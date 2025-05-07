@@ -38,6 +38,3 @@ async def read_root():
     """Root endpoint for health check or basic info."""
     return {"message": f"Welcome to {settings.APP_NAME}"}
 
-# Example: If you have a main API router for v1
-# from app.api.v1.api import api_router as api_router_v1 # This file api.py is not in the plan
-# app.include_router(api_router_v1, prefix=settings.API_V1_PREFIX)
