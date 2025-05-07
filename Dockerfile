@@ -5,7 +5,7 @@ FROM python:3.9.18-slim as base
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
-ENV PIP_NO_CACHE_DIR off # For pip, uv manages its own cache effectively
+ENV PIP_NO_CACHE_DIR off
 ENV PIP_DISABLE_PIP_VERSION_CHECK on
 ENV PIP_DEFAULT_TIMEOUT 100
 
@@ -23,8 +23,15 @@ WORKDIR /app
 # ---- PyTorch Installer Stage ----
 # This stage handles the conditional installation of PyTorch
 FROM base as pytorch_installer
-ARG PYTORCH_VARIANT=cpu # Default to CPU. Can be 'cpu' or 'cu118' (or other CUDA versions)
-ARG TORCH_VERSION="2.2.1" # Define torch versions here or pass as build args
+
+# Ensure uv's path is active for this stage.
+# This inherits $PATH from 'base' (which includes /root/.cargo/bin)
+# and then prepends /opt/venv/bin LATER, after venv creation.
+# For now, just ensure the one from base is respected or re-declared if needed.
+ENV PATH="/root/.cargo/bin:$PATH"
+
+ARG PYTORCH_VARIANT=cpu
+ARG TORCH_VERSION="2.2.1"
 ARG TORCHVISION_VERSION="0.17.1"
 ARG TORCHAUDIO_VERSION="2.2.1"
 
@@ -34,7 +41,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
-RUN uv venv /opt/venv --python $(which python)
+# Ensure python3 is used if 'python' is not aliased, $(which python3) might be safer
+RUN uv venv /opt/venv --python $(which python3 || which python)
 ENV PATH="/opt/venv/bin:$PATH"
 
 RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT}" && \
@@ -46,9 +54,9 @@ RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT}" && \
             --index-url https://download.pytorch.org/whl/cu118; \
     elif [ "${PYTORCH_VARIANT}" = "cpu" ]; then \
         uv pip install --no-cache-dir \
-            torch==${TORCH_VERSION}+cpu \
-            torchvision==${TORCHVISION_VERSION}+cpu \
-            torchaudio==${TORCHAUDIO_VERSION}+cpu \
+            torch==${TORCH_VERSION} \
+            torchvision==${TORCHVISION_VERSION} \
+            torchaudio==${TORCHAUDIO_VERSION} \
             --index-url https://download.pytorch.org/whl/cpu; \
     else \
         echo "Error: Invalid PYTORCH_VARIANT. Must be 'cpu' or 'cu118'." && exit 1; \
@@ -64,9 +72,7 @@ COPY pyproject.toml ./
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
 # so uv should respect these existing versions if they satisfy constraints.
-# Use --no-deps for torch, torchvision, torchaudio if strict control is needed here,
-# but usually uv's resolution handles this well.
-RUN uv pip install --no-cache-dir ".[dev]" # Installs project and its dev dependencies
+RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
 # Final image with the application and its dependencies
@@ -91,8 +97,4 @@ USER appuser
 EXPOSE 8000
 
 # Command to run the application using Uvicorn
-# The host 0.0.0.0 makes it accessible from outside the container.
-# Application code (e.g., in app.core.config or model loading) should use:
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# to dynamically select the device at runtime.
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
