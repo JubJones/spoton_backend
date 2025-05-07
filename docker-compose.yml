@@ -49,7 +49,7 @@ services:
       retries: 5
 
   timescaledb:
-    image: timescale/timescaledb:pg16-latest # Using PostgreSQL 16 base
+    image: timescale/timescaledb:latest-pg17 # Using PostgreSQL 16 base
     container_name: spoton_timescaledb
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432" # Allow host port override via .env
