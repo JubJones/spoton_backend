@@ -1,0 +1,101 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "spoton_backend"
+version = "0.1.0"
+description = "Backend for the Intelligent Multi-Camera Person Tracking and Analytics System (SpotOn)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [
+    { name = "SpotOn", email = "Jwizzed@outlook.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Framework :: FastAPI",
+    "Topic :: Scientific/Engineering :: Image Recognition",
+    "Topic :: Multimedia :: Video :: Tracking",
+]
+
+dependencies = [
+    "fastapi>=0.110.0,<0.111.0",
+    "uvicorn[standard]>=0.29.0,<0.30.0",
+    "pydantic>=2.7.0,<2.8.0",
+    "pydantic-settings>=2.2.0,<2.3.0",
+    "redis[hiredis]>=5.0.5,<5.1.0",
+    "psycopg2-binary>=2.9.9,<2.10.0",
+    "aiobotocore>=2.13.0,<2.14.0",
+    "numpy>=1.26.4,<1.27.0",
+    "opencv-python-headless>=4.9.0.80,<4.10.0.0", # Versioning can be specific for opencv
+    "boxmot>=10.0.41,<10.1.0", # From https://github.com/mikel-brostrom/boxmot
+    # PyTorch dependencies are listed here for completeness but are best handled
+    # specifically in the Dockerfile or by manual installation locally to match CPU/CUDA.
+    # uv will respect existing installations if versions match.
+    "torch>=2.2.0,<2.3.0",         # BoxMOT requires PyTorch >= 1.7.0. Using a recent version.
+    "torchvision>=0.17.0,<0.18.0", # Corresponds to torch 2.2.x
+    "torchaudio>=2.2.0,<2.3.0",    # Corresponds to torch 2.2.x
+    "loguru>=0.7.2,<0.8.0",
+    "httpx>=0.27.0,<0.28.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/JubJones/spoton_backend" # Replace
+Repository = "https://github.com/JubJones/spoton_backend" # Replace
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2.0,<8.3.0",
+    "pytest-asyncio>=0.23.0,<0.24.0",
+    "ruff>=0.4.2,<0.5.0",
+]
+
+[tool.ruff]
+line-length = 88 # Compatible with Black
+target-version = "py39" # Or your minimum Python version
+select = [
+    "E",  # pycodestyle errors
+    "W",  # pycodestyle warnings
+    "F",  # Pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+    "C90",# mccabe complexity
+    "N",  # pep8-naming
+    "D",  # pydocstyle (select specific rules below if needed)
+    "ANN",# flake8-annotations (use sparingly, can be noisy)
+    "BLE",# flake8-blind-except
+    "B",  # flake8-bugbear
+    "A",  # flake8-builtins
+    "RUF",# Ruff-specific rules
+]
+ignore = [
+    "D203", # One blank line required before class docstring (conflicts with D211)
+    "D212", # Multi-line docstring summary should start at the first line
+    # "ANN101", # Missing type annotation for self in method
+    # "ANN102", # Missing type annotation for cls in classmethod
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[tool.ruff.lint.pydocstyle]
+convention = "google" # Or "numpy", "pep257"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+asyncio_mode = "auto"
+# addopts = "-p no:warnings"
+
+# [tool.hatch.envs.default.scripts] # Example if using Hatch as full project manager
+# test = "pytest {args}"
+# lint = "ruff check . && ruff format --check ."
+# typecheck = "mypy app --ignore-missing-imports"
