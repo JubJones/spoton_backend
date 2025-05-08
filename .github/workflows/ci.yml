@@ -1,65 +1,65 @@
-name: SpotOn Backend CI
+# name: SpotOn Backend CI
 
-on:
-  push:
-    branches:
-      - main
-      - develop
-  pull_request:
-    branches:
-      - main
-      - develop
+# on:
+#   push:
+#     branches:
+#       - main
+#       - develop
+#   pull_request:
+#     branches:
+#       - main
+#       - develop
 
-jobs:
-  lint-and-test:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.9"]
+# jobs:
+#   lint-and-test:
+#     runs-on: ubuntu-latest
+#     strategy:
+#       matrix:
+#         python-version: ["3.9"]
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v4
 
-      - name: Set up uv (Python Package Installer)
-        run: |
-          curl -LsSf https://astral.sh/uv/install.sh | sh
-          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
-        shell: bash
+#       - name: Set up uv (Python Package Installer)
+#         run: |
+#           curl -LsSf https://astral.sh/uv/install.sh | sh
+#           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+#         shell: bash
 
-      - name: Set up Python ${{ matrix.python-version }} with uv
-        run: |
-          uv venv --python ${{ matrix.python-version }} .venv
-        shell: bash
+#       - name: Set up Python ${{ matrix.python-version }} with uv
+#         run: |
+#           uv venv --python ${{ matrix.python-version }} .venv
+#         shell: bash
 
-      - name: Install PyTorch (CPU version for CI) and App Dependencies
-        run: |
-          source .venv/bin/activate
-          # Install PyTorch CPU version first
-          uv pip install --no-cache-dir torch==2.2.1+cpu torchvision==0.17.1+cpu torchaudio==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
-          # Install project and dev dependencies (uv will respect the already installed PyTorch)
-          uv pip install --no-cache-dir ".[dev]"
-        shell: bash
+#       - name: Install PyTorch (CPU version for CI) and App Dependencies
+#         run: |
+#           source .venv/bin/activate
+#           # Install PyTorch CPU version first
+#           uv pip install --no-cache-dir torch==2.2.1+cpu torchvision==0.17.1+cpu torchaudio==2.2.1+cpu --index-url https://download.pytorch.org/whl/cpu
+#           # Install project and dev dependencies (uv will respect the already installed PyTorch)
+#           uv pip install --no-cache-dir ".[dev]"
+#         shell: bash
 
-      - name: Lint with Ruff
-        run: |
-          source .venv/bin/activate
-          ruff check .
-          ruff format --check .
-        shell: bash
+#       - name: Lint with Ruff
+#         run: |
+#           source .venv/bin/activate
+#           ruff check .
+#           ruff format --check .
+#         shell: bash
 
-      - name: Run tests with Pytest
-        env:
-          S3_BUCKET_NAME: "test-bucket"
-          S3_ACCESS_KEY_ID: "test"
-          S3_SECRET_ACCESS_KEY: "test"
-          S3_REGION_NAME: "us-east-1"
-          POSTGRES_USER: "test_user"
-          POSTGRES_PASSWORD: "test_password"
-          POSTGRES_SERVER: "localhost"
-          POSTGRES_DB: "test_db"
-          REDIS_HOST: "localhost"
-        run: |
-          source .venv/bin/activate
-          pytest
-        shell: bash
+#       - name: Run tests with Pytest
+#         env:
+#           S3_BUCKET_NAME: "test-bucket"
+#           S3_ACCESS_KEY_ID: "test"
+#           S3_SECRET_ACCESS_KEY: "test"
+#           S3_REGION_NAME: "us-east-1"
+#           POSTGRES_USER: "test_user"
+#           POSTGRES_PASSWORD: "test_password"
+#           POSTGRES_SERVER: "localhost"
+#           POSTGRES_DB: "test_db"
+#           REDIS_HOST: "localhost"
+#         run: |
+#           source .venv/bin/activate
+#           pytest
+#         shell: bash

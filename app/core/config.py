@@ -1,5 +1,5 @@
 from pydantic_settings import BaseSettings
-from typing import List, Optional # Ensure List is imported if Dict is used later with it. The provided snippet uses List for CAMERA_HOMOGRAPHIES type hint if uncommented.
+from typing import List, Optional, Dict # Ensure Dict is imported
 
 class Settings(BaseSettings):
     """
@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     S3_ENDPOINT_URL: Optional[str] = None # For MinIO or other S3-compatible services
 
     # Redis Configuration
-    REDIS_HOST: str = "localhost"
+    REDIS_HOST: str = "localhost" # Default, will be overridden by .env
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
@@ -28,7 +28,7 @@ class Settings(BaseSettings):
     # TimescaleDB (PostgreSQL) Configuration
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
-    POSTGRES_SERVER: str = "localhost"
+    POSTGRES_SERVER: str = "localhost" # Default, will be overridden by .env
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str
     DATABASE_URL: Optional[str] = None #SQLALCHEMY_DATABASE_URL if using SQLAlchemy
@@ -39,11 +39,18 @@ class Settings(BaseSettings):
     CLIP_MODEL_NAME: str = "ViT-B/32" # Example CLIP model
 
     # Homography matrices (could be loaded from a file or DB)
-    # Example: CAMERA_HOMOGRAPHIES: Dict[str, List[List[float]]] = {} # If using this, ensure Dict is imported from typing
+    # Example: CAMERA_HOMOGRAPHIES: Dict[str, List[List[float]]] = {}
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore" # Pydantic V2: use `model_config = SettingsConfigDict(extra='ignore')`
+    # Detector Settings (as used in FasterRCNNDetector)
+    PERSON_CLASS_ID: int = 1 # COCO ID for 'person'
+    DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
+    DETECTION_USE_AMP: bool = False # Or True if GPU is available and AMP is desired
+
+    # --- Pydantic V2 Configuration ---
+    model_config = {
+        "extra": "ignore",
+        "env_file": ".env",
+        "env_file_encoding": "utf-8"
+    }
 
 settings = Settings()
