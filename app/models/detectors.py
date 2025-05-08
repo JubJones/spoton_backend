@@ -10,7 +10,7 @@ import cv2 # For BGR to RGB conversion
 
 from .base_models import AbstractDetector, Detection, BoundingBox
 from app.core.config import settings
-from app.utils.image_processing import ensure_rgb # Assuming a utility for BGR->RGB if not done here
+from app.utils.video_processing import ensure_rgb # Assuming a utility for BGR->RGB if not done here
 
 class FasterRCNNDetector(AbstractDetector):
     """

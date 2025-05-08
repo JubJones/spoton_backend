@@ -1,62 +1,81 @@
-from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks # WebSocket, WebSocketDisconnect not used in this skeleton
-from typing import List, Dict, Any # List not used in this skeleton
+from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
+from typing import Dict, Any # List not used in this skeleton
+import uuid
 
-from app.api.v1 import schemas # Assuming schemas.py defines request/response models
-# from app.services.pipeline_orchestrator import PipelineOrchestratorService # Example
-# from app.dependencies import get_pipeline_orchestrator # Example dependency
+from app.api.v1 import schemas
+from app.services.pipeline_orchestrator import PipelineOrchestratorService, PROCESSING_TASKS_DB
+from app.dependencies import get_pipeline_orchestrator
+from app.core.config import settings
+import logging
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Dummy service for illustration
-class DummyPipelineOrchestratorService:
-    async def start_processing_task(self, params: schemas.ProcessingTaskStartRequest) -> schemas.ProcessingTaskCreateResponse:
-        print(f"Starting task with params: {params}")
-        task_id = "dummy_task_123"
-        # Ensure the URLs are strings as Pydantic HttpUrl will validate them.
-        # The f-string interpolation is fine here.
-        return schemas.ProcessingTaskCreateResponse(
-            task_id=task_id,
-            status_url=f"/api/v1/processing_tasks/{task_id}/status",
-            websocket_url=f"/ws/tracking/{task_id}"
-        )
-    async def get_task_status(self, task_id: str) -> Dict[str, Any]:
-        return {"task_id": task_id, "status": "running", "progress": 0.5}
 
-# This is a simple factory, real DI might be more complex or handled by FastAPI's Depends features.
-def get_pipeline_orchestrator():
-    return DummyPipelineOrchestratorService()
-
-
-@router.post("/start", response_model=schemas.ProcessingTaskCreateResponse)
-async def start_processing_task(
+@router.post(
+    "/start", 
+    response_model=schemas.ProcessingTaskCreateResponse,
+    status_code=status.HTTP_202_ACCEPTED,
+    summary="Start a new person tracking and analytics processing task"
+)
+async def start_processing_task_endpoint(
     params: schemas.ProcessingTaskStartRequest,
     background_tasks: BackgroundTasks,
-    orchestrator: DummyPipelineOrchestratorService = Depends(get_pipeline_orchestrator)
+    orchestrator: PipelineOrchestratorService = Depends(get_pipeline_orchestrator)
 ):
     """
-    Initiates a retrospective analysis task.
-    The actual processing will run in the background.
+    Initiates a retrospective analysis task for a specified environment.
+    This involves:
+    1. Downloading the first sub-video for each camera in the environment.
+    2. Extracting frames from these videos.
+    3. Running the detection, tracking, and Re-ID pipeline on these frames (simulated for now).
+    
+    The process runs in the background. Status can be polled and updates are sent via WebSocket.
     """
     try:
-        response = await orchestrator.start_processing_task(params)
-        # Example: background_tasks.add_task(orchestrator.run_full_pipeline, response.task_id, params)
-        return response
+        task_id, initial_status = await orchestrator.start_processing_task(params)
+        
+        # Add the main pipeline execution to background tasks
+        background_tasks.add_task(
+            orchestrator._run_full_pipeline_background, # Note: _run_full_pipeline_background is an internal method
+            task_id=task_id,
+            params=params
+        )
+        
+        logger.info(f"Background task added for processing task ID: {task_id}")
+        
+        return schemas.ProcessingTaskCreateResponse(
+            task_id=task_id,
+            message=initial_status.get("details", "Processing task initiated."),
+            status_url=f"{settings.API_V1_PREFIX}/processing-tasks/{task_id}/status",
+            websocket_url=f"/ws/tracking/{task_id}" # Relative path for WebSocket
+        )
     except Exception as e:
-        # It's good practice to log the exception here.
-        # For a production app, consider more specific error handling.
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception(f"Error starting processing task for environment {params.environment_id}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
-@router.get("/{task_id}/status") # response_model can be added for more clarity e.g. schemas.TaskStatusResponse
-async def get_processing_task_status(
-    task_id: str,
-    orchestrator: DummyPipelineOrchestratorService = Depends(get_pipeline_orchestrator)
+@router.get(
+    "/{task_id}/status", 
+    response_model=schemas.TaskStatusResponse,
+    summary="Get the status of a processing task"
+)
+async def get_processing_task_status_endpoint(
+    task_id: uuid.UUID,
+    orchestrator: PipelineOrchestratorService = Depends(get_pipeline_orchestrator) # Or directly use PROCESSING_TASKS_DB
 ):
     """
-    Retrieves the current status of a processing task.
+    Retrieves the current status of a specific processing task.
     """
-    status = await orchestrator.get_task_status(task_id)
-    if not status: # This check might be redundant if get_task_status always returns or raises.
-        raise HTTPException(status_code=404, detail="Task not found")
-    return status
+    # status_info = await orchestrator.get_task_status(task_id)
+    status_info = PROCESSING_TASKS_DB.get(task_id) # Direct access for simplicity
+    
+    if not status_info:
+        logger.warning(f"Status requested for unknown processing task_id: {task_id}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Processing task not found.")
+    
+    return schemas.TaskStatusResponse(task_id=task_id, **status_info)
 
-# ... other control endpoints ...
+# Placeholder for other control endpoints if needed in the future, e.g., stop task
+# @router.post("/{task_id}/control", summary="Send control commands to a task")
+# async def control_processing_task(task_id: str, command: Any):
+#     raise HTTPException(status_code=501, detail="Control endpoint not implemented yet.")
