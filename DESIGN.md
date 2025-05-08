@@ -19,11 +19,12 @@ Key backend responsibilities:
 1.  **API Endpoints:** Expose RESTful APIs for control, configuration, and historical data retrieval.
 2.  **WebSocket Communication:** Provide real-time tracking updates to the frontend.
 3.  **Data Processing Pipeline:**
-    *   Fetch image data from S3.
-    *   Perform object detection and intra-camera tracking (e.g., Faster R-CNN + BotSort via BoxMOT).
-    *   Extract appearance features for Re-ID (e.g., CLIP via BoxMOT).
+    *   Fetch video segments (sub-videos) from S3 and cache them locally.
+    *   Locally extract individual frames from the cached video segments.
+    *   Perform object detection and intra-camera tracking on each frame (e.g., Faster R-CNN + BotSort via BoxMOT).
+    *   Extract appearance features for Re-ID from detected persons (e.g., CLIP via BoxMOT).
     *   Execute cross-camera Re-Identification and global ID association.
-    *   Apply perspective transformation (Homography).
+    *   Apply perspective transformation (Homography) to get map coordinates.
 4.  **Data Management:**
     *   Interact with Redis for caching real-time state and recent Re-ID embeddings.
     *   Interact with TimescaleDB for storing historical tracking events and older embeddings.
@@ -46,21 +47,21 @@ The backend codebase is organized as follows:
             *   `base_models.py`: Abstract base classes for AI components (Detector, Tracker, FeatureExtractor) to implement the Strategy Pattern.
             *   `detectors.py`, `trackers.py`, `feature_extractors.py`: Concrete implementations of the AI strategies, likely wrapping libraries like BoxMOT.
         *   `services/`: Business logic layer. Each service encapsulates a specific domain of functionality.
-            *   `pipeline_orchestrator.py`: Orchestrates the sequence of operations in the core processing pipeline for each frame/stream.
+            *   `pipeline_orchestrator.py`: Orchestrates the sequence of operations in the core processing pipeline for each video segment and its frames.
             *   `reid_service.py`: Manages the Re-ID process, including embedding comparison and gallery management (Redis/TimescaleDB).
-            *   `storage_service.py`: Implements the Repository/Data Access Object (DAO) pattern for interacting with S3, Redis, and TimescaleDB.
+            *   `storage_service.py`: Implements the Repository/Data Access Object (DAO) pattern for interacting with S3 (fetching video segments, managing local cache), Redis, and TimescaleDB.
             *   `homography_service.py`: Handles homography transformations.
             *   `notification_service.py`: Responsible for sending data to connected frontend clients via WebSockets.
         *   `tasks/`: For background, potentially long-running processing tasks.
-            *   `frame_processor.py`: Contains the detailed logic for processing a single frame or a batch of frames through the detection, tracking, Re-ID pipeline. This can be invoked asynchronously.
-        *   `utils/`: Common utility functions (e.g., image manipulation, timestamp conversions).
+            *   `frame_processor.py`: Contains the detailed logic for processing a single frame (extracted from a video segment) through the detection, tracking, Re-ID pipeline. This can be invoked by the `PipelineOrchestratorService`.
+        *   `utils/`: Common utility functions (e.g., image manipulation, timestamp conversions, video processing utilities).
         *   `main.py`: The entry point for the FastAPI application, where the app instance is created and routers are included.
         *   `dependencies.py`: Defines FastAPI dependencies for injecting service instances, database sessions, etc., into endpoint handlers.
     *   `tests/`: Contains all unit and integration tests, mirroring the `app` structure.
     *   `.env.example`: Template for environment variables.
     *   `Dockerfile`: Instructions to build the Docker image for the backend.
     *   `docker-compose.yml`: For local development, sets up the backend service along with dependencies like Redis and TimescaleDB.
-    *   `pyproject.toml`: Project metadata and Python package dependencies (e.g., using Poetry or PDM).
+    *   `pyproject.toml`: Project metadata and Python package dependencies.
     *   `README.md`: General information about the backend project.
     *   `DESIGN.md`: This document.
 
@@ -68,52 +69,51 @@ The backend codebase is organized as follows:
 
 *   **Programming Language:** Python 3.9+
 *   **Web Framework:** FastAPI (for REST APIs and WebSocket handling, leveraging Starlette and Pydantic)
-*   **AI/CV Libraries:** PyTorch, OpenCV, BoxMOT (for detection, tracking, Re-ID feature extraction)
-*   **Async HTTP Client:** `aiobotocore` (for S3), `httpx` (if needed for other async calls)
+*   **AI/CV Libraries:** PyTorch, OpenCV (for video processing and frame extraction), BoxMOT (for detection, tracking, Re-ID feature extraction)
+*   **Async HTTP Client:** `aiobotocore` (for S3 video segment fetching), `httpx` (if needed for other async calls)
 *   **Cache:** Redis (for real-time state, Re-ID gallery)
 *   **Database:** TimescaleDB on PostgreSQL (for historical data, with `pgvector` for embedding similarity search)
 *   **Containerization:** Docker
 *   **Orchestration (Recommended for Prod):** Kubernetes (or Docker Compose for simpler setups/dev)
-*   **Dependency Management:** Poetry or PDM (recommended for `pyproject.toml`)
+*   **Dependency Management:** Poetry or PDM (as per `pyproject.toml`)
 
 ## 5. Design Patterns Employed
 
 *   **Strategy Pattern:**
-    *   **Usage:** For AI model components (detection, tracking, feature extraction). Abstract base classes (e.g., `AbstractDetector`, `AbstractTracker`, `AbstractFeatureExtractor`) define a common interface. Concrete classes (e.g., `FasterRCNNDetector`, `BotSortTracker`, `CLIPExtractor`) implement these interfaces, wrapping specific models from libraries like BoxMOT.
-    *   **Benefit:** Allows easy swapping or addition of new AI models without altering the core pipeline logic. Promotes flexibility and testability.
+    *   **Usage:** For AI model components (detection, tracking, feature extraction). Abstract base classes (e.g., `AbstractDetector`, `AbstractTracker`, `AbstractFeatureExtractor`) define a common interface. Concrete classes (e.g., `FasterRCNNDetector`, `BotSortTracker`, `CLIPExtractor`) implement these interfaces.
+    *   **Benefit:** Allows easy swapping or addition of new AI models without altering the core pipeline logic.
 *   **Factory Pattern (or Abstract Factory):**
-    *   **Usage:** To create instances of AI model strategies. A `ModelFactory` (potentially within `dependencies.py` or loaded at startup) can be responsible for instantiating and configuring the chosen AI models based on application settings.
-    *   **Benefit:** Decouples client code from concrete model classes and centralizes model creation logic.
+    *   **Usage:** To create instances of AI model strategies. A `ModelFactory` can instantiate and configure AI models based on application settings.
+    *   **Benefit:** Decouples client code from concrete model classes.
 *   **Service Layer Pattern:**
-    *   **Usage:** Business logic is encapsulated in service classes (e.g., `PipelineOrchestratorService`, `ReIDService`, `StorageService`). API endpoint handlers in `app/api/` delegate tasks to these services.
-    *   **Benefit:** Promotes Separation of Concerns (SoC), improves code organization, testability, and reusability of business logic.
+    *   **Usage:** Business logic is encapsulated in service classes (e.g., `PipelineOrchestratorService`, `ReIDService`, `StorageService`). API handlers delegate to these services.
+    *   **Benefit:** Promotes Separation of Concerns (SoC), improves code organization and testability.
 *   **Repository Pattern (or Data Access Object - DAO):**
-    *   **Usage:** The `StorageService` will act as a facade or implement repository patterns for data access operations related to S3, Redis, and TimescaleDB.
-    *   **Benefit:** Abstracts data storage details from the rest of the application, making it easier to change database technologies or mock data sources for testing.
+    *   **Usage:** The `StorageService` acts as a facade for data access related to S3 (video segments, local caching), Redis, and TimescaleDB.
+    *   **Benefit:** Abstracts data storage details.
 *   **Observer Pattern (Conceptual, via WebSockets):**
-    *   **Usage:** The backend acts as a "subject" that processes data. The frontend clients connect via WebSockets and act as "observers." When new tracking data is available, the `NotificationService` (triggered by the `PipelineOrchestratorService`) pushes updates to all relevant observers.
-    *   **Benefit:** Enables real-time data streaming to the frontend efficiently.
+    *   **Usage:** Backend processes data (subject), frontend clients (observers) receive real-time updates via WebSockets from `NotificationService`.
+    *   **Benefit:** Enables real-time data streaming.
 *   **Pipeline Pattern (Conceptual):**
-    *   **Usage:** The core per-frame processing (Fetch -> Preprocess -> Detect -> Track -> Feature Extract -> Re-ID -> Transform) is inherently a pipeline. The `PipelineOrchestratorService` and `FrameProcessorTask` will manage the flow through these stages.
-    *   **Benefit:** Structures complex processing into manageable, sequential steps.
+    *   **Usage:** The core per-frame processing (Frame Extraction -> Preprocess -> Detect -> Track -> Feature Extract -> Re-ID -> Transform) is a pipeline managed by `PipelineOrchestratorService` and `FrameProcessorTask`.
+    *   **Benefit:** Structures complex processing into manageable steps.
 *   **Dependency Injection (via FastAPI):**
-    *   **Usage:** FastAPI's built-in dependency injection is used to provide instances of services, database connections, and configuration objects to API endpoint handlers and other components.
-    *   **Benefit:** Promotes loose coupling and makes components easier to test in isolation.
+    *   **Usage:** FastAPI's dependency injection provides services, database connections, etc., to components.
+    *   **Benefit:** Promotes loose coupling and testability.
 
 ## 6. Communication Protocols
 
 *   **RESTful APIs (HTTP/S):**
-    *   **Purpose:** Used for client-initiated requests that are typically request-response in nature.
+    *   **Purpose:** Client-initiated request-response interactions.
     *   **Examples:**
-        *   Starting/stopping a processing session for specific cameras and time ranges.
-        *   User interactions like selecting a person to "focus track."
-        *   Fetching historical or aggregated analytics data.
-        *   Retrieving system configuration or metadata (e.g., list of available cameras).
+        *   Starting a processing session for specified cameras within an environment.
+        *   Fetching historical analytics data.
+        *   Retrieving system configuration (e.g., available environments, cameras per environment).
     *   **Technology:** FastAPI.
 *   **WebSockets:**
-    *   **Purpose:** Used for real-time, bidirectional communication, primarily for the backend to push continuous updates to the frontend.
+    *   **Purpose:** Real-time, bidirectional communication for backend to push updates.
     *   **Examples:**
-        *   Streaming per-frame tracking results (bounding boxes, global IDs, map coordinates, image URLs) to the frontend.
+        *   Streaming per-frame tracking results (bounding boxes, global IDs, map coordinates, potentially image URLs of current frame) to the frontend.
     *   **Technology:** FastAPI's WebSocket support.
 
 ## 7. Key API Endpoints (High-Level)
@@ -121,8 +121,8 @@ The backend codebase is organized as follows:
 All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will define request and response bodies.
 
 *   **Processing Tasks (`/processing_tasks`):**
-    *   `POST /start`: Initiates a retrospective analysis task.
-        *   Request: `{ "cameras": ["id1", "id2"], "time_range_utc": {"start": "iso_datetime", "end": "iso_datetime"}, "environment_id": "factory_A" }`
+    *   `POST /start`: Initiates a retrospective analysis task for specified cameras in an environment.
+        *   Request: `{ "cameras": ["c01", "c02"], "environment_id": "campus" }` (Camera IDs are specific to the environment, e.g., "c01" for campus, "f01" for factory. Each camera implies processing its predefined set of 4 sub-videos.)
         *   Response: `{ "task_id": "uuid", "status_url": "/api/v1/processing_tasks/{task_id}/status", "websocket_url": "/ws/tracking/{task_id}" }`
     *   `GET /{task_id}/status`: Retrieves the current status of a processing task.
     *   `POST /{task_id}/control`: Send control commands (e.g., pause, resume - if supported, focus_track).
@@ -130,51 +130,83 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
 
 *   **Analytics Data (`/analytics_data`):**
     *   `GET /trajectory/{global_person_id}`: Get historical trajectory for a person.
-        *   Params: `start_time_utc`, `end_time_utc`.
+        *   Params: `start_time_utc` (optional, to filter results), `end_time_utc` (optional).
     *   `GET /heatmap`: Get data for generating a heatmap.
-        *   Params: `camera_id` (optional), `start_time_utc`, `end_time_utc`.
+        *   Params: `camera_id` (optional), `start_time_utc` (optional), `end_time_utc` (optional).
 
 *   **Configuration/Metadata (`/config`):**
-    *   `GET /environments`: List available environments (e.g., Campus, Factory).
-    *   `GET /environments/{environment_id}/cameras`: List cameras for a given environment.
+    *   `GET /environments`: List available environments (e.g., "campus", "factory").
+    *   `GET /environments/{environment_id}/cameras`: List cameras available for a given environment (e.g., for "campus": ["c01", "c02", "c03", "c04"]).
 
 *   **WebSocket Endpoint (`/ws/tracking/{task_id}`):**
-    *   The backend pushes messages with the structure defined in the project overview (Section 5, WebSocket Payload).
+    *   The backend pushes messages with the structure defined in `app.api.v1.schemas.WebSocketTrackingMessage`.
 
-## 8. Data Flow (Retrospective Analysis - Simplified)
+## 8. Data Flow (Retrospective Analysis - Using Pre-Split Sub-Videos)
 
-1.  **Initiation (REST API):** Frontend sends a request to `POST /api/v1/processing_tasks/start` with camera IDs and time range.
-2.  **Task Creation:** Backend creates a processing task (e.g., managed by `PipelineOrchestratorService`), possibly as a background job using `tasks/frame_processor.py`.
-3.  **Image Fetching (Async):** `StorageService` fetches images from S3 for the current frame/timestamp.
-4.  **AI Processing Loop (per frame, orchestrated by `PipelineOrchestratorService` delegating to `FrameProcessorTask`):**
-    *   **Detection:** `DetectorStrategy` (e.g., FasterRCNN via BoxMOT) identifies persons.
-    *   **Tracking:** `TrackerStrategy` (e.g., BotSort via BoxMOT) performs intra-camera tracking.
-    *   **Feature Extraction (Conditional):** `FeatureExtractorStrategy` (e.g., CLIP via BoxMOT) extracts embeddings.
-    *   **Re-Identification:** `ReIDService` compares embeddings against gallery (Redis/TimescaleDB) and assigns/updates `global_person_id`.
-    *   **Homography:** `HomographyService` transforms image coordinates to map coordinates.
-5.  **Data Storage & Caching:**
-    *   `StorageService` updates Redis with real-time state.
-    *   `StorageService` (asynchronously) writes historical data to TimescaleDB.
-6.  **Real-time Update (WebSocket):** `NotificationService` (called by the orchestrator) pushes processed frame data (image URL, bounding boxes, IDs, map coordinates) to the relevant frontend client via WebSocket.
+1.  **S3 Data Preparation (One-Time):**
+    *   For each environment ("campus", "factory") and each of its 4 cameras, the ~5.5 min source video is pre-split into 4 sub-video segments (e.g., `sub_video_01.mp4` to `sub_video_04.mp4`).
+    *   These sub-videos are stored in S3 with a defined naming convention (e.g., `s3://<bucket>/videos/campus/camera_c01/sub_video_01.mp4`).
+
+2.  **Initiation (REST API):**
+    *   Frontend sends a request to `POST /api/v1/processing_tasks/start` with `environment_id` and a list of `camera_ids`.
+
+3.  **Task Creation & Sub-Video List Generation (`PipelineOrchestratorService`):**
+    *   Backend creates a processing task with a unique `task_id`.
+    *   For each requested camera, the system identifies the S3 keys for its 4 sub-videos based on the `environment_id` and `camera_id`. This forms a master list of sub-videos for the task.
+    *   The task is initiated to run in the background.
+
+4.  **Sub-Video Fetching & Caching (`StorageService`):**
+    *   For the current sub-video to be processed in the master list:
+        *   `StorageService` checks its local task-specific cache (e.g., `/tmp/spoton_cache/<task_id>/<sub_video_filename>`).
+        *   If not cached, it downloads the sub-video from S3 to the local cache.
+    *   **Prefetching:** Asynchronously, `StorageService` starts downloading the *next* sub-video from the master list to the local cache to minimize waiting time.
+
+5.  **Frame-by-Frame Processing Loop (Orchestrated by `PipelineOrchestratorService`, logic in `FrameProcessorTask` for a given sub-video):**
+    *   Once a sub-video is locally cached, `PipelineOrchestratorService` instructs `FrameProcessorTask` (or similar component) to process it.
+    *   **(a) Frame Extraction:** `FrameProcessorTask` opens the local sub-video file (e.g., using OpenCV's `cv2.VideoCapture`) and reads frames sequentially.
+    *   **For each extracted frame:**
+        *   **(b) Detection:** `DetectorStrategy` (e.g., `FasterRCNNDetector`) identifies persons in the frame.
+        *   **(c) Tracking:** `TrackerStrategy` (e.g., `BotSortTracker` via BoxMOT) performs intra-camera tracking using detections.
+        *   **(d) Feature Extraction:** `FeatureExtractorStrategy` (e.g., `CLIPExtractor` via BoxMOT) extracts appearance embeddings for new/updated tracks.
+        *   **(e) Re-Identification:** `ReIDService` uses embeddings to assign or update `global_person_id` by comparing against a gallery (managed in Redis/TimescaleDB).
+        *   **(f) Homography:** `HomographyService` transforms image coordinates to map coordinates.
+        *   **(g) Data Aggregation:** Frame timestamp (derived from frame number and 23 FPS), camera ID, and all tracking results are compiled.
+
+6.  **Data Storage & Caching (Ongoing):**
+    *   `StorageService` (or `ReIDService`) updates Redis with recent Re-ID embeddings for the gallery.
+    *   `StorageService` (asynchronously) writes historical tracking data (trajectories, older embeddings) to TimescaleDB.
+
+7.  **Real-time Update (WebSocket - `NotificationService`):**
+    *   After processing each frame (or a small batch), `NotificationService` is triggered.
+    *   It sends a `WebSocketTrackingMessage` (containing frame timestamp, camera ID, tracking data with global IDs, bounding boxes, map coordinates, and potentially a URL to the current processed frame image if generated) to clients subscribed to the `task_id`.
+
+8.  **Iteration and Completion:**
+    *   The frame processing loop (Step 5) continues until all frames in the current sub-video are processed.
+    *   The system then moves to the next sub-video in the master list (which is ideally already prefetched by `StorageService`).
+    *   Once all sub-videos for all requested cameras are processed, the task is marked as complete.
+    *   The local cache for the completed `task_id` is cleared by `StorageService`.
 
 ## 9. Scalability and Maintainability
 
 *   **Scalability:**
-    *   Stateless FastAPI application instances can be horizontally scaled behind a load balancer.
-    *   AI model inference (CPU/GPU intensive) can be handled by running blocking I/O in separate thread pools (`asyncio.to_thread` or `run_in_executor`) or by offloading to dedicated model serving workers/services if performance demands.
-    *   Redis and TimescaleDB can be scaled independently as per their capabilities (e.g., clustering, read replicas).
+    *   Stateless FastAPI application instances can be horizontally scaled.
+    *   AI model inference can utilize `asyncio.to_thread` for CPU-bound tasks or be offloaded if necessary. GPU resource management will be key if GPUs are used.
+    *   Video processing (frame extraction) is local to the worker after download, improving performance.
+    *   Prefetching of video segments hides S3 latency.
+    *   Redis and TimescaleDB are scalable.
 *   **Maintainability:**
-    *   Modular design with clear separation of concerns.
-    *   Consistent coding style (enforced by linters like Flake8 and formatters like Black).
-    *   Comprehensive unit and integration tests.
-    *   Type hinting (leveraged by FastAPI and Pydantic) improves code clarity and reduces runtime errors.
-    *   Detailed logging and monitoring hooks.
-    *   Dependency injection simplifies component wiring and testing.
+    *   Modular design with clear service responsibilities.
+    *   Consistent coding style, type hinting, and comprehensive testing.
+    *   Detailed logging.
+    *   Dependency injection.
 
 ## 10. Next Steps / Considerations
 
-*   **Authentication & Authorization:** Secure API endpoints and WebSocket connections (e.g., JWT).
-*   **Detailed Error Handling & Retry Mechanisms:** For S3 access, database operations, etc.
-*   **Configuration of AI Models:** How homography matrices, model paths, thresholds are managed and loaded.
-*   **Resource Management:** For GPU resources if AI models require them.
-*   **CI/CD Pipeline:** For automated testing and deployment. 
+*   **Authentication & Authorization:** Secure API endpoints and WebSocket connections.
+*   **Detailed Error Handling & Retry Mechanisms:** For S3 access, video processing, database operations.
+*   **Configuration of AI Models & Homography:** How homography matrices (per camera), model paths, and thresholds are managed and loaded (likely via `config.py` or a dedicated configuration service).
+*   **Resource Management:** For GPU resources if AI models require them. Ensure efficient local disk space management for cached video segments.
+*   **CI/CD Pipeline:** For automated testing and deployment.
+*   **Frame Timestamps:** Precise calculation of frame timestamps based on sub-video sequence and known FPS (23 FPS).
+*   **Image URL in WebSocket:** Determine if the backend needs to generate and serve individual processed frames (requiring storage and URL generation) or if the frontend handles video display and overlay.
+*   **Task Concurrency:** How many sub-videos or cameras are processed in parallel by a single backend instance.
