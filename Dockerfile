@@ -59,7 +59,7 @@ RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT} using /root/.local/bin/
             torchaudio==${TORCHAUDIO_VERSION}+cu118 \
             --index-url https://download.pytorch.org/whl/cu118; \
     elif [ "${PYTORCH_VARIANT}" = "cpu" ]; then \
-        uv pip install --no-cache-dir \
+        /root/.local/bin/uv pip install --no-cache-dir \
             torch==${TORCH_VERSION} \
             torchvision==${TORCHVISION_VERSION} \
             torchaudio==${TORCHAUDIO_VERSION} \
@@ -75,6 +75,7 @@ FROM pytorch_installer as builder
 # Copy project definition
 COPY pyproject.toml ./
 COPY README.md ./
+COPY ./app ./app
 
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
