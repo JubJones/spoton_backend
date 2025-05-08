@@ -11,9 +11,22 @@ ENV PIP_DEFAULT_TIMEOUT 100
 
 # Install uv globally
 RUN apt-get update && apt-get install -y curl procps && \
+    # The installer script will place uv in $HOME/.local/bin by default.
+    # For the root user in Docker, $HOME is /root.
+    echo "Installing uv..." && \
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
-ENV PATH="/root/.cargo/bin:$PATH"
+    echo "--- In base stage: Verifying uv installation (expected in /root/.local/bin) ---" && \
+    echo "Listing /root/.local/bin contents:" && \
+    ls -la /root/.local/bin && \
+    echo "Running uv --version using absolute path /root/.local/bin/uv:" && \
+    /root/.local/bin/uv --version && \
+    echo "--- End of uv verification in base stage ---" && \
+    apt-get purge -y --auto-remove curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+# Add uv's directory to PATH.
+# For uv calls within this Dockerfile, we'll use absolute paths to be more robust,
+# but this PATH modification is good practice for general use.
+ENV PATH="/root/.local/bin:$PATH"
 
 # Create a non-root user and group for security
 RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
@@ -23,15 +36,8 @@ WORKDIR /app
 # ---- PyTorch Installer Stage ----
 # This stage handles the conditional installation of PyTorch
 FROM base as pytorch_installer
-
-# Ensure uv's path is active for this stage.
-# This inherits $PATH from 'base' (which includes /root/.cargo/bin)
-# and then prepends /opt/venv/bin LATER, after venv creation.
-# For now, just ensure the one from base is respected or re-declared if needed.
-ENV PATH="/root/.cargo/bin:$PATH"
-
-ARG PYTORCH_VARIANT=cpu
-ARG TORCH_VERSION="2.2.1"
+ARG PYTORCH_VARIANT=cpu # Default to CPU. Can be 'cpu' or 'cu118' (or other CUDA versions)
+ARG TORCH_VERSION="2.2.1" # Define torch versions here or pass as build args
 ARG TORCHVISION_VERSION="0.17.1"
 ARG TORCHAUDIO_VERSION="2.2.1"
 
@@ -41,13 +47,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create virtual environment
-# Ensure python3 is used if 'python' is not aliased, $(which python3) might be safer
-RUN uv venv /opt/venv --python $(which python3 || which python)
+RUN uv venv /opt/venv --python $(which python)
 ENV PATH="/opt/venv/bin:$PATH"
 
-RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT}" && \
+# Install PyTorch using absolute path for uv
+RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT} using /root/.local/bin/uv" && \
     if [ "${PYTORCH_VARIANT}" = "cu118" ]; then \
-        uv pip install --no-cache-dir \
+        /root/.local/bin/uv pip install --no-cache-dir \
             torch==${TORCH_VERSION}+cu118 \
             torchvision==${TORCHVISION_VERSION}+cu118 \
             torchaudio==${TORCHAUDIO_VERSION}+cu118 \
@@ -68,10 +74,13 @@ FROM pytorch_installer as builder
 
 # Copy project definition
 COPY pyproject.toml ./
+COPY README.md ./
 
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
 # so uv should respect these existing versions if they satisfy constraints.
+# Use --no-deps for torch, torchvision, torchaudio if strict control is needed here,
+# but usually uv's resolution handles this well.
 RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
@@ -84,7 +93,9 @@ COPY --from=builder /opt/venv /opt/venv
 # Copy application code
 COPY ./app /app/app
 
-# Set PATH to include the virtual environment
+# Set PATH to include the virtual environment's bin directory for app execution.
+# /root/.local/bin (from base) is also still in PATH, but /opt/venv/bin takes precedence
+# for python and packages installed in the venv.
 ENV PATH="/opt/venv/bin:$PATH"
 
 # Set application directory as working directory

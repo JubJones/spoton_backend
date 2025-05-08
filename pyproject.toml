@@ -21,7 +21,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Image Recognition",
-    "Topic :: Multimedia :: Video :: Tracking",
 ]
 
 dependencies = [
