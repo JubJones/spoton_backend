@@ -43,10 +43,15 @@ def get_compute_device() -> torch.device:
 
 @lru_cache()
 def get_asset_downloader() -> AssetDownloader:
-    """Dependency provider for AssetDownloader utility."""
+    """
+    Dependency provider for AssetDownloader utility.
+    Initializes with S3 configuration from application settings.
+    """
     return AssetDownloader(
-        dagshub_repo_owner=settings.DAGSHUB_REPO_OWNER,
-        dagshub_repo_name=settings.DAGSHUB_REPO_NAME
+        s3_endpoint_url=settings.S3_ENDPOINT_URL,
+        aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+        aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+        s3_bucket_name=settings.S3_BUCKET_NAME
     )
 
 @lru_cache()
@@ -72,15 +77,6 @@ def get_detector(device: torch.device = Depends(get_compute_device)) -> Abstract
         logger.error(f"Unsupported DETECTOR_TYPE: {settings.DETECTOR_TYPE}. Defaulting to FasterRCNN.")
         detector = FasterRCNNDetector() # Fallback
 
-    # Note: load_model is async, but dependencies are typically synchronous.
-    # Model loading should ideally happen during application startup (lifespan)
-    # or handled carefully here (e.g., using an async setup function or risking blocking).
-    # For simplicity in this example, we call it here, but beware of blocking I/O.
-    # A better approach uses app lifespan events.
-    # await detector.load_model() # This won't work directly in sync function
-    # --- Alternative: Load in lifespan, store in app.state ---
-    # Or, make this dependency async if FastAPI supports async dependencies that load models.
-    # For now, we assume load_model is called within the service that uses it, or in lifespan.
     logger.info("Detector instance created (model loading deferred to usage/lifespan).")
     return detector
 
@@ -97,7 +93,6 @@ def get_tracker(device: torch.device = Depends(get_compute_device)) -> AbstractT
         logger.error(f"Unsupported TRACKER_TYPE: {settings.TRACKER_TYPE}. Defaulting to BotSort.")
         tracker = BotSortTracker()
 
-    # Similar loading concern as the detector. Deferred to usage/lifespan ideally.
     logger.info("Tracker instance created (model loading deferred to usage/lifespan).")
     return tracker
 
