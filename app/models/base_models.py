@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import List, Any, Dict, Tuple, Optional
-import numpy as np # Commonly used for image data and embeddings
+import numpy as np
 
-# Define common data structures (can be Pydantic models for more rigor)
 
 class BoundingBox:
     """Represents a bounding box."""
@@ -15,6 +14,9 @@ class BoundingBox:
     def to_xywh(self) -> Tuple[float, float, float, float]:
         return self.x1, self.y1, self.x2 - self.x1, self.y2 - self.y1
 
+    def to_list(self) -> List[float]:
+        return [self.x1, self.y1, self.x2, self.y2]
+
 class Detection:
     """Represents a detected object."""
     def __init__(self, bbox: BoundingBox, confidence: float, class_id: Any, class_name: Optional[str] = None):
@@ -23,28 +25,43 @@ class Detection:
         self.class_id = class_id
         self.class_name = class_name
 
+    def to_tracker_format(self) -> np.ndarray:
+        """Converts detection to [x1, y1, x2, y2, conf, cls_id] format for trackers."""
+        return np.array([
+            self.bbox.x1, self.bbox.y1, self.bbox.x2, self.bbox.y2,
+            self.confidence, self.class_id
+        ], dtype=np.float32)
+
+
 class TrackedObject:
     """Represents a tracked object within a single camera view."""
-    def __init__(self, temporary_track_id: Any, bbox: BoundingBox, confidence: Optional[float] = None,
-                 class_id: Optional[Any] = None, feature_embedding: Optional[np.ndarray] = None,
-                 state: Optional[str] = None, age: Optional[int] = None):
-        self.temporary_track_id = temporary_track_id
+    def __init__(self,
+                 track_id: int,
+                 bbox: BoundingBox,
+                 confidence: Optional[float] = None,
+                 class_id: Optional[Any] = None,
+                 global_id: Optional[int] = None, # Added Global ID
+                 feature_embedding: Optional[np.ndarray] = None, # Can be populated by tracker/reid
+                 state: Optional[str] = None, # e.g., 'active', 'lost' (if tracker provides)
+                 age: Optional[int] = None): # Number of frames tracked (if tracker provides)
+        self.track_id = track_id # Changed from temporary_track_id for clarity
         self.bbox = bbox
         self.confidence = confidence
         self.class_id = class_id
-        self.feature_embedding = feature_embedding # Optional, if tracker also extracts features or it's added later
-        self.state = state # e.g., 'active', 'lost'
-        self.age = age # Number of frames tracked
+        self.global_id = global_id # Store the assigned global ID
+        self.feature_embedding = feature_embedding
+        self.state = state
+        self.age = age
 
 
 class AbstractDetector(ABC):
     """Abstract base class for object detectors (Strategy Pattern)."""
 
     @abstractmethod
-    async def load_model(self, model_path: Optional[str] = None, config: Optional[Dict] = None):
+    async def load_model(self):
         """
         Loads the detection model into memory.
-        This can be async if model loading involves I/O.
+        Should handle device placement (using self.device).
         """
         pass
 
@@ -66,47 +83,30 @@ class AbstractTracker(ABC):
     """Abstract base class for intra-camera trackers (Strategy Pattern)."""
 
     @abstractmethod
-    async def load_model(self, config_path: Optional[str] = None, config: Optional[Dict] = None):
-        """Loads and initializes the tracker."""
+    async def load_model(self):
+        """
+        Loads and initializes the tracker, potentially including ReID models.
+        Should handle device placement.
+        """
         pass
 
     @abstractmethod
-    async def update(self, detections: List[Detection], image: np.ndarray) -> List[TrackedObject]:
+    async def update(self, detections: np.ndarray, image: np.ndarray) -> np.ndarray:
         """
         Updates tracks with new detections for the current frame.
 
         Args:
-            detections: A list of Detection objects from the detector for the current frame.
-            image: The current frame as a NumPy array.
+            detections: A NumPy array of detections in [x1, y1, x2, y2, conf, cls_id] format.
+            image: The current frame as a NumPy array (BGR).
 
         Returns:
-            A list of TrackedObject instances representing currently active tracks.
+            A NumPy array representing tracked objects, typically in a format like
+            [x1, y1, x2, y2, track_id, conf, cls_id, global_id (optional), ...].
+            The exact format depends on the underlying BoxMOT tracker implementation.
         """
         pass
 
     @abstractmethod
     async def reset(self):
         """Resets the tracker's state (e.g., for a new video sequence)."""
-        pass
-
-
-class AbstractFeatureExtractor(ABC):
-    """Abstract base class for appearance feature extractors (Strategy Pattern)."""
-
-    @abstractmethod
-    async def load_model(self, model_name_or_path: Optional[str] = None, config: Optional[Dict] = None):
-        """Loads the feature extraction model."""
-        pass
-
-    @abstractmethod
-    async def extract_features(self, image_crop: np.ndarray) -> np.ndarray:
-        """
-        Extracts an embedding vector from an image crop of a person.
-
-        Args:
-            image_crop: A NumPy array representing the cropped image of a person.
-
-        Returns:
-            A 1D NumPy array (embedding vector).
-        """
         pass
