@@ -21,3 +21,12 @@ docker-compose logs backend
 ```
 docker exec -it -u appuser spoton_backend_service bash -c "dagshub login"
 ```
+
+# Validate
+```
+curl -X POST -H "Content-Type: application/json" -d '{"environment_id": "campus"}' http://localhost:8000/api/v1/processing-tasks/start
+
+curl http://localhost:8000/api/v1/processing-tasks/{TASK_ID_FROM_PREVIOUS_STEP}/status
+
+websocat ws://localhost:8000/ws/tracking/{TASK_ID_FROM_PREVIOUS_STEP}
+```
