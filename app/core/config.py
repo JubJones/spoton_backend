@@ -19,21 +19,20 @@ class Settings(BaseSettings):
     # DagsHub Configuration
     DAGSHUB_REPO_OWNER: str = "Jwizzed"
     DAGSHUB_REPO_NAME: str = "spoton_ml"
+    S3_ENDPOINT_URL: Optional[str] = None
+    AWS_ACCESS_KEY_ID: Optional[str] = None
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None
 
     # Local Data Directories
-    LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
-    LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
+    LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos" # Relative to WORKDIR /app -> /app/downloaded_videos
+    LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames" # Relative to WORKDIR /app -> /app/extracted_frames
 
     # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
-        # Campus Cameras (s47)
-        # TODO: this is duplicate, the remote base key already tell the cam id already.
         VideoSetEnvironmentConfig(remote_base_key="video_s47/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s47/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s47/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s47/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
-        # Factory Cameras (s10 / s14 reference)
-        # Assuming s14 structure applies based on repo names
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="factory", cam_id="c09", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c12", env_id="factory", cam_id="c12", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="factory", cam_id="c13", num_sub_videos=4),
@@ -52,24 +51,21 @@ class Settings(BaseSettings):
     POSTGRES_SERVER: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "spotondb"
-    DATABASE_URL: Optional[str] = None # Will be constructed if needed
+    DATABASE_URL: Optional[str] = None
 
     # --- AI Model & Pipeline Configuration ---
-    # Detector Settings
-    DETECTOR_TYPE: str = "fasterrcnn" # Type of detector to use
-    PERSON_CLASS_ID: int = 1          # Class ID for 'person' (1 for torchvision FasterRCNN)
+    DETECTOR_TYPE: str = "fasterrcnn"
+    PERSON_CLASS_ID: int = 1
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
-    DETECTION_USE_AMP: bool = False   # Use AMP for detector inference (CUDA only)
+    DETECTION_USE_AMP: bool = False
 
-    # Tracker & Re-ID Settings (Integrated via BoxMOT)
-    TRACKER_TYPE: str = "botsort" # Type of tracker to use (BoxMOT compatible)
-    WEIGHTS_DIR: str = "./weights" # Directory where ReID weights are stored
-    REID_WEIGHTS_PATH: str = "clip_market1501.pt" # ReID weights filename (relative to WEIGHTS_DIR or downloaded by BoxMOT)
-    TRACKER_HALF_PRECISION: bool = False # Use half precision for tracker/ReID (CUDA only)
-    TRACKER_PER_CLASS: bool = False      # Use per-class tracking logic
+    TRACKER_TYPE: str = "botsort"
+    WEIGHTS_DIR: str = "./weights" # Relative to WORKDIR /app -> /app/weights
+    REID_WEIGHTS_PATH: str = "clip_market1501.pt" # Filename of the ReID weights
+    TRACKER_HALF_PRECISION: bool = False
+    TRACKER_PER_CLASS: bool = False
 
-    # --- Video Processing ---
-    TARGET_FPS: int = 23 # Target FPS for frame extraction
+    TARGET_FPS: int = 23
     FRAME_JPEG_QUALITY: int = 90
 
     model_config = {
@@ -79,16 +75,21 @@ class Settings(BaseSettings):
     }
 
     @property
-    def resolved_reid_weights_path(self) -> Optional[Path]:
-        """Returns the absolute path to the ReID weights file, or None if not found."""
-        base_dir = Path(self.WEIGHTS_DIR)
-        weights_file = base_dir / self.REID_WEIGHTS_PATH
-        if weights_file.is_file():
-            return weights_file.resolve()
-        # Return the raw path as identifier if not found locally (BoxMOT might download)
-        # Or return None if local existence is mandatory
-        # Let's return the relative path for BoxMOT to handle potentially
-        return Path(self.REID_WEIGHTS_PATH)
-        # return None # If local file must exist
+    def resolved_reid_weights_path(self) -> Path:
+        """
+        Returns the full, resolved path within the configured WEIGHTS_DIR for the ReID weights.
+        BoxMOT will attempt to download to this path if the file doesn't exist.
+        The WORKDIR in the Docker container is /app.
+        So, self.WEIGHTS_DIR (e.g., "./weights") becomes /app/weights.
+        """
+        # Path(self.WEIGHTS_DIR) will be relative to the current working directory (WORKDIR /app)
+        # e.g., Path("./weights")
+        weights_dir_in_container = Path(self.WEIGHTS_DIR)
+        
+        # self.REID_WEIGHTS_PATH is the filename, e.g., "clip_market1501.pt"
+        reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
+        
+        # .resolve() makes the path absolute, e.g., /app/weights/clip_market1501.pt
+        return reid_weights_file_path.resolve()
 
 settings = Settings()

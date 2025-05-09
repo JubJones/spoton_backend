@@ -86,6 +86,8 @@ RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
 # Final image with the application and its dependencies
+# ---- Runtime Stage ----
+# Final image with the application and its dependencies
 FROM base as runtime
 
 # Install runtime dependencies for OpenCV and other libraries from the pytorch_installer stage
@@ -113,16 +115,22 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set application directory as working directory
 WORKDIR /app
 
+RUN mkdir -p /home/appuser/.cache/gdown && \
+    chown -R appuser:appgroup /home/appuser/.cache
+
 ARG LOCAL_VIDEO_DOWNLOAD_DIR="./downloaded_videos"
 ARG LOCAL_FRAME_EXTRACTION_DIR="./extracted_frames"
+ARG APP_WEIGHTS_DIR="./weights" # Define an ARG for the weights directory, defaulting to "./weights"
 
 # Create directories as root
 RUN mkdir -p "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
-    mkdir -p "${LOCAL_FRAME_EXTRACTION_DIR}"
+    mkdir -p "${LOCAL_FRAME_EXTRACTION_DIR}" && \
+    mkdir -p "${APP_WEIGHTS_DIR}" # Create the weights directory
 
 # Change ownership to appuser
 RUN chown -R appuser:appgroup "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
-    chown -R appuser:appgroup "${LOCAL_FRAME_EXTRACTION_DIR}"
+    chown -R appuser:appgroup "${LOCAL_FRAME_EXTRACTION_DIR}" && \
+    chown -R appuser:appgroup "${APP_WEIGHTS_DIR}"
 
 # Switch to non-root user
 USER appuser
