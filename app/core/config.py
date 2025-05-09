@@ -34,10 +34,10 @@ class Settings(BaseSettings):
 
     # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
-        VideoSetEnvironmentConfig(remote_base_key="video_s47/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s47/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s47/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s47/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
+        VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
+        VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
+        VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
+        VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="factory", cam_id="c09", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c12", env_id="factory", cam_id="c12", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="factory", cam_id="c13", num_sub_videos=4),
