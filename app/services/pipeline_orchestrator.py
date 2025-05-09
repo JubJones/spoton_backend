@@ -1,3 +1,4 @@
+# FILE: app/services/pipeline_orchestrator.py
 import asyncio
 import uuid
 from typing import Dict, Any, Optional, List
@@ -14,6 +15,7 @@ from app.services.video_data_manager_service import VideoDataManagerService
 from app.services.notification_service import NotificationService
 from app.models.base_models import AbstractDetector, AbstractTracker, BoundingBox, TrackedObject
 from app.core.config import settings
+from app.api.v1 import schemas # <<< ADDED IMPORT HERE
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +233,7 @@ class PipelineOrchestratorService:
                         continue
 
                     # Perform Detection
-                    detections: List[Detection] = await self.detector.detect(frame_bgr)
+                    detections: List = await self.detector.detect(frame_bgr)
                     # Convert detections to numpy format [N, 6] for tracker
                     detections_np = np.array([d.to_tracker_format() for d in detections]) if detections else np.empty((0, 6))
 
