@@ -1,3 +1,11 @@
+"""
+Module for object detection models.
+
+This module contains implementations of object detectors, adhering to the
+`AbstractDetector` interface defined in `base_models.py`. It demonstrates the
+Strategy Pattern, allowing different detection algorithms to be used interchangeably
+by the application's pipeline.
+"""
 from typing import List, Any, Dict, Optional
 import numpy as np
 import asyncio
@@ -17,10 +25,19 @@ logger = logging.getLogger(__name__)
 class FasterRCNNDetector(AbstractDetector):
     """
     Implementation of a Faster R-CNN detector using torchvision.
-    Loads a pre-trained Faster R-CNN model with a ResNet50 FPN backbone.
-    Focuses on detecting persons based on configured class ID.
+
+    This detector loads a pre-trained Faster R-CNN model with a ResNet50 FPN
+    backbone. It is configured to detect persons based on the class ID specified
+    in the application settings. It handles model loading, preprocessing,
+    inference, and postprocessing to return a list of `Detection` objects.
     """
     def __init__(self):
+        """
+        Initializes the FasterRCNNDetector.
+
+        Sets up model placeholders, configuration parameters from settings,
+        and COCO class names.
+        """
         self.model: Optional[torchvision.models.detection.FasterRCNN] = None
         self.transforms: Optional[torchvision.transforms.Compose] = None
         self.device: Optional[torch.device] = None # Set during load_model
@@ -40,7 +57,15 @@ class FasterRCNNDetector(AbstractDetector):
 
 
     async def load_model(self):
-        """Loads the Faster R-CNN model."""
+        """
+        Loads the Faster R-CNN model and its preprocessor.
+
+        The model is loaded onto the appropriate device (CUDA if available, else CPU).
+        If the model is already loaded, this method does nothing.
+
+        Raises:
+            RuntimeError: If there is an error loading the model.
+        """
         if self.model is not None:
             logger.info("Faster R-CNN model already loaded.")
             return
@@ -73,6 +98,9 @@ class FasterRCNNDetector(AbstractDetector):
 
         Returns:
             A list of Detection objects for persons found.
+
+        Raises:
+            RuntimeError: If the detector model has not been loaded.
         """
         if not self.model or not self.transforms or not self.device:
             raise RuntimeError("Detector model not loaded. Call load_model() first.")
@@ -102,9 +130,10 @@ class FasterRCNNDetector(AbstractDetector):
         # 3. Postprocessing
         detections_result: List[Detection] = []
         try:
-            pred_boxes = prediction_output['boxes'].cpu().numpy()
-            pred_labels = prediction_output['labels'].cpu().numpy()
-            pred_scores = prediction_output['scores'].cpu().numpy()
+            # Detach tensors from computation graph before converting to NumPy
+            pred_boxes = prediction_output['boxes'].detach().cpu().numpy()
+            pred_labels = prediction_output['labels'].detach().cpu().numpy()
+            pred_scores = prediction_output['scores'].detach().cpu().numpy()
             original_h, original_w = image.shape[:2]
 
             for box_coords, label_id, score_val in zip(pred_boxes, pred_labels, pred_scores):
@@ -135,3 +164,4 @@ class FasterRCNNDetector(AbstractDetector):
             return [] # Return empty list on postprocessing error
 
         return detections_result
+    

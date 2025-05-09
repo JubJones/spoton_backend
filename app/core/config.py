@@ -5,7 +5,7 @@ from pathlib import Path
 
 # Define a model for individual video set configurations
 class VideoSetEnvironmentConfig(BaseModel):
-    remote_base_key: str = Field(..., description="Base S3 key in DagsHub repo (e.g., 'video_s37/c01')")
+    remote_base_key: str = Field(..., description="Base S3 key (e.g., 'video_s37/c01')")
     env_id: str = Field(..., description="Environment ID (e.g., 'campus')")
     cam_id: str = Field(..., description="Camera ID (e.g., 'c01')")
     num_sub_videos: int = Field(..., gt=0, description="Total number of sub-videos available for this camera.")
@@ -16,12 +16,17 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
 
-    # DagsHub Configuration
+    # --- S3 (DagsHub/Generic) Configuration ---
+    S3_ENDPOINT_URL: Optional[str] = "https://s3.dagshub.com"
+    AWS_ACCESS_KEY_ID: Optional[str] = None # Read from .env
+    AWS_SECRET_ACCESS_KEY: Optional[str] = None # Read from .env
+    S3_BUCKET_NAME: str = "spoton_ml" # Read from .env, defaults to "spoton_ml"
+
+    # --- DagsHub Specific Configuration (if other DagsHub library features are used) ---
+    # These might be redundant if all S3 access is through boto3 with the above credentials.
+    # However, keeping them in case the dagshub library is used elsewhere.
     DAGSHUB_REPO_OWNER: str = "Jwizzed"
-    DAGSHUB_REPO_NAME: str = "spoton_ml"
-    S3_ENDPOINT_URL: Optional[str] = None
-    AWS_ACCESS_KEY_ID: Optional[str] = None
-    AWS_SECRET_ACCESS_KEY: Optional[str] = None
+    DAGSHUB_REPO_NAME: str = "spoton_ml" # This is often the same as S3_BUCKET_NAME for DagsHub
 
     # Local Data Directories
     LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos" # Relative to WORKDIR /app -> /app/downloaded_videos
@@ -82,14 +87,8 @@ class Settings(BaseSettings):
         The WORKDIR in the Docker container is /app.
         So, self.WEIGHTS_DIR (e.g., "./weights") becomes /app/weights.
         """
-        # Path(self.WEIGHTS_DIR) will be relative to the current working directory (WORKDIR /app)
-        # e.g., Path("./weights")
         weights_dir_in_container = Path(self.WEIGHTS_DIR)
-        
-        # self.REID_WEIGHTS_PATH is the filename, e.g., "clip_market1501.pt"
         reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
-        
-        # .resolve() makes the path absolute, e.g., /app/weights/clip_market1501.pt
         return reid_weights_file_path.resolve()
 
 settings = Settings()
