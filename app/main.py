@@ -1,12 +1,13 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 import logging
-from pathlib import Path # Import Path
+from pathlib import Path
 
 from app.core.config import settings
 from app.core import event_handlers
 # Import routers
-from app.api.v1.endpoints import processing_tasks, analytics_data
+from app.api.v1.endpoints import processing_tasks
 from app.api import websockets as ws_router
 
 # Configure logging
@@ -27,10 +28,10 @@ async def lifespan(app: FastAPI):
     logger.info("Model loading deferred to first request/usage (via dependencies).")
     # ---------------------------------------------
 
-    await event_handlers.on_startup(app) # Other startup tasks (DB connections etc.)
+    await event_handlers.on_startup(app)
     yield
     logger.info("Application shutdown sequence initiated...")
-    await event_handlers.on_shutdown(app) # Clean up resources
+    await event_handlers.on_shutdown(app)
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -42,6 +43,18 @@ app = FastAPI(
     docs_url=f"/docs", # Standard /docs
     redoc_url=f"/redoc" # Standard /redoc
 )
+
+# --- CORS Middleware ---
+# This is crucial for allowing requests from different origins,
+# including WebSocket connections, especially during development.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Allows all origins. For production, restrict this to specific domains.
+    allow_credentials=True, # Allows cookies to be included in cross-origin requests.
+    allow_methods=["*"],  # Allows all HTTP methods.
+    allow_headers=["*"],  # Allows all headers.
+)
+
 
 # --- API Routers ---
 api_v1_router_prefix = settings.API_V1_PREFIX
