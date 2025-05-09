@@ -1,6 +1,6 @@
 # ---- Base Stage ----
 # Using a specific Python version for better reproducibility
-FROM python:3.9.18-slim as base
+FROM python:3.9.18-bullseye as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -44,7 +44,9 @@ ARG TORCHAUDIO_VERSION="2.2.1"
 # System dependencies that might be needed by PyTorch or other libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libopenblas-dev \
+    build-essential python3-dev \
     && rm -rf /var/lib/apt/lists/*
+# Removed cython from apt-get
 
 # Create virtual environment
 RUN uv venv /opt/venv --python $(which python)
@@ -77,16 +79,31 @@ COPY pyproject.toml ./
 COPY README.md ./
 COPY ./app ./app
 
+# Install Cython if it's needed as a build dependency for packages in pyproject.toml
+# If Cython is a direct dependency of your project, it should be in pyproject.toml.
+# If it's a build-dependency for another package, that package's build system
+# should ideally declare it. This is a fallback.
+RUN uv pip install --no-cache-dir cython
+
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
 # so uv should respect these existing versions if they satisfy constraints.
-# Use --no-deps for torch, torchvision, torchaudio if strict control is needed here,
-# but usually uv's resolution handles this well.
 RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
 # Final image with the application and its dependencies
 FROM base as runtime
+
+# Install runtime dependencies for OpenCV and other libraries from the pytorch_installer stage
+# These are needed for cv2 and potentially other packages to run correctly.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libopenblas-base \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
