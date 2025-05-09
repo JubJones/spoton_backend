@@ -79,15 +79,9 @@ COPY pyproject.toml ./
 COPY README.md ./
 COPY ./app ./app
 
-# Install Cython if it's needed as a build dependency for packages in pyproject.toml
-# If Cython is a direct dependency of your project, it should be in pyproject.toml.
-# If it's a build-dependency for another package, that package's build system
-# should ideally declare it. This is a fallback.
-RUN uv pip install --no-cache-dir cython
 
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
-# so uv should respect these existing versions if they satisfy constraints.
 RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
