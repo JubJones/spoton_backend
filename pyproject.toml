@@ -1,7 +1,6 @@
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
 [project]
 name = "spoton_backend"
 version = "0.1.0"
@@ -9,9 +8,7 @@ description = "Backend for the Intelligent Multi-Camera Person Tracking and Anal
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
-authors = [
-    { name = "SpotOn", email = "Jwizzed@outlook.com" },
-]
+authors = [{ name = "SpotOn", email = "Jwizzed@outlook.com" }]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
@@ -22,7 +19,6 @@ classifiers = [
     "Framework :: FastAPI",
     "Topic :: Scientific/Engineering :: Image Recognition",
 ]
-
 dependencies = [
     "fastapi>=0.110.0,<0.111.0",
     "uvicorn[standard]>=0.29.0,<0.30.0",
@@ -30,9 +26,8 @@ dependencies = [
     "pydantic-settings>=2.2.0,<2.3.0",
     "redis[hiredis]>=5.0.5,<5.1.0",
     "psycopg2-binary>=2.9.9,<2.10.0",
-    # "aiobotocore>=2.13.0,<2.14.0", # Replaced by dagshub for S3-like access
-    "dagshub>=0.3.0,<0.4.0", # For DagsHub S3-like access
-    "boto3>=1.34.0,<1.35.0", # DagsHub client might use boto3, ensure it's available
+    "dagshub>=0.3.0,<0.4.0",
+    "boto3>=1.34.0,<1.35.0",
     "numpy>=1.26.4,<1.27.0",
     "opencv-python-headless>=4.9.0.80,<4.10.0.0",
     "boxmot>=10.0.41,<10.1.0",
@@ -41,43 +36,53 @@ dependencies = [
     "torchaudio>=2.2.0,<2.3.0",
     "loguru>=0.7.2,<0.8.0",
     "httpx>=0.27.0,<0.28.0",
+    "setuptools>=60.0.0",
+    "cython>=0.29.0,<0.30.0",
+    "pip>=23.0,<25.0",
 ]
-
 [project.urls]
 Homepage = "https://github.com/JubJones/spoton_backend"
 Repository = "https://github.com/JubJones/spoton_backend"
-
 [project.optional-dependencies]
 dev = [
     "pytest>=8.2.0,<8.3.0",
     "pytest-asyncio>=0.23.0,<0.24.0",
     "ruff>=0.4.2,<0.5.0",
+    # Cython removed from here if it's a core build dependency for other packages
 ]
-
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
-
 [tool.ruff]
 line-length = 88
 target-version = "py39"
 select = [
-    "E", "W", "F", "I", "UP", "C90", "N", "D", "ANN", "BLE", "B", "A", "RUF",
+    "E",
+    "W",
+    "F",
+    "I",
+    "UP",
+    "C90",
+    "N",
+    "D",
+    "ANN",
+    "BLE",
+    "B",
+    "A",
+    "RUF",
 ]
 ignore = [
-    "D203", "D212",
+    "D203",
+    "D212",
     # "ANN101", "ANN102", # Allow for now, can be enabled for stricter typing
     "ANN401", # Allow Any types for now where Pydantic or external libs use them
 ]
-
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
-
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
 [tool.pytest.ini_options]
 pythonpath = ["."]
 asyncio_mode = "auto"
