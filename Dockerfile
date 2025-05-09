@@ -102,6 +102,17 @@ ENV PATH="/opt/venv/bin:$PATH"
 # Set application directory as working directory
 WORKDIR /app
 
+ARG LOCAL_VIDEO_DOWNLOAD_DIR="./downloaded_videos"
+ARG LOCAL_FRAME_EXTRACTION_DIR="./extracted_frames"
+
+# Create directories as root
+RUN mkdir -p "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
+    mkdir -p "${LOCAL_FRAME_EXTRACTION_DIR}"
+
+# Change ownership to appuser
+RUN chown -R appuser:appgroup "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
+    chown -R appuser:appgroup "${LOCAL_FRAME_EXTRACTION_DIR}"
+
 # Switch to non-root user
 USER appuser
 
