@@ -43,7 +43,6 @@ def get_selected_device(requested_device: str = "auto") -> torch.device:
 
     elif req_device_lower == "auto":
         logger.info("Attempting auto-detection: CUDA > MPS > CPU")
-        # Try CUDA
         if torch.cuda.is_available():
             try:
                 device = torch.device("cuda")
@@ -52,8 +51,9 @@ def get_selected_device(requested_device: str = "auto") -> torch.device:
                 logger.info(f"Auto-selected CUDA device: {device} ({torch.cuda.get_device_name(device)})")
             except Exception as e:
                 logger.warning(f"CUDA available but failed test ({e}). Checking MPS.")
-        # Try MPS if CUDA failed or unavailable
-        if selected_device is None and hasattr(torch.backends, 'mps') and torch.backends.mps.is_available() and torch.backends.mps.is_built():
+        
+        if selected_device is None and hasattr(torch.backends, 'mps') and \
+           torch.backends.mps.is_available() and torch.backends.mps.is_built():
             try:
                 device = torch.device("mps")
                 _ = torch.tensor([1.0], device=device)
@@ -61,7 +61,7 @@ def get_selected_device(requested_device: str = "auto") -> torch.device:
                 logger.info(f"Auto-selected MPS device: {device}")
             except Exception as e:
                 logger.warning(f"MPS available but test failed ({e}). Falling back to CPU.")
-        # Fallback to CPU
+        
         if selected_device is None:
             selected_device = torch.device("cpu")
             logger.info(f"Auto-selected CPU device.")
@@ -69,9 +69,34 @@ def get_selected_device(requested_device: str = "auto") -> torch.device:
         logger.warning(f"Unknown device requested: '{requested_device}'. Falling back to CPU.")
         selected_device = torch.device("cpu")
 
-    # Final fallback if something went wrong
-    if selected_device is None:
+    if selected_device is None: # Should not happen with fallbacks, but as a final safety.
         logger.error("Device selection failed unexpectedly. Defaulting to CPU.")
         selected_device = torch.device("cpu")
-
+        
     return selected_device
+
+
+def get_boxmot_device_string(device: torch.device) -> str:
+    """
+    Converts a torch.device object into a string specifier suitable for BoxMOT.
+    Example: torch.device('cuda:0') -> '0', torch.device('cpu') -> 'cpu'
+    """
+    if not isinstance(device, torch.device):
+        logger.warning(f"Input to get_boxmot_device_string is not torch.device: {type(device)}. Trying to convert.")
+        try:
+            device = torch.device(str(device)) # Attempt conversion
+        except Exception:
+            logger.error(f"Could not convert '{device}' to torch.device. Defaulting to 'cpu' string.")
+            return 'cpu'
+
+    device_type = device.type
+    if device_type == 'cuda':
+        # BoxMOT usually expects the device index string, e.g., '0', '1'
+        return str(device.index if device.index is not None else 0)
+    elif device_type == 'mps':
+        return 'mps'
+    elif device_type == 'cpu':
+        return 'cpu'
+    else:
+        logger.warning(f"Unsupported torch.device type '{device_type}' for BoxMOT. Defaulting to 'cpu' string.")
+        return 'cpu'

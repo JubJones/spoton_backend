@@ -51,11 +51,11 @@ app.include_router(
     prefix=f"{api_v1_router_prefix}/processing-tasks", # Note: hyphenated path
     tags=["V1 - Processing Tasks"]
 )
-app.include_router(
-    analytics_data.router,
-    prefix=f"{api_v1_router_prefix}/analytics",
-    tags=["V1 - Analytics Data"]
-)
+# app.include_router(
+#     analytics_data.router,
+#     prefix=f"{api_v1_router_prefix}/analytics",
+#     tags=["V1 - Analytics Data"]
+# )
 
 # WebSocket Router (typically at root or specific path)
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
