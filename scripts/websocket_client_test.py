@@ -1,3 +1,4 @@
+# FILE: scripts/websocket_client_test.py
 """
 Test client for SpotOn backend.
 """
@@ -27,7 +28,6 @@ API_V1_PREFIX = "/api/v1"
 async def start_processing_task(environment_id: str = "campus"):
     """
     Sends a request to start a processing task.
-    (No changes to this function)
     """
     start_url = f"{BACKEND_BASE_URL}{API_V1_PREFIX}/processing-tasks/start"
     payload = {"environment_id": environment_id}
@@ -63,7 +63,7 @@ async def start_processing_task(environment_id: str = "campus"):
 async def listen_to_websocket(websocket_url: str, task_id: str):
     """
     Connects to the WebSocket and listens for messages.
-    Simplified for websockets v12.0.0.
+    Logs detailed tracking information.
     """
     logger.info(f"Attempting to connect to WebSocket: {websocket_url}")
 
@@ -78,17 +78,15 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
         "origin": origin_value,
         "ping_interval": 20,
         "ping_timeout": 20,
-        # In websockets 12, common headers like User-Agent are often passed separately
-        # "user_agent_header": "MyTestClient/1.0" # Example if needed
     }
 
     try:
         async with websockets.connect(websocket_url, **connect_kwargs) as websocket: # type: ignore
             logger.info(f"Successfully connected to WebSocket for task '{task_id}' at {websocket_url}")
             if hasattr(websocket, 'request_headers'):
-                 logger.info(f"  WebSocket Connection Request Headers (client-side perspective): {websocket.request_headers}") # type: ignore
+                 logger.debug(f"  WebSocket Connection Request Headers (client-side perspective): {websocket.request_headers}") # type: ignore
             if hasattr(websocket, 'response_headers'):
-                 logger.info(f"  WebSocket Connection Response Headers (client-side perspective): {websocket.response_headers}") # type: ignore
+                 logger.debug(f"  WebSocket Connection Response Headers (client-side perspective): {websocket.response_headers}") # type: ignore
             try:
                 while True:
                     message_str = await websocket.recv()
@@ -98,7 +96,27 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                         payload = message.get("payload", {})
 
                         if msg_type == "tracking_update":
-                            logger.info(f"[TASK {task_id}][TRACKING_UPDATE] Cam: {payload.get('camera_id')}, Tracks: {len(payload.get('tracking_data',[]))}")
+                            cam_id = payload.get('camera_id')
+                            frame_ts = payload.get('frame_timestamp')
+                            tracking_data_list = payload.get('tracking_data', [])
+                            logger.info(
+                                f"[TASK {task_id}][TRACKING_UPDATE] Cam: {cam_id}, TS: {frame_ts}, Tracks: {len(tracking_data_list)}"
+                            )
+                            # Log details for each tracked person
+                            for i, person_data in enumerate(tracking_data_list):
+                                bbox_img = person_data.get('bbox_img', 'N/A')
+                                # Format bbox for readability
+                                if isinstance(bbox_img, list) and len(bbox_img) == 4:
+                                    bbox_str = f"[{bbox_img[0]:.1f}, {bbox_img[1]:.1f}, {bbox_img[2]:.1f}, {bbox_img[3]:.1f}]"
+                                else:
+                                    bbox_str = str(bbox_img)
+
+                                logger.info(
+                                    f"  -> Person {i+1}: TrackID: {person_data.get('track_id', 'N/A')}, "
+                                    f"GlobalID: {person_data.get('global_person_id', 'None')}, "
+                                    f"BBox: {bbox_str}, "
+                                    f"Conf: {person_data.get('confidence', 'N/A')}"
+                                )
 
                         elif msg_type == "status_update":
                             logger.info(f"[TASK {task_id}][STATUS_UPDATE]")
@@ -160,7 +178,7 @@ async def main():
 if __name__ == "__main__":
     try:
         _ws_version = getattr(websockets, "__version__", "unknown")
-        logger.debug(f"Using websockets library version: {_ws_version}") # Will print 12.0.0
+        logger.debug(f"Using websockets library version: {_ws_version}")
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Client stopped by user (Ctrl+C).")
