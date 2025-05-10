@@ -8,7 +8,7 @@ from pathlib import Path
 try:
     # Import the specific tracker class directly
     from boxmot.trackers.botsort.botsort import BotSort
-    from boxmot.trackers.basetracker import BaseTracker as BoxMOTBaseTracker # For type hinting if needed
+    from boxmot.trackers.basetracker import BaseTracker as BoxMOTBaseTracker
     BOXMOT_AVAILABLE = True
 except ImportError as e:
     logging.critical(f"Failed to import BoxMOT components. Tracking unavailable. Error: {e}")
@@ -30,7 +30,7 @@ class BotSortTracker(AbstractTracker):
         if not BOXMOT_AVAILABLE or BotSort is None: # Check if BotSort itself was imported
             raise ImportError("BoxMOT library or BotSort class is required but not available.")
 
-        self.tracker_instance: Optional[BotSort] = None # Type hint with BotSort
+        self.tracker_instance = None # Type hint with BotSort
         self.device: Optional[torch.device] = None
         self.reid_model_path: Path = settings.resolved_reid_weights_path
         self.use_half: bool = settings.TRACKER_HALF_PRECISION

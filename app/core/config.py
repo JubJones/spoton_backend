@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict, Tuple
 from pathlib import Path
+from app.common_types import CameraID
 
 # Define a model for individual video set configurations
 class VideoSetEnvironmentConfig(BaseModel):
@@ -23,14 +24,12 @@ class Settings(BaseSettings):
     S3_BUCKET_NAME: str = "spoton_ml" # Read from .env, defaults to "spoton_ml"
 
     # --- DagsHub Specific Configuration (if other DagsHub library features are used) ---
-    # These might be redundant if all S3 access is through boto3 with the above credentials.
-    # However, keeping them in case the dagshub library is used elsewhere.
     DAGSHUB_REPO_OWNER: str = "Jwizzed"
-    DAGSHUB_REPO_NAME: str = "spoton_ml" # This is often the same as S3_BUCKET_NAME for DagsHub
+    DAGSHUB_REPO_NAME: str = "spoton_ml"
 
     # Local Data Directories
-    LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos" # Relative to WORKDIR /app -> /app/downloaded_videos
-    LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames" # Relative to WORKDIR /app -> /app/extracted_frames
+    LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
+    LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
 
     # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
@@ -43,6 +42,11 @@ class Settings(BaseSettings):
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="factory", cam_id="c13", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c16", env_id="factory", cam_id="c16", num_sub_videos=4),
     ]
+    # --- NEW: Define possible camera overlaps for conceptual handoff influence ---
+    # Each tuple represents a pair of camera IDs that might have an overlap.
+    # Example: [("c01", "c02"), ("c02", "c03")]
+    POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list, description="List of camera ID pairs that have potential visual overlap.")
+
 
     # Redis Configuration
     REDIS_HOST: str = "localhost"
@@ -65,11 +69,18 @@ class Settings(BaseSettings):
     DETECTION_USE_AMP: bool = False
 
     TRACKER_TYPE: str = "botsort"
-    WEIGHTS_DIR: str = "./weights" # Relative to WORKDIR /app -> /app/weights
-    REID_WEIGHTS_PATH: str = "clip_market1501.pt" # Filename of the ReID weights
+    WEIGHTS_DIR: str = "./weights"
+    REID_WEIGHTS_PATH: str = "clip_market1501.pt"
     TRACKER_HALF_PRECISION: bool = False
     TRACKER_PER_CLASS: bool = False
-    REID_SIMILARITY_THRESHOLD: float = 0.65
+    
+    # --- Re-ID Logic Configuration (NEW/MODIFIED) ---
+    REID_SIMILARITY_THRESHOLD: float = 0.65 # As per POC
+    REID_GALLERY_EMA_ALPHA: float = 0.9 # Exponential Moving Average for gallery updates
+    REID_REFRESH_INTERVAL_FRAMES: int = 10 # Processed frames between ReID updates for a track
+    REID_LOST_TRACK_BUFFER_FRAMES: int = 200 # Frames before a lost track feature is purged from lost gallery
+    REID_MAIN_GALLERY_PRUNE_INTERVAL_FRAMES: int = 500 # How often to check for main gallery pruning
+    REID_MAIN_GALLERY_PRUNE_THRESHOLD_FRAMES: int = REID_LOST_TRACK_BUFFER_FRAMES * 2 # Prune if GID unseen for this many frames in main gallery
 
     TARGET_FPS: int = 23
     FRAME_JPEG_QUALITY: int = 90
@@ -84,12 +95,16 @@ class Settings(BaseSettings):
     def resolved_reid_weights_path(self) -> Path:
         """
         Returns the full, resolved path within the configured WEIGHTS_DIR for the ReID weights.
-        BoxMOT will attempt to download to this path if the file doesn't exist.
-        The WORKDIR in the Docker container is /app.
-        So, self.WEIGHTS_DIR (e.g., "./weights") becomes /app/weights.
         """
         weights_dir_in_container = Path(self.WEIGHTS_DIR)
         reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
         return reid_weights_file_path.resolve()
+    
+    @property
+    def normalized_possible_camera_overlaps(self) -> List[Tuple[CameraID, CameraID]]:
+        """Returns a normalized list of camera overlaps (sorted tuples)."""
+        # Ensure CameraID type consistency if needed, though str comparison works
+        return [tuple(sorted(pair)) for pair in self.POSSIBLE_CAMERA_OVERLAPS]
+
 
 settings = Settings()
