@@ -1,10 +1,9 @@
-# FILE: scripts/websocket_client_test.py
 """
 Test client for SpotOn backend.
 """
 import asyncio
 import httpx
-import websockets # type: ignore
+import websockets
 import json
 import logging
 import sys
@@ -63,13 +62,13 @@ async def start_processing_task(environment_id: str = "campus"):
 async def listen_to_websocket(websocket_url: str, task_id: str):
     """
     Connects to the WebSocket and listens for messages.
-    Logs detailed tracking information.
+    Logs detailed tracking information including map coordinates.
     """
     logger.info(f"Attempting to connect to WebSocket: {websocket_url}")
 
     parsed_ws_url = urlparse(websocket_url)
     scheme = "http" if parsed_ws_url.scheme == "ws" else "https"
-    origin_value = f"{scheme}://{parsed_ws_url.netloc}" # e.g. "http://localhost:8000"
+    origin_value = f"{scheme}://{parsed_ws_url.netloc}" 
     
     logger.info(f"Client attempting WebSocket connection to: {websocket_url}")
     logger.info(f"Client will use origin parameter: '{origin_value}'")
@@ -93,42 +92,72 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                     try:
                         message = json.loads(message_str)
                         msg_type = message.get("type")
-                        payload = message.get("payload", {})
+                        
+                        # Check if payload is the direct tracking update structure (from example JSON)
+                        # or if it's nested under a "payload" key (from NotificationService)
+                        payload_data = message # Assume direct structure first
+                        if "payload" in message and isinstance(message["payload"], dict):
+                            # If a "payload" key exists and its value is a dict, use that
+                            # This matches how NotificationService structures messages.
+                            payload_data = message["payload"]
+                        
+                        # Now, msg_type should ideally be part of the outer message if NotificationService sent it,
+                        # or inferred if the structure is directly the JSON example.
+                        # For flexibility, let's re-check msg_type if it was from outer message
+                        if msg_type is None and "type" in payload_data: # Should not happen with NotificationService
+                             pass # msg_type already set or payload_data is the content
 
-                        if msg_type == "tracking_update":
-                            cam_id = payload.get('camera_id')
-                            frame_ts = payload.get('frame_timestamp')
-                            tracking_data_list = payload.get('tracking_data', [])
+                        if msg_type == "tracking_update": # This type is set by NotificationService
+                            # payload_data here is the content of WebSocketTrackingMessagePayload
+                            frame_idx = payload_data.get("frame_index", "N/A")
+                            scene_id = payload_data.get("scene_id", "N/A")
+                            ts_processed = payload_data.get("timestamp_processed_utc", "N/A")
+                            cameras_data = payload_data.get("cameras", {})
+                            
                             logger.info(
-                                f"[TASK {task_id}][TRACKING_UPDATE] Cam: {cam_id}, TS: {frame_ts}, Tracks: {len(tracking_data_list)}"
+                                f"[TASK {task_id}][TRACKING_UPDATE] Frame: {frame_idx}, Scene: {scene_id}, TS: {ts_processed}"
                             )
-                            # Log details for each tracked person
-                            for i, person_data in enumerate(tracking_data_list):
-                                bbox_img = person_data.get('bbox_img', 'N/A')
-                                # Format bbox for readability
-                                if isinstance(bbox_img, list) and len(bbox_img) == 4:
-                                    bbox_str = f"[{bbox_img[0]:.1f}, {bbox_img[1]:.1f}, {bbox_img[2]:.1f}, {bbox_img[3]:.1f}]"
-                                else:
-                                    bbox_str = str(bbox_img)
 
+                            for cam_id, cam_content in cameras_data.items():
+                                image_src = cam_content.get("image_source", "N/A")
+                                tracking_data_list = cam_content.get('tracks', [])
                                 logger.info(
-                                    f"  -> Person {i+1}: TrackID: {person_data.get('track_id', 'N/A')}, "
-                                    f"GlobalID: {person_data.get('global_person_id', 'None')}, "
-                                    f"BBox: {bbox_str}, "
-                                    f"Conf: {person_data.get('confidence', 'N/A')}"
+                                    f"  Camera: {cam_id}, ImgSrc: {image_src}, Tracks: {len(tracking_data_list)}"
                                 )
+                                for i, person_data in enumerate(tracking_data_list):
+                                    bbox_xyxy = person_data.get('bbox_xyxy', 'N/A') # Corrected key from schema
+                                    map_coords = person_data.get('map_coords', 'N/A') # Get map_coords
+
+                                    bbox_str = str(bbox_xyxy)
+                                    if isinstance(bbox_xyxy, list) and len(bbox_xyxy) == 4:
+                                        bbox_str = f"[{bbox_xyxy[0]:.1f}, {bbox_xyxy[1]:.1f}, {bbox_xyxy[2]:.1f}, {bbox_xyxy[3]:.1f}]"
+                                    
+                                    map_coords_str = str(map_coords)
+                                    if isinstance(map_coords, list) and len(map_coords) == 2:
+                                        map_coords_str = f"[{map_coords[0]:.1f}, {map_coords[1]:.1f}]"
+
+
+                                    logger.info(
+                                        f"    -> Person {i+1}: TrackID: {person_data.get('track_id', 'N/A')}, "
+                                        f"GlobalID: {person_data.get('global_id', 'None')}, "
+                                        f"BBox: {bbox_str}, "
+                                        f"Conf: {person_data.get('confidence', 'N/A')}, "
+                                        f"ClassID: {person_data.get('class_id', 'N/A')}, " # Log class_id
+                                        f"MapCoords: {map_coords_str}" # Log map_coords
+                                    )
 
                         elif msg_type == "status_update":
+                            # payload_data here is the status dict from PipelineOrchestrator
                             logger.info(f"[TASK {task_id}][STATUS_UPDATE]")
-                            logger.info(f"  Status: {payload.get('status')}")
-                            progress = payload.get('progress')
+                            logger.info(f"  Status: {payload_data.get('status')}")
+                            progress = payload_data.get('progress')
                             if progress is not None:
                                 logger.info(f"  Progress: {progress:.2%}")
-                            logger.info(f"  Current Step: {payload.get('current_step')}")
-                            if payload.get('details'):
-                                logger.info(f"  Details: {payload.get('details')}")
+                            logger.info(f"  Current Step: {payload_data.get('current_step')}")
+                            if payload_data.get('details'):
+                                logger.info(f"  Details: {payload_data.get('details')}")
                         else:
-                            logger.warning(f"Received unknown message type or malformed JSON: {message_str[:200]}")
+                            logger.warning(f"Received unknown message type ('{msg_type}') or malformed JSON: {message_str[:300]}")
 
                     except json.JSONDecodeError:
                         logger.warning(f"Received non-JSON message: {message_str[:200]}")
@@ -147,7 +176,7 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                 "A 403 (Forbidden) error. "
                 f"Check server logs. Client used origin parameter: '{origin_value}'"
             )
-    except TypeError as te: # Catch TypeErrors from connect() itself
+    except TypeError as te: 
         logger.error(f"TypeError during websockets.connect(): {te}", exc_info=True)
         logger.error(f"This might indicate an incompatibility with websockets=={getattr(websockets, '__version__', 'unknown')} "
                      f"and the arguments: {connect_kwargs}")
@@ -161,7 +190,7 @@ async def main():
     """
     Main function to run the client. 
     """
-    environment_id_to_process = "campus"
+    environment_id_to_process = "factory" # Changed default to factory for testing with provided JSON
     if len(sys.argv) > 1:
         environment_id_to_process = sys.argv[1]
         logger.info(f"Using environment_id from command line argument: '{environment_id_to_process}'")
