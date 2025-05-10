@@ -1,6 +1,6 @@
 # ---- Base Stage ----
 # Using a specific Python version for better reproducibility
-FROM python:3.9.18-slim as base
+FROM python:3.9.18-bullseye as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -44,7 +44,9 @@ ARG TORCHAUDIO_VERSION="2.2.1"
 # System dependencies that might be needed by PyTorch or other libraries
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libopenblas-dev \
+    build-essential python3-dev \
     && rm -rf /var/lib/apt/lists/*
+# Removed cython from apt-get
 
 # Create virtual environment
 RUN uv venv /opt/venv --python $(which python)
@@ -77,16 +79,27 @@ COPY pyproject.toml ./
 COPY README.md ./
 COPY ./app ./app
 
+
 # Install dependencies from pyproject.toml.
 # PyTorch, torchvision, torchaudio should already be in /opt/venv from the previous stage,
-# so uv should respect these existing versions if they satisfy constraints.
-# Use --no-deps for torch, torchvision, torchaudio if strict control is needed here,
-# but usually uv's resolution handles this well.
 RUN uv pip install --no-cache-dir ".[dev]"
 
 # ---- Runtime Stage ----
 # Final image with the application and its dependencies
+# ---- Runtime Stage ----
+# Final image with the application and its dependencies
 FROM base as runtime
+
+# Install runtime dependencies for OpenCV and other libraries from the pytorch_installer stage
+# These are needed for cv2 and potentially other packages to run correctly.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    libopenblas-base \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy virtual environment from builder stage
 COPY --from=builder /opt/venv /opt/venv
@@ -101,6 +114,23 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # Set application directory as working directory
 WORKDIR /app
+
+RUN mkdir -p /home/appuser/.cache/gdown && \
+    chown -R appuser:appgroup /home/appuser/.cache
+
+ARG LOCAL_VIDEO_DOWNLOAD_DIR="./downloaded_videos"
+ARG LOCAL_FRAME_EXTRACTION_DIR="./extracted_frames"
+ARG APP_WEIGHTS_DIR="./weights" # Define an ARG for the weights directory, defaulting to "./weights"
+
+# Create directories as root
+RUN mkdir -p "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
+    mkdir -p "${LOCAL_FRAME_EXTRACTION_DIR}" && \
+    mkdir -p "${APP_WEIGHTS_DIR}" # Create the weights directory
+
+# Change ownership to appuser
+RUN chown -R appuser:appgroup "${LOCAL_VIDEO_DOWNLOAD_DIR}" && \
+    chown -R appuser:appgroup "${LOCAL_FRAME_EXTRACTION_DIR}" && \
+    chown -R appuser:appgroup "${APP_WEIGHTS_DIR}"
 
 # Switch to non-root user
 USER appuser

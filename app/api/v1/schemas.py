@@ -1,48 +1,52 @@
-from pydantic import BaseModel, HttpUrl, Field
-from typing import List, Optional, Dict, Any # Dict and Any are not used in this snippet directly, but good to keep if planning to expand.
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 from datetime import datetime
-import uuid # For task IDs
+import uuid
 
-class TimeRangeUTC(BaseModel):
-    start: datetime
-    end: datetime
+# --- Request Schemas ---
 
 class ProcessingTaskStartRequest(BaseModel):
-    # cameras: List[str] # Removed, cameras are determined by environment_id
-    # time_range_utc: TimeRangeUTC # Removed for simplification, can be added back
+    """Request body to start a new processing task."""
     environment_id: str = Field(..., description="Identifier for the environment (e.g., 'campus', 'factory') to process.")
-    # Add other parameters like specific Re-ID rules or models if configurable
+
+# --- Response Schemas ---
 
 class ProcessingTaskCreateResponse(BaseModel):
-    task_id: uuid.UUID # Using UUID object directly for Pydantic
+    """Response after successfully queuing a processing task."""
+    task_id: uuid.UUID
     message: str = "Processing task initiated."
-    status_url: str # Relative path for status
-    websocket_url: str # Relative path for WebSocket
+    status_url: str # Relative path for status check
+    websocket_url: str # Relative path for WebSocket connection
 
 class TaskStatusResponse(BaseModel):
+    """Response containing the current status of a task."""
     task_id: uuid.UUID
-    status: str # e.g., "INITIALIZING", "PREPARING_DATA", "PROCESSING", "COMPLETED", "FAILED"
-    progress: float = Field(default=0.0, ge=0.0, le=1.0)
-    details: Optional[str] = None
-    # Can add more specific progress indicators later if needed
+    status: str = Field(..., description="Current status (e.g., QUEUED, INITIALIZING, DOWNLOADING, EXTRACTING, PROCESSING, COMPLETED, FAILED)")
+    progress: float = Field(default=0.0, ge=0.0, le=1.0, description="Overall task progress estimate (0.0 to 1.0)")
+    current_step: Optional[str] = Field(None, description="Description of the current step being performed.")
+    details: Optional[str] = Field(None, description="Additional details or error message.")
 
-# --- WebSocket Message Schemas (mirroring project doc) ---
+# --- WebSocket Message Schemas ---
+
 class MapCoordinates(BaseModel):
-    x: float
-    y: float
+    """Represents coordinates on a 2D map (ignored for now, but kept for structure)."""
+    x: Optional[float] = None
+    y: Optional[float] = None
 
 class TrackedPersonData(BaseModel):
-    global_person_id: str
-    bbox_img: List[float] # [x1, y1, x2, y2] or [x,y,w,h] - ensure consistency
-    map_coordinates: MapCoordinates
+    """Data for a single tracked person in a frame."""
+    track_id: int # The temporary track ID assigned by the intra-camera tracker
+    global_person_id: Optional[str] = Field(None, description="Globally unique ID assigned by Re-ID (null if not identified).")
+    bbox_img: List[float] = Field(..., description="Bounding box in image coordinates [x1, y1, x2, y2]")
+    confidence: Optional[float] = Field(None, description="Detection confidence score.")
+    # map_coordinates: Optional[MapCoordinates] = None # Keep optional, but ignore for now
 
 class WebSocketTrackingMessage(BaseModel):
-    camera_id: str
-    timestamp: datetime # Or str in ISO format
-    image_url: HttpUrl # This will be local file paths now or data URLs if embedding
-    tracking_data: List[TrackedPersonData]
+    """Message pushed via WebSocket containing tracking data for a frame."""
+    type: str = Field(default="tracking_update", description="Type of WebSocket message.")
+    payload: Dict[str, Any] = Field(..., description="The actual message content.")
 
-# --- Analytics Schemas ---
+# --- Analytics Schemas (Keep as placeholders) ---
 class TrajectoryPoint(BaseModel):
     timestamp: datetime
     camera_id: str
