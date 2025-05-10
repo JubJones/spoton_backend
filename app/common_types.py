@@ -33,7 +33,7 @@ class TrackedObjectData(BaseModel):
     bbox_xyxy: BoundingBoxXYXY
     confidence: Optional[float] = None
     feature_vector: Optional[List[float]] = None # Optional: if features are explicitly passed
-    map_coords: Optional[Tuple[float, float]] = None # Added from POC for BEV map compatibility
+    map_coords: Optional[List[float]] = Field(None, description="Projected [X, Y] coordinates on the map. Null if not available.") # MODIFIED
 
     class Config:
         arbitrary_types_allowed = True
@@ -64,12 +64,12 @@ class ExitRuleModel(BaseModel):
 
 class CameraHandoffDetailConfig(BaseModel):
     """
-    Detailed configuration for a camera, including handoff rules and frame shape.
+    Detailed configuration for a camera, including handoff rules and homography.
     Used internally by settings, keyed by (env_id, cam_id).
     """
-    # frame_shape: Tuple[int, int] # (height, width) - Decided to get this dynamically from frame
     exit_rules: List[ExitRuleModel] = Field(default_factory=list)
-    # Add other camera-specific details if needed, e.g., homography matrix path or pre-loaded matrix
+    homography_matrix_path: Optional[str] = Field(None, description="Path to the .npz file containing homography points for this camera and scene, relative to WEIGHTS_DIR/homography_points.")
+    # Homography matrix itself will be loaded and cached by MultiCameraFrameProcessor
 
 class HandoffTriggerInfo(NamedTuple):
     """
