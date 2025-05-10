@@ -1,6 +1,5 @@
 """
 Test client for SpotOn backend.
-... (rest of the docstring) ...
 """
 import asyncio
 import httpx
@@ -142,7 +141,7 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
 
 async def main():
     """
-    Main function to run the client.
+    Main function to run the client. 
     """
     environment_id_to_process = "campus"
     if len(sys.argv) > 1:

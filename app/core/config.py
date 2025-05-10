@@ -69,6 +69,7 @@ class Settings(BaseSettings):
     REID_WEIGHTS_PATH: str = "clip_market1501.pt" # Filename of the ReID weights
     TRACKER_HALF_PRECISION: bool = False
     TRACKER_PER_CLASS: bool = False
+    REID_SIMILARITY_THRESHOLD: float = 0.65
 
     TARGET_FPS: int = 23
     FRAME_JPEG_QUALITY: int = 90
