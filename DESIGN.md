@@ -17,7 +17,7 @@ The backend follows a service-oriented architecture, containerized using Docker 
 
 Key backend responsibilities:
 1.  **API Endpoints:** Expose RESTful APIs for control, configuration, and historical data retrieval.
-2.  **WebSocket Communication:** Provide real-time tracking updates to the frontend.
+2.  **WebSocket Communication:** Provide real-time *tracking metadata updates* to the frontend.
 3.  **Data Processing Pipeline:**
     *   Fetch video segments (sub-videos) from S3 and cache them locally.
     *   Locally extract individual frames from the cached video segments.
@@ -25,6 +25,7 @@ Key backend responsibilities:
     *   Extract appearance features for Re-ID from detected persons (e.g., CLIP via BoxMOT).
     *   Execute cross-camera Re-Identification and global ID association.
     *   Apply perspective transformation (Homography) to get map coordinates.
+    *   Compile tracking results (bounding boxes, global IDs, map coordinates). *Client handles video display and overlays based on this metadata.*
 4.  **Data Management:**
     *   Interact with Redis for caching real-time state and recent Re-ID embeddings.
     *   Interact with TimescaleDB for storing historical tracking events and older embeddings.
@@ -92,8 +93,8 @@ The backend codebase is organized as follows:
     *   **Usage:** The `StorageService` acts as a facade for data access related to S3 (video segments, local caching), Redis, and TimescaleDB.
     *   **Benefit:** Abstracts data storage details.
 *   **Observer Pattern (Conceptual, via WebSockets):**
-    *   **Usage:** Backend processes data (subject), frontend clients (observers) receive real-time updates via WebSockets from `NotificationService`.
-    *   **Benefit:** Enables real-time data streaming.
+    *   **Usage:** Backend processes data (subject), frontend clients (observers) receive real-time *metadata* updates via WebSockets from `NotificationService`.
+    *   **Benefit:** Enables real-time data streaming for client-side rendering and synchronization.
 *   **Pipeline Pattern (Conceptual):**
     *   **Usage:** The core per-frame processing (Frame Extraction -> Preprocess -> Detect -> Track -> Feature Extract -> Re-ID -> Transform) is a pipeline managed by `PipelineOrchestratorService` and `FrameProcessorTask`.
     *   **Benefit:** Structures complex processing into manageable steps.
@@ -109,11 +110,12 @@ The backend codebase is organized as follows:
         *   Starting a processing session for specified cameras within an environment.
         *   Fetching historical analytics data.
         *   Retrieving system configuration (e.g., available environments, cameras per environment).
+        *   *Potentially serving video files or providing signed URLs for video access if not directly from S3.*
     *   **Technology:** FastAPI.
 *   **WebSockets:**
     *   **Purpose:** Real-time, bidirectional communication for backend to push updates.
     *   **Examples:**
-        *   Streaming per-frame tracking results (bounding boxes, global IDs, map coordinates, potentially image URLs of current frame) to the frontend.
+        *   Streaming per-frame *tracking metadata* (bounding boxes, global IDs, map coordinates, frame timestamps) to the frontend. *The client separately fetches and plays the video stream (e.g., from S3) and uses this metadata to render overlays.*
     *   **Technology:** FastAPI's WebSocket support.
 
 ## 7. Key API Endpoints (High-Level)
@@ -124,6 +126,7 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
     *   `POST /start`: Initiates a retrospective analysis task for specified cameras in an environment.
         *   Request: `{ "cameras": ["c01", "c02"], "environment_id": "campus" }` (Camera IDs are specific to the environment, e.g., "c01" for campus, "f01" for factory. Each camera implies processing its predefined set of 4 sub-videos.)
         *   Response: `{ "task_id": "uuid", "status_url": "/api/v1/processing_tasks/{task_id}/status", "websocket_url": "/ws/tracking/{task_id}" }`
+            *   *Note: The client will need to derive the S3 paths for the sub-videos based on the `environment_id`, `camera_ids`, and sub-video sequence, or an additional mechanism might be needed for the client to discover these video URLs.*
     *   `GET /{task_id}/status`: Retrieves the current status of a processing task.
     *   `POST /{task_id}/control`: Send control commands (e.g., pause, resume - if supported, focus_track).
         *   Request: `{ "command": "focus_track", "global_person_id": "person_xyz" }`
@@ -137,9 +140,11 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
 *   **Configuration/Metadata (`/config`):**
     *   `GET /environments`: List available environments (e.g., "campus", "factory").
     *   `GET /environments/{environment_id}/cameras`: List cameras available for a given environment (e.g., for "campus": ["c01", "c02", "c03", "c04"]).
+    *   *Potentially `GET /environments/{environment_id}/cameras/{camera_id}/video_urls` to get S3 URLs for sub-videos if client derivation is too complex.*
 
 *   **WebSocket Endpoint (`/ws/tracking/{task_id}`):**
-    *   The backend pushes messages with the structure defined in `app.api.v1.schemas.WebSocketTrackingMessage`.
+    *   The backend pushes messages with the structure defined in `app.api.v1.schemas.WebSocketTrackingMessage` (containing tracking metadata, not frame images).
+    *   The video stream itself is not sent over WebSockets. The client is responsible for fetching and displaying the appropriate sub-video segments (e.g., constructing S3 URLs based on task details like environment, camera, and sub-video sequence) and then synchronizing the WebSocket metadata with the video playback.
 
 ## 8. Data Flow (Retrospective Analysis - Using Pre-Split Sub-Videos)
 
@@ -149,20 +154,25 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
 
 2.  **Initiation (REST API):**
     *   Frontend sends a request to `POST /api/v1/processing_tasks/start` with `environment_id` and a list of `camera_ids`.
+    *   The backend responds with task details, including the WebSocket URL for metadata.
 
 3.  **Task Creation & Sub-Video List Generation (`PipelineOrchestratorService`):**
     *   Backend creates a processing task with a unique `task_id`.
     *   For each requested camera, the system identifies the S3 keys for its 4 sub-videos based on the `environment_id` and `camera_id`. This forms a master list of sub-videos for the task.
     *   The task is initiated to run in the background.
 
-4.  **Sub-Video Fetching & Caching (`StorageService`):**
+4.  **Sub-Video Fetching & Caching (Backend - `StorageService`):**
     *   For the current sub-video to be processed in the master list:
         *   `StorageService` checks its local task-specific cache (e.g., `/tmp/spoton_cache/<task_id>/<sub_video_filename>`).
         *   If not cached, it downloads the sub-video from S3 to the local cache.
     *   **Prefetching:** Asynchronously, `StorageService` starts downloading the *next* sub-video from the master list to the local cache to minimize waiting time.
 
-5.  **Frame-by-Frame Processing Loop (Orchestrated by `PipelineOrchestratorService`, logic in `FrameProcessorTask` for a given sub-video):**
-    *   Once a sub-video is locally cached, `PipelineOrchestratorService` instructs `FrameProcessorTask` (or similar component) to process it.
+5.  **Client-Side Video Access:**
+    *   The frontend client, based on the `environment_id`, `camera_ids`, and the current sub-video sequence being processed by the backend (implicitly known or explicitly signaled), constructs the S3 URLs for the relevant sub-video segments.
+    *   The client fetches and buffers these video segments for playback (e.g., using an HTML5 `<video>` tag).
+
+6.  **Frame-by-Frame Processing Loop (Backend - Orchestrated by `PipelineOrchestratorService`, logic in `FrameProcessorTask` for a given sub-video):**
+    *   Once a sub-video is locally cached on the backend, `PipelineOrchestratorService` instructs `FrameProcessorTask` (or similar component) to process it.
     *   **(a) Frame Extraction:** `FrameProcessorTask` opens the local sub-video file (e.g., using OpenCV's `cv2.VideoCapture`) and reads frames sequentially.
     *   **For each extracted frame:**
         *   **(b) Detection:** `DetectorStrategy` (e.g., `FasterRCNNDetector`) identifies persons in the frame.
@@ -170,21 +180,26 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
         *   **(d) Feature Extraction:** `FeatureExtractorStrategy` (e.g., `CLIPExtractor` via BoxMOT) extracts appearance embeddings for new/updated tracks.
         *   **(e) Re-Identification:** `ReIDService` uses embeddings to assign or update `global_person_id` by comparing against a gallery (managed in Redis/TimescaleDB).
         *   **(f) Homography:** `HomographyService` transforms image coordinates to map coordinates.
-        *   **(g) Data Aggregation:** Frame timestamp (derived from frame number and 23 FPS), camera ID, and all tracking results are compiled.
+        *   **(g) Data Aggregation:** Frame timestamp (derived from frame number and 23 FPS), camera ID, and all tracking results (bounding boxes, global IDs, map coordinates) are compiled.
 
-6.  **Data Storage & Caching (Ongoing):**
+7.  **Data Storage & Caching (Backend - Ongoing):**
     *   `StorageService` (or `ReIDService`) updates Redis with recent Re-ID embeddings for the gallery.
     *   `StorageService` (asynchronously) writes historical tracking data (trajectories, older embeddings) to TimescaleDB.
 
-7.  **Real-time Update (WebSocket - `NotificationService`):**
+8.  **Real-time Metadata Update (Backend to Client via WebSocket - `NotificationService`):**
     *   After processing each frame (or a small batch), `NotificationService` is triggered.
-    *   It sends a `WebSocketTrackingMessage` (containing frame timestamp, camera ID, tracking data with global IDs, bounding boxes, map coordinates, and potentially a URL to the current processed frame image if generated) to clients subscribed to the `task_id`.
+    *   It sends a `WebSocketTrackingMessage` (containing frame timestamp, camera ID, tracking data with global IDs, bounding boxes, map coordinates) to clients subscribed to the `task_id`. *The message does not contain the frame image itself.*
 
-8.  **Iteration and Completion:**
-    *   The frame processing loop (Step 5) continues until all frames in the current sub-video are processed.
-    *   The system then moves to the next sub-video in the master list (which is ideally already prefetched by `StorageService`).
-    *   Once all sub-videos for all requested cameras are processed, the task is marked as complete.
-    *   The local cache for the completed `task_id` is cleared by `StorageService`.
+9.  **Client-Side Video Playback and Overlay Rendering:**
+    *   The frontend client plays the video segment fetched in Step 5.
+    *   Upon receiving `WebSocketTrackingMessage`s, the client uses the `frame_timestamp` (or a derived frame index based on FPS) to synchronize the tracking metadata with the current video playback position.
+    *   The client renders overlays (bounding boxes, global IDs, etc.) on top of the video display (e.g., using an HTML canvas).
+
+10. **Iteration and Completion (Backend & Client):**
+    *   The backend frame processing loop (Step 6) continues until all frames in the current sub-video are processed.
+    *   The backend then moves to the next sub-video in the master list (which is ideally already prefetched by `StorageService`). The client also moves to playing the next sub-video segment.
+    *   Once all sub-videos for all requested cameras are processed, the task is marked as complete on the backend.
+    *   The local cache for the completed `task_id` is cleared by `StorageService` on the backend.
 
 ## 9. Scalability and Maintainability
 
@@ -193,6 +208,8 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
     *   AI model inference can utilize `asyncio.to_thread` for CPU-bound tasks or be offloaded if necessary. GPU resource management will be key if GPUs are used.
     *   Video processing (frame extraction) is local to the worker after download, improving performance.
     *   Prefetching of video segments hides S3 latency.
+    *   WebSocket communication is lightweight (metadata only), improving scalability for concurrent clients.
+    *   Video delivery to clients can leverage standard HTTP streaming and CDNs.
     *   Redis and TimescaleDB are scalable.
 *   **Maintainability:**
     *   Modular design with clear service responsibilities.
@@ -207,6 +224,10 @@ All endpoints will be versioned (e.g., `/api/v1/...`). Pydantic schemas will def
 *   **Configuration of AI Models & Homography:** How homography matrices (per camera), model paths, and thresholds are managed and loaded (likely via `config.py` or a dedicated configuration service).
 *   **Resource Management:** For GPU resources if AI models require them. Ensure efficient local disk space management for cached video segments.
 *   **CI/CD Pipeline:** For automated testing and deployment.
-*   **Frame Timestamps:** Precise calculation of frame timestamps based on sub-video sequence and known FPS (23 FPS).
-*   **Image URL in WebSocket:** Determine if the backend needs to generate and serve individual processed frames (requiring storage and URL generation) or if the frontend handles video display and overlay.
+*   **Frame Timestamps:** Precise calculation and communication of frame timestamps (or consistent frame indices) to ensure accurate client-side synchronization with video playback.
+*   **Client-Side Video Rendering Strategy:** The current design assumes the client fetches video streams (e.g., sub-videos from S3 by deriving URLs) and synchronizes WebSocket metadata for overlays. Future considerations could include:
+    *   An API endpoint for clients to discover video stream URLs if derivation logic becomes complex or S3 paths are not publicly patterned.
+    *   Support for adaptive streaming protocols like HLS/DASH for video delivery to clients for improved user experience over varying network conditions.
+    *   Detailed specifications for client-side synchronization mechanisms (e.g., handling video seeking, playback rate changes, buffering).
+*   **Client-Side Implementation:** Significant logic will reside on the client for video playback, WebSocket data handling, timestamp synchronization, and rendering overlays.
 *   **Task Concurrency:** How many sub-videos or cameras are processed in parallel by a single backend instance.
