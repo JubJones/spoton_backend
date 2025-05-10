@@ -18,14 +18,22 @@ For a detailed system design, please refer to [DESIGN.md](DESIGN.md).
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 *   **S3-Compatible Object Storage**: Access to an S3-compatible storage (e.g., AWS S3, MinIO, DagsHub) where the input video data (sub-videos) is stored.
-*   **AI Model Weights**: Download the required Re-ID model weights (e.g., `clip_market1501.pt`). Links and filenames are typically specified in `weights/note.txt`. Place the downloaded `.pt` file(s) into the `spoton_backend/weights/` directory. This directory is copied into the Docker image during the build.
+*   **AI Model Weights**:
+    *   **Re-ID Model (`clip_market1501.pt`)**: This model is crucial for person re-identification.
+        1.  Navigate to the `spoton_backend/weights/` directory in your cloned repository.
+        2.  Open the `note.txt` file. It contains links to various model weights.
+        3.  Download the file from the **first URL** listed in `note.txt`.
+        4.  Rename the downloaded file to `clip_market1501.pt`.
+        5.  Place this `clip_market1501.pt` file directly into the `spoton_backend/weights/` directory.
+    *   The `Dockerfile` is configured to copy the contents of the `weights/` directory (including `clip_market1501.pt`) and `homography_data/` into the Docker image during the build process.
+    *   Detection models (like Faster R-CNN) are typically downloaded by `torchvision` at runtime if pre-trained weights are used, or their paths would be configured if custom trained.
 
 ## Installation and Setup
 
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/JubJones/spoton_backend # Replace with your repository URL if different
+git clone https://github.com/JubJones/spoton_backend.git # Replace with your repository URL if different
 cd spoton_backend
 ```
 
@@ -48,6 +56,9 @@ Now, edit the `.env` file. Pay close attention to the following:
     *   `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
 *   **PyTorch Variant for Docker Build**:
     *   `PYTORCH_VARIANT_BUILD`: Set to `cpu` for CPU-only execution or `cu118` for CUDA 11.8 GPU support. If using `cu118`, ensure the NVIDIA Container Toolkit is installed on your Docker host and your Docker host has compatible NVIDIA drivers and GPUs.
+*   **Model Weights Paths**:
+    *   `WEIGHTS_DIR`: Defaults to `./weights`. This is where the application expects to find model files inside the container.
+    *   `REID_WEIGHTS_PATH`: Defaults to `clip_market1501.pt`. This filename should match the Re-ID model you placed in `weights/`.
 
 ### 3. Setup Options
 
@@ -58,7 +69,11 @@ You can set up the backend using Docker (recommended for most users and for runn
 This method encapsulates the backend application and its dependencies (Redis, TimescaleDB) in Docker containers, providing a consistent and isolated environment.
 
 1.  **Ensure AI Model Weights are in Place**:
-    As mentioned in Prerequisites, download the necessary model weights (e.g., `clip_market1501.pt`) and place them in the `spoton_backend/weights/` directory. The `Dockerfile` is configured to copy the contents of this directory and `homography_data/` into the Docker image.
+    As detailed in the **Prerequisites** section:
+    *   Download the Re-ID model from the first link in `weights/note.txt`.
+    *   Rename it to `clip_market1501.pt`.
+    *   Place `clip_market1501.pt` into the `spoton_backend/weights/` directory.
+    This step is crucial *before* building the Docker image, as the `Dockerfile` copies the `weights/` directory contents.
 
 2.  **Build and Start Services using Docker Compose**:
     Navigate to the root directory of `spoton_backend` (where `docker-compose.yml` is located) and run:
@@ -113,7 +128,7 @@ This setup is intended for developers who want to run and debug the Python appli
     ```
 
 3.  **Ensure AI Model Weights and Homography Data are Accessible**:
-    *   Confirm that the downloaded AI model weights are in the `spoton_backend/weights/` directory.
+    *   Confirm that `clip_market1501.pt` (downloaded as per Prerequisites) is in the `spoton_backend/weights/` directory.
     *   The `spoton_backend/homography_data/` directory (containing `.npz` files) should be present.
     *   The application uses paths configured in your `.env` file (e.g., `WEIGHTS_DIR`, `HOMOGRAPHY_DATA_DIR`) to find these assets, which default to these locations relative to the app's execution directory.
 
@@ -140,6 +155,11 @@ If you've set up using Docker (Option A):
     docker-compose logs backend
     # To follow logs in real-time:
     docker-compose logs -f backend
+    ```
+*   **(Optional) DagsHub Login for S3 access using DagsHub CLI**:
+    If you need to interact with DagsHub storage using the `dagshub` CLI from *within* the running backend container (e.g., for `dagshub upload`):
+    ```bash
+    docker exec -it -u appuser spoton_backend_service bash -c "dagshub login"
     ```
     _Note: For the application's S3 data access (video downloads), the AWS credentials in your `.env` file are used by `boto3` and are sufficient._
 
@@ -205,8 +225,10 @@ The `scripts/websocket_client_test.py` script is a helpful tool for simulating a
         ```
     4.  Navigate to the `spoton_backend` root directory and execute the script:
         ```bash
-        python scripts/websocket_client_test.py
+        python scripts/websocket_client_test.py [environment_id]
         ```
+        *   **Example**: `python scripts/websocket_client_test.py factory`
+        *   If `[environment_id]` is omitted, the script defaults to processing the `"factory"` environment (this default is set within the script).
 
 *   **Understanding the WebSocket client output**:
     The client script will first log its attempt to start a processing task. If successful, it will connect to the WebSocket URL provided by the backend. You will then observe two main types of messages printed to your console:
@@ -277,7 +299,7 @@ The backend codebase is organized as follows:
 *   `homography_data/`: Stores `.npz` files with points for homography calculations.
 *   `scripts/`: Utility scripts, including `websocket_client_test.py`.
 *   `tests/`: Unit and integration tests.
-*   `weights/`: Directory for storing AI model weight files (e.g., `.pt` files).
+*   `weights/`: Directory for storing AI model weight files (e.g., `clip_market1501.pt`). Contains `note.txt` with download links.
 *   `Dockerfile`: Instructions to build the Docker image for the backend.
 *   `docker-compose.yml`: Defines services for local development and deployment (backend, Redis, TimescaleDB).
 *   `pyproject.toml`: Project metadata and Python package dependencies.
