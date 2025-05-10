@@ -1,246 +1,325 @@
 """
-Module for managing video data, including downloading and frame extraction.
+Module for managing video data, including downloading and frame extraction
+in batches suitable for synchronized multi-camera processing.
 """
 import os
 import asyncio
 from pathlib import Path
 import logging
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, AsyncGenerator
+import uuid
+from datetime import datetime, timezone
+from collections import defaultdict
+import numpy as np
+
+import cv2 # OpenCV for video processing
 
 from app.core.config import settings, VideoSetEnvironmentConfig
 from app.utils.asset_downloader import AssetDownloader
-from app.utils.video_processing import extract_frames_from_video_to_disk
+from app.common_types import CameraID, FrameBatch, FrameData
 
 logger = logging.getLogger(__name__)
 
-class VideoDataManagerService:
+class BatchedFrameProvider:
     """
-    Manages downloading videos and extracting frames for processing.
-    Checks for existing videos and frames to avoid redundant operations.
+    Provides frames from multiple video files in synchronized batches.
+    Each batch contains one frame from each video, corresponding to the same
+    temporal index.
     """
-    def __init__(self, asset_downloader: AssetDownloader):
+    def __init__(
+        self,
+        task_id: uuid.UUID,
+        video_paths_map: Dict[CameraID, Path], # CameraID -> Path to local video file
+        target_fps: int,
+        jpeg_quality: int, # Not used for frame providing, but kept for consistency if saving
+        loop_videos: bool = False # Whether to loop videos if they end
+    ):
+        self.task_id = task_id
+        self.video_paths_map = video_paths_map
+        self.target_fps = target_fps
+        self.loop_videos = loop_videos
+        
+        self.video_captures: Dict[CameraID, cv2.VideoCapture] = {}
+        self.video_actual_fps: Dict[CameraID, float] = {}
+        self.frame_skip_intervals: Dict[CameraID, int] = {}
+        self.frame_counters_read: Dict[CameraID, int] = defaultdict(int)
+        self.total_frames_in_video: Dict[CameraID, int] = {}
+        self.current_frame_index_processed_per_cam: Dict[CameraID, int] = defaultdict(int)
+
+        self._is_open = False
+        self._open_videos()
+
+    def _open_videos(self):
+        """Opens all video files using OpenCV VideoCapture."""
+        for cam_id, video_path in self.video_paths_map.items():
+            if not video_path.exists():
+                logger.error(f"[Task {self.task_id}][{cam_id}] Video file not found: {video_path}. Will skip this camera.")
+                continue
+            
+            cap = cv2.VideoCapture(str(video_path))
+            if not cap.isOpened():
+                logger.error(f"[Task {self.task_id}][{cam_id}] Could not open video: {video_path}. Will skip this camera.")
+                continue
+
+            self.video_captures[cam_id] = cap
+            actual_fps = cap.get(cv2.CAP_PROP_FPS)
+            self.video_actual_fps[cam_id] = actual_fps if actual_fps > 0 else 25.0 # Default if FPS read fails
+            self.total_frames_in_video[cam_id] = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+            skip_interval = 1
+            if self.target_fps > 0 and self.video_actual_fps[cam_id] > self.target_fps:
+                skip_interval = max(1, round(self.video_actual_fps[cam_id] / self.target_fps))
+            self.frame_skip_intervals[cam_id] = skip_interval
+            
+            logger.info(
+                f"[Task {self.task_id}][{cam_id}] Opened video {video_path.name}. "
+                f"Actual FPS: {self.video_actual_fps[cam_id]:.2f}, "
+                f"Target FPS: {self.target_fps}, Skip Interval: {skip_interval}, "
+                f"Total Frames: {self.total_frames_in_video[cam_id]}."
+            )
+        self._is_open = True
+
+    async def get_next_frame_batch(self) -> Tuple[FrameBatch, bool]:
         """
-        Initializes the VideoDataManagerService.
-
-        Args:
-            asset_downloader: An instance of AssetDownloader for fetching remote files.
-        """
-        self.asset_downloader = asset_downloader
-        self.video_sets_config: List[VideoSetEnvironmentConfig] = settings.VIDEO_SETS
-        self.local_video_dir: str = settings.LOCAL_VIDEO_DOWNLOAD_DIR
-        self.local_frame_dir: str = settings.LOCAL_FRAME_EXTRACTION_DIR
-        logger.info("VideoDataManagerService initialized.")
-
-    async def prepare_initial_frames_for_environment(
-        self, environment_id: str, target_fps: int, jpeg_quality: int
-    ) -> Dict[str, List[str]]:
-        """
-        Prepares initial frames for each camera in the specified environment.
-
-        This involves:
-        1. Identifying the first sub-video for each camera in the environment.
-        2. Checking if the sub-video already exists locally. If not, download it.
-        3. Checking if frames for this sub-video are already extracted locally.
-           If yes, use them (cache hit).
-        4. If frames are not cached, extract them from the local video.
-
-        Args:
-            environment_id: The ID of the environment (e.g., "campus", "factory").
-            target_fps: Target FPS for frame extraction.
-            jpeg_quality: Quality for saving JPEG frames.
+        Asynchronously reads the next frame from each video according to skip intervals
+        and returns them as a batch.
 
         Returns:
-            A dictionary mapping camera_id to a list of full paths of its extracted frames.
-            Example: {"c01": ["/path/to/frames/c01/frame_000000.jpg", ...], ...}
-            Returns an empty list for a camera if its video download or frame processing fails.
+            A tuple: (FrameBatch, bool indicating if any video still has frames).
+            FrameBatch: Dict mapping CameraID to Optional[FrameData (image_np, frame_pseudo_path)].
+                        None if a camera's video ended or failed to read.
+            bool: True if at least one video capture is still active and provided a frame,
+                  False if all videos have ended.
         """
-        logger.info(f"Preparing initial frames for environment: {environment_id}")
-        cam_frames_map: Dict[str, List[str]] = {}
+        if not self._is_open:
+            logger.warning(f"[Task {self.task_id}] Attempted to get frames, but provider is not open.")
+            return {}, False
+
+        current_batch: FrameBatch = {}
+        any_video_active = False
+        
+        tasks = []
+        for cam_id, cap in self.video_captures.items():
+            tasks.append(self._read_frame_for_camera(cam_id, cap))
+        
+        results = await asyncio.gather(*tasks)
+
+        for cam_id_res, frame_data_res in results:
+            current_batch[cam_id_res] = frame_data_res
+            if frame_data_res is not None:
+                any_video_active = True
+        
+        # If looping and all videos ended, try to reopen them (simplistic loop for now)
+        if not any_video_active and self.loop_videos and self.video_captures:
+            logger.info(f"[Task {self.task_id}] All videos ended, looping enabled. Re-opening videos.")
+            self.close() # Close current captures
+            self._open_videos() # Re-open
+            # Retry getting the first batch after re-opening
+            # This recursive call is okay if loop_videos is typically False or for short demos.
+            # For long-running loops, a more robust state reset is needed.
+            if self._is_open:
+                 return await self.get_next_frame_batch() # Get the first batch of the new loop
+            else: # Failed to re-open
+                 return {}, False
+
+
+        return current_batch, any_video_active
+
+    async def _read_frame_for_camera(self, cam_id: CameraID, cap: cv2.VideoCapture) -> Tuple[CameraID, Optional[FrameData]]:
+        """Helper to read a frame from a single camera respecting skip interval."""
+        # This function is synchronous internally but called via asyncio.gather
+        # cv2.VideoCapture.read() is blocking.
+        # To make this truly async per frame, each read needs to be in a thread.
+        # For now, asyncio.gather is used on these sync calls, meaning they block the event loop
+        # one by one when their turn comes in gather. This is okay if frame reads are fast.
+
+        frame_image_np: Optional[np.ndarray] = None
+        pseudo_frame_path = "" # Used for logging/identification
+
+        if cap.isOpened():
+            for _ in range(self.frame_skip_intervals[cam_id]):
+                ret, frame = await asyncio.to_thread(cap.read)
+                self.frame_counters_read[cam_id] += 1
+                if not ret:
+                    if self.loop_videos: # If looping, reset specific capture
+                        logger.debug(f"[Task {self.task_id}][{cam_id}] Video ended, will loop. Current read count: {self.frame_counters_read[cam_id]}.")
+                        # Simple reset: reopen this specific video
+                        # This part is tricky with async; for simplicity, we mark as ended for this batch
+                        # Looping is handled at the batch level for now.
+                        pass # Let the batch level handle looping
+                    break # Break from skip loop if video ends
+                frame_image_np = frame # Keep the last read frame within the skip window
+            
+            if frame_image_np is not None:
+                self.current_frame_index_processed_per_cam[cam_id] +=1
+                # Construct a pseudo path for identification based on video name and frame index
+                video_file_name = Path(self.video_paths_map[cam_id]).name
+                pseudo_frame_path = f"cam_{cam_id}/{video_file_name}/frame_{self.current_frame_index_processed_per_cam[cam_id]:06d}.jpg"
+                return cam_id, (frame_image_np, pseudo_frame_path)
+
+        # logger.debug(f"[Task {self.task_id}][{cam_id}] Video ended or failed to read frame.")
+        return cam_id, None
+
+
+    def close(self):
+        """Releases all video capture objects."""
+        logger.info(f"[Task {self.task_id}] Closing BatchedFrameProvider.")
+        for cam_id, cap in self.video_captures.items():
+            if cap.isOpened():
+                cap.release()
+                logger.debug(f"[Task {self.task_id}][{cam_id}] Released video capture.")
+        self.video_captures.clear()
+        self._is_open = False
+
+class VideoDataManagerService:
+    """
+    Manages downloading videos and providing frames in batches.
+    """
+    def __init__(self, asset_downloader: AssetDownloader):
+        self.asset_downloader = asset_downloader
+        self.video_sets_config: List[VideoSetEnvironmentConfig] = settings.VIDEO_SETS
+        self.local_video_dir_base: Path = Path(settings.LOCAL_VIDEO_DOWNLOAD_DIR)
+        # For task-specific subdirectories, e.g., ./downloaded_videos/<task_id>/...
+        logger.info("VideoDataManagerService initialized.")
+
+    async def download_sub_videos_for_environment_batch(
+        self, task_id: uuid.UUID, environment_id: str, sub_video_index: int # 0-indexed
+    ) -> Dict[CameraID, Path]:
+        """
+        Downloads a specific sub-video (by index) for all relevant cameras
+        in the given environment for a specific task.
+
+        Args:
+            task_id: The unique ID of the processing task.
+            environment_id: The environment (e.g., "campus").
+            sub_video_index: The 0-based index of the sub-video (e.g., 0 for "sub_video_01.mp4").
+
+        Returns:
+            A dictionary mapping CameraID to the local Path of the downloaded sub-video.
+            Empty dict if no videos found or downloads fail.
+        """
+        logger.info(
+            f"[Task {task_id}] Downloading sub_video index {sub_video_index} for env '{environment_id}'."
+        )
+        downloaded_video_paths: Dict[CameraID, Path] = {}
+        
+        task_specific_video_dir = self.local_video_dir_base / str(task_id)
+        task_specific_video_dir.mkdir(parents=True, exist_ok=True)
 
         cameras_in_env = [
             vs_config for vs_config in self.video_sets_config if vs_config.env_id == environment_id
         ]
 
         if not cameras_in_env:
-            logger.warning(f"No camera configurations found for environment: {environment_id}. Cannot prepare data.")
-            return cam_frames_map
+            logger.warning(f"[Task {task_id}] No camera configurations for environment: {environment_id}.")
+            return {}
 
-        download_tasks = []
-        # Stores metadata for each video, used to manage download and extraction logic
-        video_processing_metadata_list: List[Dict[str, Any]] = [] 
+        download_coroutines = []
+        video_metadata_for_download = [] # Store (cam_id, remote_key, local_path)
 
         for cam_config in cameras_in_env:
-            first_sub_video_idx = 1 # Process only the first sub-video as per current design
-            if cam_config.num_sub_videos < first_sub_video_idx:
+            if sub_video_index >= cam_config.num_sub_videos:
                 logger.warning(
-                    f"Camera {cam_config.cam_id} in env {environment_id} configured with "
-                    f"{cam_config.num_sub_videos} sub-videos, cannot get sub-video {first_sub_video_idx}."
+                    f"[Task {task_id}][{cam_config.cam_id}] Requested sub-video index {sub_video_index} "
+                    f"is out of bounds (total: {cam_config.num_sub_videos}). Skipping."
                 )
-                cam_frames_map[cam_config.cam_id] = [] # Mark as failed/skipped early
                 continue
 
-            video_filename = cam_config.sub_video_filename_pattern.format(idx=first_sub_video_idx)
+            # sub_video_filename_pattern uses 1-based indexing for {idx}
+            video_filename = cam_config.sub_video_filename_pattern.format(idx=sub_video_index + 1)
             remote_video_key = f"{cam_config.remote_base_key.strip('/')}/{video_filename}"
-
-            local_cam_video_download_dir = Path(self.local_video_dir) / environment_id / cam_config.cam_id
-            local_video_path = local_cam_video_download_dir / video_filename
-            # Frame directory is specific to this video file's stem
-            local_cam_frame_extraction_dir = Path(self.local_frame_dir) / environment_id / cam_config.cam_id / Path(video_filename).stem
-
+            
+            # Store in task_specific_video_dir / environment_id / camera_id / video_filename
+            local_cam_video_download_dir = task_specific_video_dir / environment_id / cam_config.cam_id
             local_cam_video_download_dir.mkdir(parents=True, exist_ok=True)
-            # Note: local_cam_frame_extraction_dir is created later if extraction occurs or checked if caching.
+            local_video_path = local_cam_video_download_dir / video_filename
 
-            current_video_info = {
-                "cam_id": cam_config.cam_id,
-                "local_video_path": str(local_video_path),
-                "local_frame_dir": str(local_cam_frame_extraction_dir),
-                "frame_prefix": f"{Path(video_filename).stem}_frame_" # e.g., "sub_video_01_frame_"
-            }
-            video_processing_metadata_list.append(current_video_info)
+            video_metadata_for_download.append({
+                "cam_id": CameraID(cam_config.cam_id),
+                "remote_key": remote_video_key,
+                "local_path": local_video_path
+            })
 
             if not local_video_path.exists():
-                logger.info(f"[{environment_id}/{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
-                download_tasks.append(
+                logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
+                download_coroutines.append(
                     self.asset_downloader.download_file_from_dagshub(
                         remote_s3_key=remote_video_key,
                         local_destination_path=str(local_video_path)
                     )
                 )
             else:
-                logger.info(f"[{environment_id}/{cam_config.cam_id}] Video already exists locally: {local_video_path}")
-                download_tasks.append(asyncio.sleep(0, result=True)) # Simulate non-blocking success
-
-        # Run downloads concurrently
-        download_results = []
-        if download_tasks:
-            download_results = await asyncio.gather(*download_tasks, return_exceptions=True)
-        else: 
-            logger.info(f"[{environment_id}] No video downloads were queued (e.g., all videos skipped or no cameras).")
-
-
-        # --- Frame Processing Phase (Cache Check & New Extraction) ---
-        actual_extraction_coroutines = [] 
-        # Stores how to get frames for each video that was successfully available (downloaded or existed)
-        cam_frame_sourcing_references = [] 
-
-        successful_downloads_count = 0
-        failed_downloads_count = 0
+                logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
+                # Simulate successful coroutine for asyncio.gather
+                async def _mock_download_success(): return True
+                download_coroutines.append(_mock_download_success())
         
-        for i, video_meta in enumerate(video_processing_metadata_list):
-            cam_id = video_meta['cam_id']
-            
-            if i >= len(download_results): 
-                 logger.warning(f"[{environment_id}/{cam_id}] Mismatch: No download result for video metadata. Skipping.")
-                 cam_frames_map[cam_id] = [] # Ensure it's marked
-                 continue
+        if not download_coroutines:
+            logger.info(f"[Task {task_id}] No videos to download for sub-video index {sub_video_index}, env '{environment_id}'.")
+            return {}
 
-            download_result = download_results[i]
+        download_results = await asyncio.gather(*download_coroutines, return_exceptions=True)
 
-            if isinstance(download_result, Exception) or download_result is not True:
-                logger.error(f"[{environment_id}/{cam_id}] Download failed for video {video_meta['local_video_path']}: {download_result}")
-                failed_downloads_count += 1
-                cam_frames_map[cam_id] = [] # Record failure
-                continue
-            
-            # Video is successfully downloaded or already existed
-            successful_downloads_count +=1
-            logger.info(f"[{environment_id}/{cam_id}] Video ready: {video_meta['local_video_path']}. Checking for existing frames...")
-
-            frame_dir_path = Path(video_meta["local_frame_dir"])
-            frame_prefix = video_meta["frame_prefix"]
-            existing_frames = []
-
-            if frame_dir_path.is_dir():
-                # Glob for .jpg files matching the naming convention and sort them
-                existing_frames = sorted([str(f) for f in frame_dir_path.glob(f"{frame_prefix}*.jpg")])
-            
-            if existing_frames:
-                logger.info(f"[{environment_id}/{cam_id}] Found {len(existing_frames)} existing frames in {frame_dir_path}. Using cached frames.")
-                cam_frame_sourcing_references.append({
-                    "cam_id": cam_id,
-                    "status": "cached", # Indicates frames were found in cache
-                    "data": (existing_frames, f"Used {len(existing_frames)} cached frames from {frame_dir_path}.")
-                })
+        for i, meta in enumerate(video_metadata_for_download):
+            cam_id, local_path = meta["cam_id"], meta["local_path"]
+            result = download_results[i]
+            if isinstance(result, Exception) or not result:
+                logger.error(
+                    f"[Task {task_id}][{cam_id}] Failed to download {meta['remote_key']}: {result}"
+                )
             else:
-                # Ensure frame directory exists before queueing extraction
-                frame_dir_path.mkdir(parents=True, exist_ok=True)
-                logger.info(f"[{environment_id}/{cam_id}] No cached frames found in {frame_dir_path}. Queueing new frame extraction.")
-                coro = asyncio.to_thread(
-                    extract_frames_from_video_to_disk,
-                    video_path=video_meta["local_video_path"],
-                    output_folder=str(frame_dir_path),
-                    frame_filename_prefix=frame_prefix,
-                    target_fps=target_fps,
-                    jpeg_quality=jpeg_quality
-                )
-                actual_extraction_coroutines.append(coro)
-                cam_frame_sourcing_references.append({
-                    "cam_id": cam_id,
-                    "status": "needs_extraction", # Indicates frames need to be extracted
-                    "future_index": len(actual_extraction_coroutines) - 1 # Index in actual_extraction_coroutines
-                })
+                downloaded_video_paths[cam_id] = local_path
         
         logger.info(
-            f"Download summary for env '{environment_id}': {successful_downloads_count} videos ready for frame processing, "
-            f"{failed_downloads_count} failed/skipped video downloads."
+            f"[Task {task_id}] Downloaded {len(downloaded_video_paths)} videos for sub-video index {sub_video_index}."
+        )
+        return downloaded_video_paths
+
+    def get_batched_frame_provider(
+        self,
+        task_id: uuid.UUID,
+        local_video_paths_map: Dict[CameraID, Path],
+        loop_videos: bool = False
+    ) -> BatchedFrameProvider:
+        """
+        Creates and returns a BatchedFrameProvider for the given set of local video files.
+        """
+        logger.info(f"[Task {task_id}] Creating BatchedFrameProvider for {len(local_video_paths_map)} videos.")
+        return BatchedFrameProvider(
+            task_id=task_id,
+            video_paths_map=local_video_paths_map,
+            target_fps=settings.TARGET_FPS,
+            jpeg_quality=settings.FRAME_JPEG_QUALITY, # Not directly used by provider, but for consistency
+            loop_videos=loop_videos
         )
 
-        # Run new extractions if any are needed
-        newly_extracted_frame_results = []
-        if actual_extraction_coroutines:
-            logger.info(f"[{environment_id}] Starting {len(actual_extraction_coroutines)} new frame extraction tasks.")
-            newly_extracted_frame_results = await asyncio.gather(*actual_extraction_coroutines, return_exceptions=True)
-            logger.info(f"[{environment_id}] Finished {len(actual_extraction_coroutines)} new frame extraction tasks.")
+    async def cleanup_task_data(self, task_id: uuid.UUID):
+        """Removes downloaded video data for a specific task."""
+        task_specific_video_dir = self.local_video_dir_base / str(task_id)
+        if task_specific_video_dir.exists():
+            try:
+                # Use asyncio.to_thread for shutil.rmtree if it's blocking
+                import shutil
+                await asyncio.to_thread(shutil.rmtree, task_specific_video_dir)
+                logger.info(f"[Task {task_id}] Cleaned up downloaded video data from {task_specific_video_dir}.")
+            except Exception as e:
+                logger.error(f"[Task {task_id}] Error cleaning up task data {task_specific_video_dir}: {e}", exc_info=True)
         else:
-            logger.info(f"[{environment_id}] No new frame extractions were needed (all cached or downloads failed).")
+            logger.info(f"[Task {task_id}] No video data directory found at {task_specific_video_dir} to cleanup.")
 
-        # Populate cam_frames_map using the references
-        for ref in cam_frame_sourcing_references:
-            cam_id = ref["cam_id"]
-            if ref["status"] == "cached":
-                frames, msg = ref["data"]
-                cam_frames_map[cam_id] = frames
-                # Message for cached frames already logged when found
-            elif ref["status"] == "needs_extraction":
-                future_idx = ref["future_index"]
-                if future_idx < len(newly_extracted_frame_results):
-                    result = newly_extracted_frame_results[future_idx]
-                    if isinstance(result, Exception):
-                        logger.error(f"[{environment_id}/{cam_id}] Frame extraction task failed: {result}", exc_info=True)
-                        cam_frames_map[cam_id] = []
-                    elif isinstance(result, tuple) and len(result) == 2:
-                        frames, msg = result
-                        cam_frames_map[cam_id] = frames
-                        logger.info(f"[{environment_id}/{cam_id}] Frame extraction successful. {msg}")
-                        if not frames: # Extraction succeeded but returned no paths
-                            logger.warning(f"[{environment_id}/{cam_id}] Extraction reported success but returned no frame paths.")
-                    else: # Should not happen if extract_frames_from_video_to_disk is consistent
-                        logger.error(f"[{environment_id}/{cam_id}] Unexpected result type from extraction task: {type(result)}")
-                        cam_frames_map[cam_id] = []
-                else: # Should not happen if indexing logic is correct
-                    logger.error(f"[{environment_id}/{cam_id}] Logic error: Mismatch in extraction results index for future_index {future_idx}.")
-                    cam_frames_map[cam_id] = []
-            
-            # Safety net: ensure cam_id from references is in map, even if with empty list
-            if cam_id not in cam_frames_map: 
-                logger.warning(f"[{environment_id}/{cam_id}] Cam ID from references was not added to cam_frames_map. Setting to empty list.")
-                cam_frames_map[cam_id] = []
-
-        # Ensure all originally configured cameras for the env (that weren't skipped early due to config) have an entry
+    def get_max_sub_videos_for_environment(self, environment_id: str) -> int:
+        """
+        Determines the maximum number of sub-videos any camera in the specified
+        environment has. This helps determine how many sub-video batches to process.
+        Returns 0 if environment or cameras not found.
+        """
+        max_subs = 0
+        cameras_in_env = [
+            vs_config for vs_config in self.video_sets_config if vs_config.env_id == environment_id
+        ]
+        if not cameras_in_env:
+            return 0
         for cam_config in cameras_in_env:
-            if cam_config.cam_id not in cam_frames_map:
-                # This case implies the camera was skipped before even video_processing_metadata_list was populated
-                # or some other very early exit for this cam_id. It should already have [] from the initial loop.
-                logger.debug(
-                    f"[{environment_id}/{cam_config.cam_id}] Ensuring entry in map for camera. "
-                    "It was likely skipped early or already handled."
-                )
-                # If it's missing (shouldn't be if initial loop is correct), add empty list.
-                if cam_config.cam_id not in cam_frames_map : cam_frames_map[cam_config.cam_id] = []
-
-
-        logger.info(
-            f"Finished preparing initial frames for environment: {environment_id}. "
-            f"Frame data map (cam_id: num_frames): { {k: f'{len(v)} frames' for k, v in cam_frames_map.items()} }"
-        )
-        return cam_frames_map
+            if cam_config.num_sub_videos > max_subs:
+                max_subs = cam_config.num_sub_videos
+        return max_subs
