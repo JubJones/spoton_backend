@@ -45,42 +45,44 @@ class Settings(BaseSettings):
     ]
 
     # --- NEW: Handoff and Detailed Camera Configuration ---
-    # This would ideally be loaded from YAML per environment/scene as in POC.
-    # For this example, we'll define it directly. Key is (environment_id, camera_id_str)
+    # Homography matrix paths are relative to WEIGHTS_DIR/homography_points/
+    # Example: homography_points_c09_scene_factory.npz if WEIGHTS_DIR="./weights"
     CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {
         # Campus Example (c01, c02, c03, c05 from VIDEO_SETS)
         ("campus", "c01"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c02"), target_entry_area="left_side"),
             ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c03"), target_entry_area="top_side"),
-        ]),
+        ], homography_matrix_path="homography_points_c01_scene_campus.npz"),
         ("campus", "c02"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c01"), target_entry_area="right_side"),
             ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c05"), target_entry_area="top_right"),
-        ]),
+        ], homography_matrix_path="homography_points_c02_scene_campus.npz"),
         ("campus", "c03"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c01"), target_entry_area="bottom_side"),
-        ]),
+        ], homography_matrix_path="homography_points_c03_scene_campus.npz"),
          ("campus", "c05"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c02"), target_entry_area="bottom_right"),
-        ]),
+        ], homography_matrix_path="homography_points_c05_scene_campus.npz"),
         # Factory Example (c09, c12, c13, c16 from VIDEO_SETS)
+        # Using "factory" as the scene_id part of the filename, matching env_id
         ("factory", "c09"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c12"), target_entry_area="left_corridor"),
-        ]),
+        ], homography_matrix_path="homography_points_c09_scene_factory.npz"),
         ("factory", "c12"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c09"), target_entry_area="right_corridor"),
             ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c13"), target_entry_area="entrance_top"),
-        ]),
+        ], homography_matrix_path="homography_points_c12_scene_factory.npz"),
         ("factory", "c13"): CameraHandoffDetailConfig(exit_rules=[
              ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c12"), target_entry_area="exit_bottom"),
              ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c16"), target_entry_area="left_door"),
-        ]),
+        ], homography_matrix_path="homography_points_c13_scene_factory.npz"),
         ("factory", "c16"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c13"), target_entry_area="right_door"),
-        ]),
+        ], homography_matrix_path="homography_points_c16_scene_factory.npz"),
     }
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40, description="Min BBox area ratio in an exit quadrant to trigger handoff.")
-    # Note: Frame shapes are determined dynamically in MultiCameraFrameProcessor now.
+    HOMOGRAPHY_SUBDIR: str = Field(default="homography_points", description="Subdirectory under WEIGHTS_DIR for homography files.")
+
 
     # --- Original `POSSIBLE_CAMERA_OVERLAPS` is still useful for the general ReID filter ---
     # This defines general spatial relationships, while ExitRules define directional handoffs.
@@ -142,6 +144,11 @@ class Settings(BaseSettings):
         reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
         return reid_weights_file_path.resolve()
     
+    @property
+    def resolved_homography_base_path(self) -> Path:
+        """Returns the resolved base path for homography files."""
+        return Path(self.WEIGHTS_DIR) / self.HOMOGRAPHY_SUBDIR
+
     @property
     def normalized_possible_camera_overlaps(self) -> Set[Tuple[CameraID, CameraID]]: # Return Set for faster lookups
         """Returns a normalized list of camera overlaps (sorted tuples)."""

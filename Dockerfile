@@ -1,4 +1,3 @@
-# ---- Base Stage ----
 # Using a specific Python version for better reproducibility
 FROM python:3.9.18-bullseye as base
 

@@ -28,32 +28,35 @@ class TaskStatusResponse(BaseModel):
 
 # --- WebSocket Message Schemas ---
 
-class MapCoordinates(BaseModel):
-    """Represents coordinates on a 2D map (ignored for now, but kept for structure)."""
-    x: Optional[float] = None
-    y: Optional[float] = None
-
-class TrackedPersonData(BaseModel):
-    """Data for a single tracked person in a frame."""
-    track_id: int # The temporary track ID assigned by the intra-camera tracker
-    global_person_id: Optional[str] = Field(None, description="Globally unique ID assigned by Re-ID (null if not identified).")
-    bbox_img: List[float] = Field(..., description="Bounding box in image coordinates [x1, y1, x2, y2]")
+class TrackedPersonData(BaseModel): # Renamed for clarity and to match JSON structure
+    """Data for a single tracked person in a frame for WebSocket output."""
+    track_id: int # The temporary track ID from the intra-camera tracker
+    global_id: Optional[str] = Field(None, description="Globally unique ID assigned by Re-ID (null if not identified).")
+    bbox_xyxy: List[float] = Field(..., description="Bounding box in image coordinates [x1, y1, x2, y2]") # Changed name for JSON match
     confidence: Optional[float] = Field(None, description="Detection confidence score.")
-    # map_coordinates: Optional[MapCoordinates] = None # Keep optional, but ignore for now
+    class_id: Optional[int] = Field(None, description="Class ID of the detection (e.g., 1 for person).") # Added class_id
+    map_coords: Optional[List[float]] = Field(None, description="Projected [X, Y] coordinates on the map. Null if not available.") # Changed name
 
-class WebSocketTrackingMessage(BaseModel):
-    """Message pushed via WebSocket containing tracking data for a frame."""
-    type: str = Field(default="tracking_update", description="Type of WebSocket message.")
-    payload: Dict[str, Any] = Field(..., description="The actual message content.")
+class CameraTracksData(BaseModel): # New model for per-camera data in WebSocket
+    """Holds tracking data for a single camera in a frame for WebSocket output."""
+    image_source: str = Field(..., description="Filename of the image source for this camera (e.g., '000000.jpg').")
+    tracks: List[TrackedPersonData] = Field(default_factory=list)
 
-# --- Analytics Schemas (Keep as placeholders) ---
-class TrajectoryPoint(BaseModel):
-    timestamp: datetime
-    camera_id: str
-    map_x: float
-    map_y: float
-    bbox_img: Optional[List[float]] = None
 
-class TrajectoryResponse(BaseModel):
-    global_person_id: str
-    trajectory: List[TrajectoryPoint]
+class WebSocketTrackingMessagePayload(BaseModel): # Specific payload for tracking_update
+    """Payload for the 'tracking_update' WebSocket message, matching JSON structure."""
+    frame_index: int = Field(..., description="0-indexed frame number for the scene.")
+    scene_id: str = Field(..., description="Identifier for the scene (e.g., 's10').")
+    timestamp_processed_utc: str = Field(..., description="ISO UTC timestamp of when the frame was processed.")
+    cameras: Dict[str, CameraTracksData] # Keyed by CameraID string (e.g., "c09")
+
+
+# Generic WebSocket message structure
+class WebSocketMessage(BaseModel):
+    """Generic structure for messages pushed via WebSocket."""
+    type: str = Field(..., description="Type of WebSocket message (e.g., 'tracking_update', 'status_update').")
+    payload: Dict[str, Any] = Field(..., description="The actual message content, structure depends on 'type'.")
+
+# Example for the structure that NotificationService will send for tracking updates:
+# It will construct a dictionary for the payload based on WebSocketTrackingMessagePayload
+# and then wrap it in WebSocketMessage.
