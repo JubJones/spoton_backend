@@ -34,10 +34,12 @@ class Settings(BaseSettings):
 
     # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
+        # --- Campus (s37) Environment - Commented Out ---
+        # VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
+        # VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
+        # VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
+        # VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
+        # --- Factory (s14) Environment ---
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="factory", cam_id="c09", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c12", env_id="factory", cam_id="c12", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="factory", cam_id="c13", num_sub_videos=4),
@@ -45,46 +47,59 @@ class Settings(BaseSettings):
     ]
 
     # --- Handoff and Detailed Camera Configuration ---
-    # Homography matrix paths are now relative to HOMOGRAPHY_DATA_DIR
+    # Homography matrix paths are relative to HOMOGRAPHY_DATA_DIR
+    # For factory (s14 videos), homography files refer to scene s10.
     CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {
-        ("campus", "c01"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c02"), target_entry_area="left_side"),
-            ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c03"), target_entry_area="top_side"),
-        ], homography_matrix_path="homography_points_c01_scene_campus.npz"),
-        ("campus", "c02"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c01"), target_entry_area="right_side"),
-            ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c05"), target_entry_area="top_right"),
-        ], homography_matrix_path="homography_points_c02_scene_campus.npz"),
-        ("campus", "c03"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c01"), target_entry_area="bottom_side"),
-        ], homography_matrix_path="homography_points_c03_scene_campus.npz"),
-         ("campus", "c05"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c02"), target_entry_area="bottom_right"),
-        ], homography_matrix_path="homography_points_c05_scene_campus.npz"),
-        ("factory", "c09"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c12"), target_entry_area="left_corridor"),
-        ], homography_matrix_path="homography_points_c09_scene_factory.npz"),
-        ("factory", "c12"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c09"), target_entry_area="right_corridor"),
-            ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c13"), target_entry_area="entrance_top"),
-        ], homography_matrix_path="homography_points_c12_scene_factory.npz"),
-        ("factory", "c13"): CameraHandoffDetailConfig(exit_rules=[
-             ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c12"), target_entry_area="exit_bottom"),
-             ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c16"), target_entry_area="left_door"),
-        ], homography_matrix_path="homography_points_c13_scene_factory.npz"),
-        ("factory", "c16"): CameraHandoffDetailConfig(exit_rules=[
-            ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c13"), target_entry_area="right_door"),
-        ], homography_matrix_path="homography_points_c16_scene_factory.npz"),
+        # --- Campus Environment - Commented Out ---
+        # ("campus", "c01"): CameraHandoffDetailConfig(exit_rules=[
+        #     ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c02"), target_entry_area="left_side"),
+        #     ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c03"), target_entry_area="top_side"),
+        # ], homography_matrix_path="homography_points_c01_scene_campus.npz"), # Actual file might be _scene_s37 based on video
+        # ("campus", "c02"): CameraHandoffDetailConfig(exit_rules=[
+        #     ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c01"), target_entry_area="right_side"),
+        #     ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c05"), target_entry_area="top_right"),
+        # ], homography_matrix_path="homography_points_c02_scene_campus.npz"),
+        # ("campus", "c03"): CameraHandoffDetailConfig(exit_rules=[
+        #     ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c01"), target_entry_area="bottom_side"),
+        # ], homography_matrix_path="homography_points_c03_scene_campus.npz"),
+        #  ("campus", "c05"): CameraHandoffDetailConfig(exit_rules=[
+        #     ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c02"), target_entry_area="bottom_right"),
+        # ], homography_matrix_path="homography_points_c05_scene_campus.npz"),
+        # --- Factory Environment (Videos: s14, Homography Scene: s10) ---
+        ("factory", "c09"): CameraHandoffDetailConfig(
+            exit_rules=[
+                ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c13"), target_entry_area="upper right", notes="wait; overlap c13/c16 possible"),
+            ],
+            homography_matrix_path="homography_points_c09_scene_s14.npz" # Aligned with actual file
+        ),
+        ("factory", "c12"): CameraHandoffDetailConfig(
+            exit_rules=[
+                ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c13"), target_entry_area="upper left", notes="overlap c13 possible"),
+            ],
+            homography_matrix_path="homography_points_c12_scene_s14.npz" # Aligned with actual file
+        ),
+        ("factory", "c13"): CameraHandoffDetailConfig(
+            exit_rules=[
+                 ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c09"), target_entry_area="down", notes="wait; overlap c09 possible"),
+                 ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c12"), target_entry_area="upper left", notes="overlap c12 possible"),
+            ],
+            homography_matrix_path="homography_points_c13_scene_s14.npz" # Aligned with actual file
+        ),
+        ("factory", "c16"): CameraHandoffDetailConfig(
+            exit_rules=[], # No exit rules defined from c16 in user example
+            homography_matrix_path="homography_points_c16_scene_s14.npz" # Aligned with actual file
+        ),
     }
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40, description="Min BBox area ratio in an exit quadrant to trigger handoff.")
-    # MODIFIED: Homography data directory path
     HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_points", description="Directory relative to app root for homography .npz files.")
 
 
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(
         default_factory=lambda: [
-            ("c01", "c02"), ("c01", "c03"),
-            ("c02", "c05"),
+            # --- Campus Overlaps - Commented Out ---
+            # ("c01", "c02"), ("c01", "c03"),
+            # ("c02", "c05"),
+            # --- Factory Overlaps ---
             ("c09", "c12"), ("c12", "c13"), ("c13", "c16")
         ],
         description="List of camera ID pairs that have potential visual overlap."
@@ -141,7 +156,6 @@ class Settings(BaseSettings):
     @property
     def resolved_homography_base_path(self) -> Path:
         """Returns the resolved base path for homography files, relative to app root."""
-        # Path(self.HOMOGRAPHY_DATA_DIR) will be relative to /app if HOMOGRAPHY_DATA_DIR is like "./homography_points"
         return Path(self.HOMOGRAPHY_DATA_DIR).resolve()
 
     @property
