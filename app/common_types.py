@@ -1,9 +1,9 @@
 """
 Module for shared type aliases and data structures used across the application.
 """
-from typing import Dict, Any, Tuple, Optional, List, NewType
+from typing import Dict, Any, Tuple, Optional, List, NewType, NamedTuple, Set, Callable
 import numpy as np
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 CameraID = NewType("CameraID", str)
@@ -33,6 +33,7 @@ class TrackedObjectData(BaseModel):
     bbox_xyxy: BoundingBoxXYXY
     confidence: Optional[float] = None
     feature_vector: Optional[List[float]] = None # Optional: if features are explicitly passed
+    map_coords: Optional[Tuple[float, float]] = None # Added from POC for BEV map compatibility
 
     class Config:
         arbitrary_types_allowed = True
@@ -45,3 +46,52 @@ class FrameProcessingUpdatePayload(BaseModel):
     frame_path: str # Path of the frame being reported
     timestamp_utc: str # ISO format timestamp
     tracked_objects: List[TrackedObjectData]
+
+
+# --- Handoff Logic Types (Inspired by POC) ---
+ExitDirection = NewType("ExitDirection", str) # e.g., 'up', 'down', 'left', 'right'
+QuadrantName = NewType("QuadrantName", str)   # e.g., 'upper_left', 'lower_right'
+
+class ExitRuleModel(BaseModel):
+    """
+    Defines a rule for triggering a handoff based on exit direction.
+    Pydantic model version of POC's ExitRule.
+    """
+    direction: ExitDirection = Field(..., description="Direction rule applies to (e.g., 'down', 'left').")
+    target_cam_id: CameraID = Field(..., description="The camera ID this rule targets for handoff.")
+    target_entry_area: str = Field(..., description="Descriptive name of the entry area in the target camera (e.g., 'upper_right').")
+    notes: Optional[str] = Field(None, description="Optional notes about this rule.")
+
+class CameraHandoffDetailConfig(BaseModel):
+    """
+    Detailed configuration for a camera, including handoff rules and frame shape.
+    Used internally by settings, keyed by (env_id, cam_id).
+    """
+    # frame_shape: Tuple[int, int] # (height, width) - Decided to get this dynamically from frame
+    exit_rules: List[ExitRuleModel] = Field(default_factory=list)
+    # Add other camera-specific details if needed, e.g., homography matrix path or pre-loaded matrix
+
+class HandoffTriggerInfo(NamedTuple):
+    """
+    Holds information about a triggered handoff event for a specific track.
+    Directly from POC.
+    """
+    source_track_key: TrackKey
+    rule: ExitRuleModel # Use the Pydantic model
+    source_bbox: BoundingBoxXYXY # BBox that triggered the rule in the source camera
+
+
+# --- Map for Quadrant Calculation ---
+QUADRANT_REGIONS_TEMPLATE: Dict[QuadrantName, Callable[[int, int], Tuple[int, int, int, int]]] = {
+    QuadrantName('upper_left'): lambda W, H: (0, 0, W // 2, H // 2),
+    QuadrantName('upper_right'): lambda W, H: (W // 2, 0, W, H // 2),
+    QuadrantName('lower_left'): lambda W, H: (0, H // 2, W // 2, H),
+    QuadrantName('lower_right'): lambda W, H: (W // 2, H // 2, W, H),
+}
+
+DIRECTION_TO_QUADRANTS_MAP: Dict[ExitDirection, List[QuadrantName]] = {
+    ExitDirection('up'): [QuadrantName('upper_left'), QuadrantName('upper_right')],
+    ExitDirection('down'): [QuadrantName('lower_left'), QuadrantName('lower_right')],
+    ExitDirection('left'): [QuadrantName('upper_left'), QuadrantName('lower_left')],
+    ExitDirection('right'): [QuadrantName('upper_right'), QuadrantName('lower_right')],
+}
