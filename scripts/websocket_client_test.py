@@ -1,10 +1,9 @@
-# FILE: scripts/websocket_client_test.py
 """
 Test client for SpotOn backend.
 """
 import asyncio
 import httpx
-import websockets # type: ignore
+import websockets
 import json
 import logging
 import sys
