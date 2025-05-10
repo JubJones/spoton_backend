@@ -1,8 +1,8 @@
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
-from typing import List, Optional, Dict, Tuple, Set # Added Set
+from typing import List, Optional, Dict, Tuple, Set
 from pathlib import Path
-from app.common_types import CameraID, ExitRuleModel, ExitDirection, CameraHandoffDetailConfig # MODIFIED
+from app.common_types import CameraID, ExitRuleModel, ExitDirection, CameraHandoffDetailConfig
 
 # Define a model for individual video set configurations
 class VideoSetEnvironmentConfig(BaseModel):
@@ -32,23 +32,21 @@ class Settings(BaseSettings):
     LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
     LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
 
-    # Video Source Definitions (unchanged, defines where to get videos from)
+    # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="campus", cam_id="c05", num_sub_videos=4), # Assuming c05 is part of campus
+        VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="campus", cam_id="c05", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="factory", cam_id="c09", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c12", env_id="factory", cam_id="c12", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="factory", cam_id="c13", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c16", env_id="factory", cam_id="c16", num_sub_videos=4),
     ]
 
-    # --- NEW: Handoff and Detailed Camera Configuration ---
-    # Homography matrix paths are relative to WEIGHTS_DIR/homography_points/
-    # Example: homography_points_c09_scene_factory.npz if WEIGHTS_DIR="./weights"
+    # --- Handoff and Detailed Camera Configuration ---
+    # Homography matrix paths are now relative to HOMOGRAPHY_DATA_DIR
     CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {
-        # Campus Example (c01, c02, c03, c05 from VIDEO_SETS)
         ("campus", "c01"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c02"), target_entry_area="left_side"),
             ExitRuleModel(direction=ExitDirection("down"), target_cam_id=CameraID("c03"), target_entry_area="top_side"),
@@ -63,8 +61,6 @@ class Settings(BaseSettings):
          ("campus", "c05"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("up"), target_cam_id=CameraID("c02"), target_entry_area="bottom_right"),
         ], homography_matrix_path="homography_points_c05_scene_campus.npz"),
-        # Factory Example (c09, c12, c13, c16 from VIDEO_SETS)
-        # Using "factory" as the scene_id part of the filename, matching env_id
         ("factory", "c09"): CameraHandoffDetailConfig(exit_rules=[
             ExitRuleModel(direction=ExitDirection("right"), target_cam_id=CameraID("c12"), target_entry_area="left_corridor"),
         ], homography_matrix_path="homography_points_c09_scene_factory.npz"),
@@ -81,12 +77,10 @@ class Settings(BaseSettings):
         ], homography_matrix_path="homography_points_c16_scene_factory.npz"),
     }
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40, description="Min BBox area ratio in an exit quadrant to trigger handoff.")
-    HOMOGRAPHY_SUBDIR: str = Field(default="homography_points", description="Subdirectory under WEIGHTS_DIR for homography files.")
+    # MODIFIED: Homography data directory path
+    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_points", description="Directory relative to app root for homography .npz files.")
 
 
-    # --- Original `POSSIBLE_CAMERA_OVERLAPS` is still useful for the general ReID filter ---
-    # This defines general spatial relationships, while ExitRules define directional handoffs.
-    # The handoff filter in ReID will use `target_cam_id` from the rule and its overlaps.
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(
         default_factory=lambda: [
             ("c01", "c02"), ("c01", "c03"),
@@ -110,14 +104,14 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "spotondb"
     DATABASE_URL: Optional[str] = None
 
-    # --- AI Model & Pipeline Configuration ---
+    # AI Model & Pipeline Configuration
     DETECTOR_TYPE: str = "fasterrcnn"
     PERSON_CLASS_ID: int = 1
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
     DETECTION_USE_AMP: bool = False
 
     TRACKER_TYPE: str = "botsort"
-    WEIGHTS_DIR: str = "./weights"
+    WEIGHTS_DIR: str = "./weights" # This is for model weights like .pt files
     REID_WEIGHTS_PATH: str = "clip_market1501.pt"
     TRACKER_HALF_PRECISION: bool = False
     TRACKER_PER_CLASS: bool = False
@@ -129,7 +123,7 @@ class Settings(BaseSettings):
     REID_MAIN_GALLERY_PRUNE_INTERVAL_FRAMES: int = 500
     REID_MAIN_GALLERY_PRUNE_THRESHOLD_FRAMES: int = REID_LOST_TRACK_BUFFER_FRAMES * 2
 
-    TARGET_FPS: int = 23 # Target FPS for video processing and frame sampling
+    TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 90
 
     model_config = {
@@ -140,19 +134,18 @@ class Settings(BaseSettings):
 
     @property
     def resolved_reid_weights_path(self) -> Path:
-        weights_dir_in_container = Path(self.WEIGHTS_DIR)
+        weights_dir_in_container = Path(self.WEIGHTS_DIR) # e.g., /app/weights
         reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
         return reid_weights_file_path.resolve()
     
     @property
     def resolved_homography_base_path(self) -> Path:
-        """Returns the resolved base path for homography files."""
-        return Path(self.WEIGHTS_DIR) / self.HOMOGRAPHY_SUBDIR
+        """Returns the resolved base path for homography files, relative to app root."""
+        # Path(self.HOMOGRAPHY_DATA_DIR) will be relative to /app if HOMOGRAPHY_DATA_DIR is like "./homography_points"
+        return Path(self.HOMOGRAPHY_DATA_DIR).resolve()
 
     @property
-    def normalized_possible_camera_overlaps(self) -> Set[Tuple[CameraID, CameraID]]: # Return Set for faster lookups
-        """Returns a normalized list of camera overlaps (sorted tuples)."""
-        # Using Set for potentially faster lookups in _get_relevant_handoff_cams
+    def normalized_possible_camera_overlaps(self) -> Set[Tuple[CameraID, CameraID]]:
         return {tuple(sorted((CameraID(c1), CameraID(c2)))) for c1, c2 in self.POSSIBLE_CAMERA_OVERLAPS}
 
 settings = Settings()
