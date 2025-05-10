@@ -1,74 +1,144 @@
+"""
+Module for downloading assets from S3-compatible storage.
+"""
 import os
 import asyncio
 from pathlib import Path
 import logging
-from typing import Optional # Added for clarity with s3_endpoint_url
-from dagshub import get_repo_bucket_client
-from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
+from typing import Optional
 
-# Note: settings import is removed as it's now expected to be passed during instantiation
-# from app.core.config import settings
+import boto3 # For S3 communication
+from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
 
 logger = logging.getLogger(__name__)
 
-class AssetDownloader: # Renamed class for clarity as a utility
+class AssetDownloader:
     """
-    Utility class for downloading assets, specifically from DagsHub.
+    Utility class for downloading assets from S3-compatible storage (e.g., DagsHub, AWS S3).
     """
-    def __init__(self, dagshub_repo_owner: str, dagshub_repo_name: str, s3_endpoint_url: Optional[str] = None):
-        self.dagshub_repo_owner = dagshub_repo_owner
-        self.dagshub_repo_name = dagshub_repo_name
-        self.s3_endpoint_url = s3_endpoint_url
-        self.dagshub_full_repo_name = f"{dagshub_repo_owner}/{dagshub_repo_name}"
-
-    async def download_file_from_dagshub(
-        self,
-        remote_s3_key: str,
-        local_destination_path: str,
-        dagshub_bucket_name_override: Optional[str] = None
-    ) -> bool:
+    def __init__(self,
+                 s3_endpoint_url: Optional[str],
+                 aws_access_key_id: Optional[str],
+                 aws_secret_access_key: Optional[str],
+                 s3_bucket_name: str):
         """
-        Downloads a file from DagsHub using its S3-like interface.
+        Initializes the AssetDownloader with S3 client configuration.
 
         Args:
-            remote_s3_key: The key (path) of the file within the DagsHub repository's DVC storage.
+            s3_endpoint_url: The S3 endpoint URL.
+            aws_access_key_id: AWS Access Key ID.
+            aws_secret_access_key: AWS Secret Access Key.
+            s3_bucket_name: The S3 bucket name to interact with.
+        """
+        self.s3_endpoint_url = s3_endpoint_url
+        self.aws_access_key_id = aws_access_key_id
+        self.aws_secret_access_key = aws_secret_access_key
+        self.s3_bucket_name = s3_bucket_name
+        self.s3_client = None
+
+        if not self.aws_access_key_id or not self.aws_secret_access_key:
+            logger.warning(
+                "AWS Access Key ID or Secret Access Key is not configured. "
+                "S3 downloads might fail if credentials are required by the endpoint."
+            )
+        
+        if not self.s3_bucket_name:
+            logger.error("S3_BUCKET_NAME is not configured. Cannot initialize S3 client.")
+            return # Do not initialize client if bucket name is missing
+
+        try:
+            self.s3_client = boto3.client(
+                's3',
+                endpoint_url=self.s3_endpoint_url,
+                aws_access_key_id=self.aws_access_key_id,
+                aws_secret_access_key=self.aws_secret_access_key
+            )
+            # Optional: Add a connection test here if desired, e.g., list_objects_v2 with MaxKeys=0
+            logger.info(
+                f"Boto3 S3 client initialized. Endpoint: '{self.s3_endpoint_url}', "
+                f"Bucket: '{self.s3_bucket_name}'"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Boto3 S3 client: {e}", exc_info=True)
+            self.s3_client = None # Ensure client is None if initialization fails
+
+    async def download_file_from_dagshub( # Method name kept for compatibility
+        self,
+        remote_s3_key: str,
+        local_destination_path: str
+    ) -> bool:
+        """
+        Downloads a file from the configured S3 bucket.
+        The method name "download_file_from_dagshub" is kept for backward
+        compatibility with services that previously used a DagsHub-specific library.
+
+        Args:
+            remote_s3_key: The key (path) of the file within the S3 bucket.
             local_destination_path: Full local path to save the downloaded file.
-            dagshub_bucket_name_override: Optional. If provided, uses this as the bucket name.
-                                         Defaults to self.dagshub_repo_name.
 
         Returns:
             True if download was successful, False otherwise.
         """
-        Path(local_destination_path).parent.mkdir(parents=True, exist_ok=True)
-        
-        bucket_to_use = dagshub_bucket_name_override if dagshub_bucket_name_override else self.dagshub_repo_name
+        if not self.s3_client:
+            logger.error("S3 client not initialized. Cannot download.")
+            return False
 
-        logger.info(f"Attempting to download from DagsHub: repo='{self.dagshub_full_repo_name}', key='{remote_s3_key}', bucket='{bucket_to_use}' to '{local_destination_path}'")
+        if not remote_s3_key:
+            logger.error("Remote S3 key cannot be empty.")
+            return False
+        
+        if not local_destination_path:
+            logger.error("Local destination path cannot be empty.")
+            return False
 
         try:
-            boto_client = await asyncio.to_thread(
-                get_repo_bucket_client,
-                self.dagshub_full_repo_name,
-                flavor="boto"
-            )
-            
+            Path(local_destination_path).parent.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            logger.error(f"Could not create parent directory for {local_destination_path}: {e}")
+            return False
+        
+        logger.info(
+            f"Attempting to download S3 object: Bucket='{self.s3_bucket_name}', "
+            f"Key='{remote_s3_key}', To='{local_destination_path}'"
+        )
+
+        try:
+            # boto3 client methods are blocking, so run in a separate thread
             await asyncio.to_thread(
-                boto_client.download_file,
-                Bucket=bucket_to_use,
+                self.s3_client.download_file,
+                Bucket=self.s3_bucket_name,
                 Key=remote_s3_key,
                 Filename=local_destination_path
             )
-            logger.info(f"Successfully downloaded '{remote_s3_key}' from DagsHub repo '{self.dagshub_full_repo_name}' to '{local_destination_path}'")
+            logger.info(
+                f"Successfully downloaded '{remote_s3_key}' from bucket "
+                f"'{self.s3_bucket_name}' to '{local_destination_path}'"
+            )
             return True
         except (NoCredentialsError, PartialCredentialsError) as e:
-            logger.error(f"DagsHub/S3 credentials error for repo {self.dagshub_full_repo_name}, key {remote_s3_key}: {e}. Ensure 'dagshub login' has been run.")
+            logger.error(
+                f"S3 credentials error for Bucket='{self.s3_bucket_name}', Key='{remote_s3_key}': {e}. "
+                "Ensure credentials are set and valid for the S3 endpoint."
+            )
         except ClientError as e:
             error_code = e.response.get("Error", {}).get("Code")
             if error_code == '404' or error_code == 'NoSuchKey':
-                logger.warning(f"File not found on DagsHub: repo='{self.dagshub_full_repo_name}', bucket='{bucket_to_use}', key='{remote_s3_key}'.")
+                logger.warning(
+                    f"File not found: Bucket='{self.s3_bucket_name}', Key='{remote_s3_key}'."
+                )
+            elif error_code == '403' or 'Forbidden' in str(e) or 'AccessDenied' in str(e):
+                logger.error(
+                    f"Access Denied for Bucket='{self.s3_bucket_name}', Key='{remote_s3_key}'. "
+                    "Check S3 credentials and permissions."
+                )
             else:
-                logger.error(f"DagsHub/S3 ClientError for repo {self.dagshub_full_repo_name}, key {remote_s3_key}: {e}")
+                logger.error(
+                    f"S3 ClientError for Bucket='{self.s3_bucket_name}', Key='{remote_s3_key}': {e}"
+                )
         except Exception as e:
-            logger.error(f"Unexpected error downloading from DagsHub repo {self.dagshub_full_repo_name}, key {remote_s3_key}: {e}")
+            logger.error(
+                f"Unexpected error downloading from Bucket='{self.s3_bucket_name}', Key='{remote_s3_key}': {e}",
+                exc_info=True
+            )
         
         return False
