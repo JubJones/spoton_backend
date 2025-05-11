@@ -1,4 +1,3 @@
-# FILE: app/utils/homography_utils.py
 """
 Utilities for loading homography matrices and projecting points.
 Adapted from reid_poc.
