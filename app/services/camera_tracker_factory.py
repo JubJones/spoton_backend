@@ -1,4 +1,3 @@
-# FILE: app/services/camera_tracker_factory.py
 """
 Factory for creating and managing per-camera tracker instances.
 This ensures that each camera view has its own tracker state.
@@ -9,7 +8,7 @@ import uuid
 
 import torch
 
-from app.models.trackers import BotSortTracker # Your existing tracker
+from app.models.trackers import BotSortTracker
 from app.models.base_models import AbstractTracker
 from app.core.config import settings
 
