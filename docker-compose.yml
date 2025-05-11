@@ -17,6 +17,7 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - OMP_NUM_THREADS=1
       # The application inside will check torch.cuda.is_available()
       # To enable GPU access for the container, uncomment 'deploy' section.
       # This requires NVIDIA Container Toolkit on the host.
