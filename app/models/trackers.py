@@ -30,7 +30,7 @@ class BotSortTracker(AbstractTracker):
         if not BOXMOT_AVAILABLE or BotSort is None: # Check if BotSort itself was imported
             raise ImportError("BoxMOT library or BotSort class is required but not available.")
 
-        self.tracker_instance = None # Type hint with BotSort
+        self.tracker_instance = None 
         self.device: Optional[torch.device] = None
         self.reid_model_path: Path = settings.resolved_reid_weights_path
         self.use_half: bool = settings.TRACKER_HALF_PRECISION
@@ -47,38 +47,33 @@ class BotSortTracker(AbstractTracker):
             return
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Loading BotSort tracker on device: {self.device}...")
+        logger.info(f"BotSortTracker: Attempting to load BotSort tracker on device: {self.device}...")
 
         boxmot_device_str = get_boxmot_device_string(self.device)
         effective_half = self.use_half and self.device.type == 'cuda'
 
         try:
-            # Directly instantiate the BotSort class
-            # The 'weights' parameter in create_tracker likely maps to 'reid_weights'
-            # or 'model_weights' in the specific tracker class constructor.
-            # For BotSort, 'reid_weights' is the common parameter name for the ReID model.
+            logger.info(f"BotSortTracker: Instantiating BotSort with reid_weights='{self.reid_model_path}', device='{boxmot_device_str}', half={effective_half}, per_class={self.per_class}")
             self.tracker_instance = await asyncio.to_thread(
                 BotSort,
-                # --- Key Change: Pass arguments directly to BotSort constructor ---
-                reid_weights=self.reid_model_path, # Use 'reid_weights'
+                reid_weights=self.reid_model_path, 
                 device=boxmot_device_str,
                 half=effective_half,
                 per_class=self.per_class
             )
-            logger.info(f"BotSort tracker instance created with ReID model '{self.reid_model_path}'.")
-            # Warmup (optional but good practice)
-            # Ensure dummy_dets has the correct shape for tracker input (e.g., N, 6)
+            logger.info(f"BotSortTracker: BotSort tracker instance CREATED successfully. Type: {type(self.tracker_instance)}")
+            
+            logger.info("BotSortTracker: Attempting warmup...")
             dummy_frame = np.zeros((100, 100, 3), dtype=np.uint8)
-            dummy_dets = np.empty((0, 6)) # [x1, y1, x2, y2, conf, cls]
-            # The update method expects detections and the image
-            await self.update(dummy_dets, dummy_frame)
-            logger.info("BotSort tracker warmup update complete.")
+            dummy_dets = np.empty((0, 6)) 
+            await self.update(dummy_dets, dummy_frame) # This already calls tracker_instance.update
+            logger.info("BotSortTracker: BotSort tracker warmup update complete.")
         except TypeError as te:
-            logger.exception(f"TypeError loading BotSort tracker. Check constructor arguments: {te}")
+            logger.exception(f"BotSortTracker: TypeError loading BotSort tracker. Check constructor arguments: {te}")
             self.tracker_instance = None
             raise
         except Exception as e:
-            logger.exception(f"Error loading BotSort tracker: {e}")
+            logger.exception(f"BotSortTracker: CRITICAL ERROR loading BotSort tracker: {e}") # Log full exception
             self.tracker_instance = None
             raise
 
@@ -95,61 +90,56 @@ class BotSortTracker(AbstractTracker):
             [x1, y1, x2, y2, track_id, conf, cls_id, global_id (optional), ...].
         """
         if self.tracker_instance is None:
+            logger.error("BotSortTracker: Tracker not loaded. Call load_model() first.")
             raise RuntimeError("BotSort tracker not loaded. Call load_model() first.")
 
         detections_for_update = detections
-        # Ensure detections are in the expected shape [N, 6]
         if detections.ndim != 2 or detections.shape[1] != 6:
-            if detections.size == 0: # If empty, ensure it's (0, 6)
+            if detections.size == 0: 
                  detections_for_update = np.empty((0, 6))
             else:
-                # Log an error and return empty if shape is incorrect but not empty
-                logger.error(f"Invalid detections shape: {detections.shape}. Expected (N, 6) for tracker update.")
-                return np.empty((0, 8)) # Assuming output might have up to 8 columns (incl. global_id)
+                logger.error(f"BotSortTracker: Invalid detections shape: {detections.shape}. Expected (N, 6) for tracker update.")
+                return np.empty((0, 8)) 
 
         if image is None or image.size == 0:
-            logger.error("Invalid image provided to tracker update.")
+            logger.error("BotSortTracker: Invalid image provided to tracker update.")
             return np.empty((0, 8))
 
         try:
-            # Call the update method of the instantiated tracker
+            # logger.debug(f"BotSortTracker: Calling tracker_instance.update with dets shape {detections_for_update.shape}, image shape {image.shape}")
             tracked_output_np = await asyncio.to_thread(
                 self.tracker_instance.update,
-                detections_for_update, # Correctly shaped detections
+                detections_for_update, 
                 image
             )
+            # logger.debug(f"BotSortTracker: tracker_instance.update returned output shape: {tracked_output_np.shape if tracked_output_np is not None else 'None'}")
 
-            # Validate tracker output
+
             if tracked_output_np is None or not isinstance(tracked_output_np, np.ndarray):
-                # logger.debug("Tracker output is None or not an ndarray.")
                 return np.empty((0, 8))
             if tracked_output_np.size == 0:
-                # logger.debug("Tracker output is an empty ndarray.")
                 return np.empty((0, 8))
-            # BoxMOT trackers usually output at least 5 columns: [x1,y1,x2,y2, track_id]
-            # With conf, cls, reid_features/global_id it can be more (e.g., 7 or 8 for BotSort)
             if tracked_output_np.ndim != 2 or tracked_output_np.shape[1] < 5:
-                 logger.warning(f"Tracker output has an unexpected shape: {tracked_output_np.shape}. Expected at least 5 columns.")
-                 return np.empty((0, 8)) # Return empty if shape is invalid
+                 logger.warning(f"BotSortTracker: Tracker output has an unexpected shape: {tracked_output_np.shape}. Expected at least 5 columns.")
+                 return np.empty((0, 8)) 
 
             return tracked_output_np
         except Exception as e:
-            logger.exception(f"Error during BotSort tracker update: {e}")
-            return np.empty((0, 8)) # Return empty on error
+            logger.exception(f"BotSortTracker: Error during BotSort tracker update: {e}")
+            return np.empty((0, 8)) 
 
     async def reset(self):
         """Resets the tracker's state (e.g., for a new video sequence)."""
         if self.tracker_instance and hasattr(self.tracker_instance, 'reset'):
             try:
-                # BoxMOT's reset is typically synchronous
+                logger.info("BotSortTracker: Calling tracker_instance.reset()")
                 await asyncio.to_thread(self.tracker_instance.reset)
-                logger.info("BotSort tracker state reset.")
+                logger.info("BotSortTracker: BotSort tracker state reset.")
             except Exception as e:
-                logger.error(f"Error resetting BotSort tracker: {e}")
+                logger.error(f"BotSortTracker: Error resetting BotSort tracker: {e}")
         elif self.tracker_instance:
-            # If no explicit reset, re-initialize for a clean state
-            logger.warning("BotSort tracker instance does not have a 'reset' method. Re-initializing for reset.")
-            self.tracker_instance = None # Clear current instance
-            await self.load_model() # Reload to get a fresh state
+            logger.warning("BotSortTracker: Tracker instance does not have a 'reset' method. Re-initializing for reset.")
+            self.tracker_instance = None 
+            await self.load_model() 
         else:
-            logger.warning("BotSort tracker instance not available to reset.")
+            logger.warning("BotSortTracker: Tracker instance not available to reset.")

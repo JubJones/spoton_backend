@@ -1,6 +1,7 @@
 # ---- Base Stage ----
 # Using a specific Python version for better reproducibility
-FROM python:3.9.18-bullseye as base
+ARG BUILDPLATFORM=linux/amd64
+FROM --platform=$BUILDPLATFORM python:3.9.18-bullseye as base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1

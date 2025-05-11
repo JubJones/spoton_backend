@@ -269,19 +269,19 @@ class MultiCameraFrameProcessor:
         batch_start_time = asyncio.get_event_loop().time()
         logger.info(f"[Task {task_id}][Env {environment_id}] MFProc: Processing batch for global frame count {processed_frame_count}.")
 
-        await self._ensure_detector_loaded()
+        await self._ensure_detector_loaded() # Detector loaded here
 
         aggregated_parsed_track_data_this_batch: Dict[TrackKey, Tuple[BoundingBoxXYXY, Optional[FeatureVector]]] = {}
         active_track_keys_this_batch_set: Set[TrackKey] = set()
         all_handoff_triggers_this_batch: List[HandoffTriggerInfo] = []
         camera_frame_shapes: Dict[CameraID, Tuple[int, int]] = {}
-        confidences_map: Dict[TrackKey, float] = {} # To store confidences for final output
+        confidences_map: Dict[TrackKey, float] = {} 
 
-        # --- Detection Phase ---
         per_camera_detections_tasks = []
         valid_cam_ids_in_batch = [cam_id for cam_id, data in frame_batch.items() if data is not None]
 
         async def detect_for_camera(cam_id_local: CameraID, frame_image_np_local: np.ndarray) -> Tuple[CameraID, List[RawDetection]]:
+            logger.debug(f"[Task {task_id}][{cam_id_local}] MFProc: Starting detection.")
             raw_model_detections = await self.detector.detect(frame_image_np_local)
             converted_detections = [
                 RawDetection(
@@ -290,6 +290,7 @@ class MultiCameraFrameProcessor:
                     class_id=d.class_id
                 ) for d in raw_model_detections
             ]
+            logger.debug(f"[Task {task_id}][{cam_id_local}] MFProc: Detection completed. Found {len(converted_detections)} raw detections.")
             return cam_id_local, converted_detections
 
         for cam_id_loop in valid_cam_ids_in_batch:
@@ -299,11 +300,14 @@ class MultiCameraFrameProcessor:
                 camera_frame_shapes[cam_id_loop] = frame_image_np_loop.shape[:2]
                 per_camera_detections_tasks.append(detect_for_camera(cam_id_loop, frame_image_np_loop))
         
+        logger.info(f"[Task {task_id}] MFProc: Gathered {len(per_camera_detections_tasks)} detection tasks for batch {processed_frame_count}.")
         detection_results: List[Any] = await asyncio.gather(*per_camera_detections_tasks, return_exceptions=True)
+        logger.info(f"[Task {task_id}] MFProc: Detection phase completed for batch {processed_frame_count}.")
 
-        # --- Tracking, Feature Parsing, and Handoff Trigger Detection Phase ---
+
         for i, det_res_or_exc in enumerate(detection_results):
             cam_id_from_det_task_order = valid_cam_ids_in_batch[i]
+            logger.debug(f"[Task {task_id}][{cam_id_from_det_task_order}] MFProc: Processing detection result.")
             
             if isinstance(det_res_or_exc, Exception):
                 logger.error(f"[Task {task_id}][{cam_id_from_det_task_order}] Detection failed: {det_res_or_exc}", exc_info=True)
@@ -311,7 +315,10 @@ class MultiCameraFrameProcessor:
             
             cam_id, raw_detections_list = det_res_or_exc
             frame_data = frame_batch.get(cam_id)
-            if not frame_data: continue
+            if not frame_data: 
+                logger.warning(f"[Task {task_id}][{cam_id}] Frame data missing after detection. Skipping.")
+                continue
+
             frame_image_np, _ = frame_data
             current_frame_shape = camera_frame_shapes.get(cam_id)
             if not current_frame_shape:
@@ -321,36 +328,44 @@ class MultiCameraFrameProcessor:
             detections_np_for_tracker = np.array(
                 [(*d.bbox_xyxy, d.confidence, d.class_id) for d in raw_detections_list], dtype=np.float32
             ) if raw_detections_list else np.empty((0, 6))
+            logger.debug(f"[Task {task_id}][{cam_id}] MFProc: Converted {len(raw_detections_list)} detections to NumPy array for tracker.")
 
             try:
+                logger.info(f"[Task {task_id}][{cam_id}] MFProc: Attempting to get tracker...") # DEBUG LOG
                 tracker_instance = await self.tracker_factory.get_tracker(task_id, cam_id)
-                raw_tracker_output_np: np.ndarray = await tracker_instance.update(detections_np_for_tracker, frame_image_np)
+                logger.info(f"[Task {task_id}][{cam_id}] MFProc: Tracker instance obtained: {type(tracker_instance)}. Attempting update.") # DEBUG LOG
                 
-                # Load homography matrix for this camera (cached or newly loaded)
-                # This needs to be done here as frame_shape is now known
+                raw_tracker_output_np: np.ndarray = await tracker_instance.update(detections_np_for_tracker, frame_image_np)
+                logger.info(f"[Task {task_id}][{cam_id}] MFProc: Tracker update completed. Output shape: {raw_tracker_output_np.shape if raw_tracker_output_np is not None else 'None'}") # DEBUG LOG
+                
                 homography_matrix = await self._load_homography_matrix_for_camera(task_id, environment_id, cam_id)
+                logger.debug(f"[Task {task_id}][{cam_id}] MFProc: Homography matrix {'loaded' if homography_matrix is not None else 'not available'}.")
+
 
                 parsed_tracks_this_camera = self._parse_raw_tracker_output(task_id, cam_id, raw_tracker_output_np)
+                logger.debug(f"[Task {task_id}][{cam_id}] MFProc: Parsed {len(parsed_tracks_this_camera)} tracks from tracker output.")
                 for track_key, bbox, feature in parsed_tracks_this_camera:
                     aggregated_parsed_track_data_this_batch[track_key] = (bbox, feature)
                     active_track_keys_this_batch_set.add(track_key)
-                    # Store confidence: BoxMOT output typically [x1,y1,x2,y2, track_id, conf, cls_id, (+optional features)]
-                    # Find the original detection or tracker output row for confidence
                     original_track_row = next((row for row in raw_tracker_output_np if int(row[4]) == track_key[1]), None)
                     if original_track_row is not None and len(original_track_row) > 5:
                         confidences_map[track_key] = float(original_track_row[5])
 
 
                 if raw_tracker_output_np.size > 0:
+                    logger.debug(f"[Task {task_id}][{cam_id}] MFProc: Checking handoff triggers.")
                     handoff_triggers_this_cam = self._check_handoff_triggers_for_camera(
                         task_id, environment_id, cam_id, raw_tracker_output_np, current_frame_shape
                     )
                     all_handoff_triggers_this_batch.extend(handoff_triggers_this_cam)
+                    logger.debug(f"[Task {task_id}][{cam_id}] MFProc: Found {len(handoff_triggers_this_cam)} handoff triggers.")
+
 
             except Exception as e:
-                logger.error(f"[Task {task_id}][{cam_id}] Error during tracking, parsing or handoff check: {e}", exc_info=True)
+                logger.error(f"[Task {task_id}][{cam_id}] MFProc: Error during tracking, parsing or handoff check: {e}", exc_info=True)
         
-        # --- Re-ID Association Phase ---
+        logger.info(f"[Task {task_id}] MFProc: Tracking, Parsing, Handoff check phase completed for batch {processed_frame_count}.")
+        
         features_for_reid_input: Dict[TrackKey, FeatureVector] = {
             tk: feat for tk, (_, feat) in aggregated_parsed_track_data_this_batch.items() if feat is not None
         }
@@ -358,26 +373,25 @@ class MultiCameraFrameProcessor:
             trigger.source_track_key: trigger for trigger in all_handoff_triggers_this_batch
         }
 
+        logger.debug(f"[Task {task_id}] MFProc: Preparing for Re-ID. Features: {len(features_for_reid_input)}, Active Tracks: {len(active_track_keys_this_batch_set)}, Triggers: {len(active_triggers_map_for_reid)}.")
         if features_for_reid_input or active_track_keys_this_batch_set:
             await reid_manager.associate_features_and_update_state(
                 features_for_reid_input, active_track_keys_this_batch_set, active_triggers_map_for_reid, processed_frame_count
             )
+            logger.debug(f"[Task {task_id}] MFProc: Re-ID association completed.")
         else:
             logger.debug(f"[Task {task_id}] MFProc: No features or active tracks for ReID for frame {processed_frame_count}.")
 
-        # --- Construct Final Output for this Batch (including map projection) ---
         final_batch_results: Dict[CameraID, List[TrackedObjectData]] = defaultdict(list)
         for track_key, (bbox_xyxy, original_feature) in aggregated_parsed_track_data_this_batch.items():
             cam_id_active, track_id_active = track_key
             gid_assigned: Optional[GlobalID] = reid_manager.track_to_global_id.get(track_key)
             
-            # Map projection
             map_coords_output: Optional[List[float]] = None
             homography_matrix_current_cam = self._homography_matrices_cache.get((task_id, environment_id, cam_id_active))
             if homography_matrix_current_cam is not None:
-                # Project foot point (center bottom of bbox_xyxy)
                 foot_point_x = (bbox_xyxy[0] + bbox_xyxy[2]) / 2.0
-                foot_point_y = bbox_xyxy[3] # y2 (bottom)
+                foot_point_y = bbox_xyxy[3] 
                 map_coords_output = self._project_point_to_map((foot_point_x, foot_point_y), homography_matrix_current_cam)
 
             track_obj_data = TrackedObjectData(
@@ -385,7 +399,7 @@ class MultiCameraFrameProcessor:
                 track_id=track_id_active,
                 global_person_id=gid_assigned,
                 bbox_xyxy=bbox_xyxy,
-                confidence=confidences_map.get(track_key), # Get stored confidence
+                confidence=confidences_map.get(track_key), 
                 feature_vector=list(original_feature) if original_feature is not None else None,
                 map_coords=map_coords_output
             )
