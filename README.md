@@ -18,6 +18,43 @@ For a detailed system design, please refer to [DESIGN.md](DESIGN.md).
     curl -LsSf https://astral.sh/uv/install.sh | sh
     ```
 *   **S3-Compatible Object Storage**: Access to an S3-compatible storage (e.g., AWS S3, MinIO, DagsHub) where the input video data (sub-videos) is stored.
+
+### Obtaining the MTMMC Video Dataset
+
+SpotOn is designed for intelligent multi-camera person tracking and has been developed and tested primarily using the MTMMC (Multi-Target Multi-Camera) dataset. Due to the licensing and terms of use agreement I adhered to when obtaining this dataset, I cannot directly provide or redistribute the MTMMC video frames or annotations.
+
+If you intend to use the MTMMC dataset with SpotOn, you will need to request access directly from the dataset providers by following their specified procedure. I went through this process to obtain the data for development, and you will need to do the same.
+
+Here’s how to request access to the MTMMC dataset, based on the information provided by the dataset owners at [https://sites.google.com/view/mtmmc](https://sites.google.com/view/mtmmc):
+
+**Dataset Access Request Instructions:**
+
+You can request access by contacting the MTMMC team at `gritycda@gmail.com`.
+
+**Submission Guidelines:**
+It's crucial to follow these guidelines precisely, as failure to do so will result in your request not being processed.
+
+1.  **Include the Dataset Terms and Conditions:**
+    *   Download the MTMMC User Agreement form: [MTMMC User Agreement.docx](https://docs.google.com/document/d/1eyDTFlm6M6bYm2OJYnIPOxDecVmTmcnc/edit?usp=drive_link&ouid=114109061858846451061&rtpof=true&sd=true).
+    *   Complete all user information fields in the form.
+    *   Provide a detailed description of your intended use of the dataset (this is important for their evaluation, especially concerning ethical considerations).
+    *   Check the agreement box and insert your handwritten signature.
+    *   **Crucially, delete any blue instructional text from the form before saving.**
+    *   Convert the completed document to PDF format.
+    *   Use the following file naming convention: `{Application Date}_{Affiliation}_{Your Name}` (e.g., `20240623_KAIST_Jaden Kim`).
+
+2.  **Email Submission Requirements:**
+    *   Use the subject line format: `[MTMMC benchmark request] {Your Name}, {Affiliation}`.
+    *   In the email body, include:
+        *   The Google email address to which the MTMMC benchmark drive should be shared if your request is approved.
+        *   A brief explanation of your intended use of the MTMMC benchmark.
+
+**Important Notice from the Dataset Providers:**
+Please be aware that unauthorized sharing or transfer of the dataset outside the methods outlined in their approval process is a violation of international law and may result in legal action. All users must submit the signed agreement before accessing the dataset.
+(Dataset information last noted as revised by providers: 10 / 16 / 2024)
+
+Once you have successfully obtained the MTMMC dataset (which includes video frames in JPG format and annotations in COCO style JSON format), you will need to upload the video data (sub-videos/frames) to your S3-compatible object storage, as configured in your `.env` file (see `S3_BUCKET_NAME` and related S3 variables). The SpotOn backend will then process this data from your S3 bucket.
+
 *   **AI Model Weights**:
     *   **Re-ID Model (`clip_market1501.pt`)**: This model is crucial for person re-identification.
         1.  Navigate to the `spoton_backend/weights/` directory in your cloned repository.
@@ -156,12 +193,6 @@ If you've set up using Docker (Option A):
     # To follow logs in real-time:
     docker-compose logs -f backend
     ```
-*   **(Optional) DagsHub Login for S3 access using DagsHub CLI**:
-    If you need to interact with DagsHub storage using the `dagshub` CLI from *within* the running backend container (e.g., for `dagshub upload`):
-    ```bash
-    docker exec -it -u appuser spoton_backend_service bash -c "dagshub login"
-    ```
-    _Note: For the application's S3 data access (video downloads), the AWS credentials in your `.env` file are used by `boto3` and are sufficient._
 
 ### Local Development (Uvicorn)
 
