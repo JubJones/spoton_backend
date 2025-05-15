@@ -31,9 +31,9 @@ Key backend responsibilities:
     *   Interact with Redis for caching real-time state and recent Re-ID embeddings.
     *   Interact with TimescaleDB for storing historical tracking events and older embeddings.
 5.  **Application Initialization (Startup Phase):**
-    *   **Eager loading of AI models:** The primary detection model (e.g., FasterRCNN) and the core Re-ID model (e.g., `clip_market1501.pt`, potentially via a prototype tracker instance) are loaded into memory/GPU.
+    *   **Eager loading of AI models:** The primary detection model (e.g., FasterRCNN) and the core Re-ID model (e.g., `clip_market1501.pt`, typically by initializing a prototype tracker instance within the `CameraTrackerFactory`) are loaded into memory/GPU.
     *   **Model warm-up:** Dummy data is passed through loaded models to compile any JIT kernels and prepare them for inference.
-    *   **Homography pre-computation:** Homography matrices for all configured cameras are calculated from their respective point files and cached.
+    *   **Homography pre-computation:** Homography matrices for all configured cameras are calculated from their respective point files and cached by the `HomographyService`.
     This ensures that the system is immediately ready to process requests with minimal latency once the application is reported as "ready."
 
 ## 3. Backend Directory Structure
@@ -55,16 +55,16 @@ The backend codebase is organized as follows:
             *   `detectors.py`, `trackers.py`, `feature_extractors.py`: Concrete implementations of the AI strategies, likely wrapping libraries like BoxMOT. Models are designed to be loaded during application startup.
         *   `services/`: Business logic layer. Each service encapsulates a specific domain of functionality.
             *   `pipeline_orchestrator.py`: Orchestrates the sequence of operations in the core processing pipeline for each video segment and its frames.
-            *   `reid_service.py` (or `reid_components.py`): Manages the Re-ID process, including embedding comparison and gallery management (Redis/TimescaleDB). Relies on pre-loaded Re-ID models.
+            *   `reid_components.py`: Manages the Re-ID process, including embedding comparison and gallery management (Redis/TimescaleDB). Relies on pre-loaded Re-ID models.
             *   `storage_service.py`: Implements the Repository/Data Access Object (DAO) pattern for interacting with S3 (fetching video segments, managing local cache), Redis, and TimescaleDB.
-            *   `homography_service.py` (or similar component, e.g., integrated into `MultiCameraFrameProcessor`): Handles homography transformations using pre-calculated matrices loaded at startup.
+            *   `homography_service.py`: Dedicated service that loads homography point files, pre-calculates all homography matrices at application startup via `on_startup` event handlers, and provides cached access to these matrices.
             *   `notification_service.py`: Responsible for sending data to connected frontend clients via WebSockets.
-            *   `camera_tracker_factory.py`: Manages per-camera tracker instances, potentially aiding in the startup pre-loading of shared Re-ID models by initializing a prototype tracker.
+            *   `camera_tracker_factory.py`: Manages per-camera tracker instances, and aids in the startup pre-loading of shared Re-ID models by initializing a prototype tracker.
         *   `tasks/`: For background, potentially long-running processing tasks.
             *   `frame_processor.py`: Contains the detailed logic for processing a single frame (extracted from a video segment) through the detection, tracking, Re-ID pipeline. This can be invoked by the `PipelineOrchestratorService`.
         *   `utils/`: Common utility functions (e.g., image manipulation, timestamp conversions, video processing utilities).
         *   `main.py`: The entry point for the FastAPI application, where the app instance is created and routers are included. Its `lifespan` manager triggers the `on_startup` events.
-        *   `dependencies.py`: Defines FastAPI dependencies for injecting service instances, database sessions, etc., into endpoint handlers. These services expect their underlying models/data to be pre-loaded.
+        *   `dependencies.py`: Defines FastAPI dependencies for injecting service instances, database sessions, etc., into endpoint handlers. These services expect their underlying models/data to be pre-loaded (available via `app.state`).
     *   `tests/`: Contains all unit and integration tests, mirroring the `app` structure.
     *   `.env.example`: Template for environment variables.
     *   `Dockerfile`: Instructions to build the Docker image for the backend.
@@ -91,7 +91,7 @@ The backend codebase is organized as follows:
     *   **Usage:** For AI model components (detection, tracking, feature extraction). Abstract base classes (e.g., `AbstractDetector`, `AbstractTracker`, `AbstractFeatureExtractor`) define a common interface. Concrete classes (e.g., `FasterRCNNDetector`, `BotSortTracker`, `CLIPExtractor`) implement these interfaces. These strategies are instantiated and their models pre-loaded at application startup.
     *   **Benefit:** Allows easy swapping or addition of new AI models without altering the core pipeline logic.
 *   **Factory Pattern (or Abstract Factory):**
-    *   **Usage:** To create instances of AI model strategies (if needed beyond simple instantiation at startup) or per-camera trackers (`CameraTrackerFactory`). The factory may also play a role in the startup sequence by creating a "prototype" tracker to ensure shared Re-ID models are loaded.
+    *   **Usage:** To create instances of AI model strategies (if needed beyond simple instantiation at startup) or per-camera trackers (`CameraTrackerFactory`). The factory also plays a role in the startup sequence by creating a "prototype" tracker to ensure shared Re-ID models are loaded.
     *   **Benefit:** Decouples client code from concrete model classes, centralizes instantiation logic.
 *   **Service Layer Pattern:**
     *   **Usage:** Business logic is encapsulated in service classes (e.g., `PipelineOrchestratorService`, `ReIDService`, `StorageService`). API handlers delegate to these services.
@@ -103,12 +103,12 @@ The backend codebase is organized as follows:
     *   **Usage:** Backend processes data (subject), frontend clients (observers) receive real-time *metadata* updates via WebSockets from `NotificationService`.
     *   **Benefit:** Enables real-time data streaming for client-side rendering and synchronization.
 *   **Pipeline Pattern (Conceptual):**
-    *   **Usage:** The core per-frame processing (Frame Extraction -> Preprocess -> Detect -> Track -> Feature Extract -> Re-ID -> Transform) is a pipeline managed by `PipelineOrchestratorService` and `FrameProcessorTask` (or `MultiCameraFrameProcessor`).
+    *   **Usage:** The core per-frame processing (Frame Extraction -> Preprocess -> Detect -> Track -> Feature Extract -> Re-ID -> Transform) is a pipeline managed by `PipelineOrchestratorService` and `MultiCameraFrameProcessor`.
     *   **Benefit:** Structures complex processing into manageable steps.
 *   **Dependency Injection (via FastAPI):**
-    *   **Usage:** FastAPI's dependency injection provides services, database connections, etc., to components. These dependencies (like model wrappers or services holding pre-computed data) are available immediately after application startup.
+    *   **Usage:** FastAPI's dependency injection provides services, database connections, etc., to components. These dependencies (like model wrappers or services holding pre-computed data) are available immediately after application startup via `app.state`.
     *   **Benefit:** Promotes loose coupling and testability.
-*   **Singleton Pattern (via FastAPI Dependencies & Application State):** Core services, AI model instances (detector, Re-ID model handler), and pre-computed data (like all homography matrices) are managed as singletons, initialized during the application's startup phase and reused throughout its lifecycle.
+*   **Singleton Pattern (via FastAPI Dependencies & Application State):** Core services, AI model instances (detector, Re-ID model handler), and pre-computed data (like all homography matrices) are managed as singletons, initialized during the application's startup phase (stored in `app.state`) and reused throughout its lifecycle.
 
 ## 6. Communication Protocols
 
@@ -171,7 +171,7 @@ This describes the flow once a processing task is initiated, assuming models and
             *   The system then processes frames from this batch:
                 *   **(Frame Extraction):** `BatchedFrameProvider` reads synchronized frames (one from each sub-video in the current batch).
                 *   **(Per-Frame AI Processing - `MultiCameraFrameProcessor`):** For each such multi-camera frame batch:
-                    *   Detection, Tracking, Feature Extraction, Re-ID, and Homography transformation (using pre-loaded models and pre-calculated matrices) are performed.
+                    *   Detection, Tracking, Feature Extraction, Re-ID, and Homography transformation (using pre-loaded models and pre-calculated matrices from `app.state` via `HomographyService`) are performed.
                 *   **(Real-time Metadata Update):** `NotificationService` sends tracking metadata via WebSocket.
             *   This inner frame processing continues until all frames from the current batch of sub-videos (index `idx`) are exhausted.
             *   The `BatchedFrameProvider` for batch `idx` is then closed.
@@ -195,7 +195,7 @@ This describes the flow once a processing task is initiated, assuming models and
 
 *   **Scalability:**
     *   Stateless FastAPI application instances can be horizontally scaled.
-    *   AI models and homography data are pre-loaded, improving response consistency.
+    *   AI models and homography data are pre-loaded during application startup, improving response consistency and reducing per-request overhead.
     *   Video processing (frame extraction) is local to the worker after download.
     *   WebSocket communication is lightweight (metadata only).
     *   Video delivery to clients can leverage standard HTTP streaming and CDNs.
@@ -204,16 +204,16 @@ This describes the flow once a processing task is initiated, assuming models and
     *   Modular design with clear service responsibilities.
     *   Consistent coding style, type hinting, and comprehensive testing.
     *   Detailed logging.
-    *   Dependency injection.
-    *   Centralized initialization logic in `on_startup` improves predictability.
+    *   Dependency injection using FastAPI, leveraging `app.state` for pre-loaded singletons.
+    *   Centralized initialization logic in `on_startup` improves predictability and manages application readiness.
 
 ## 10. Next Steps / Considerations
 
 *   **Authentication & Authorization.**
-*   **Detailed Error Handling & Retry Mechanisms.**
+*   **Detailed Error Handling & Retry Mechanisms:** Especially for S3 operations and external service interactions.
 *   **Resource Management:** For GPU resources and local disk space. Monitor Docker startup time and resource consumption due to eager loading.
 *   **CI/CD Pipeline.**
 *   **Frame Timestamps:** Precise calculation and communication for client-side synchronization.
 *   **Client-Side Video Rendering Strategy and Implementation.**
-*   **Task Concurrency and Resource Allocation.**
-*   **Explicit Prefetching of Sub-Video Batches:** While the current flow is sequential per batch, a future optimization could involve initiating the download of the *next* batch of sub-videos (`idx+1`) while the current batch (`idx`) is still undergoing frame-by-frame processing. This would further hide S3 download latency.
+*   **Task Concurrency and Resource Allocation:** How many tasks can a single backend instance handle; potential for Celery or other distributed task queues for heavier workloads.
+*   **Explicit Prefetching of Sub-Video Batches:** While the current flow is sequential per batch (download batch N, process batch N, then download N+1), a future optimization could involve initiating the download of the *next* batch of sub-videos (`idx+1`) while the current batch (`idx`) is still undergoing frame-by-frame processing. This would further hide S3 download latency.
