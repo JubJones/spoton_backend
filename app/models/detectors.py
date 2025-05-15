@@ -6,7 +6,7 @@ This module contains implementations of object detectors, adhering to the
 Strategy Pattern, allowing different detection algorithms to be used interchangeably
 by the application's pipeline.
 """
-from typing import List, Any, Dict, Optional
+from typing import List, Any, Dict, Optional, Tuple
 import numpy as np
 import asyncio
 import logging
@@ -41,6 +41,7 @@ class FasterRCNNDetector(AbstractDetector):
         self.model: Optional[torchvision.models.detection.FasterRCNN] = None
         self.transforms: Optional[torchvision.transforms.Compose] = None
         self.device: Optional[torch.device] = None # Set during load_model
+        self._model_loaded_flag: bool = False # Added flag
 
         # Configuration from settings
         self.person_class_id: int = settings.PERSON_CLASS_ID
@@ -66,7 +67,7 @@ class FasterRCNNDetector(AbstractDetector):
         Raises:
             RuntimeError: If there is an error loading the model.
         """
-        if self.model is not None:
+        if self._model_loaded_flag and self.model is not None: # Check flag
             logger.info("Faster R-CNN model already loaded.")
             return
 
@@ -81,13 +82,35 @@ class FasterRCNNDetector(AbstractDetector):
 
             self.model.to(self.device)
             self.model.eval()
+            self._model_loaded_flag = True # Set flag
             logger.info("Faster R-CNN model loaded and configured successfully.")
 
         except Exception as e:
             logger.exception(f"Error loading Faster R-CNN model: {e}")
             self.model = None
             self.transforms = None
+            self._model_loaded_flag = False
             raise # Re-raise the exception to signal failure
+
+    async def warmup(self, dummy_image_shape: Tuple[int, int, int] = (640, 480, 3)):
+        """
+        Warms up the model by performing a dummy inference.
+        Should be called after load_model().
+        """
+        if not self._model_loaded_flag or not self.model or not self.device:
+            logger.warning("Detector model not loaded. Cannot perform warmup.")
+            return
+
+        logger.info(f"Warming up FasterRCNN detector on device {self.device}...")
+        try:
+            dummy_np_image = np.uint8(np.random.rand(*dummy_image_shape) * 255)
+            # Use existing detect method for warmup logic, ensuring it's thread-safe
+            # The detect method itself handles preprocessing and inference.
+            _ = await self.detect(dummy_np_image)
+            logger.info("FasterRCNN detector warmup successful.")
+        except Exception as e:
+            logger.error(f"FasterRCNN detector warmup failed: {e}", exc_info=True)
+
 
     async def detect(self, image: np.ndarray) -> List[Detection]:
         """
@@ -102,7 +125,7 @@ class FasterRCNNDetector(AbstractDetector):
         Raises:
             RuntimeError: If the detector model has not been loaded.
         """
-        if not self.model or not self.transforms or not self.device:
+        if not self._model_loaded_flag or not self.model or not self.transforms or not self.device: # Check flag
             raise RuntimeError("Detector model not loaded. Call load_model() first.")
 
         # 1. Preprocessing
@@ -164,4 +187,3 @@ class FasterRCNNDetector(AbstractDetector):
             return [] # Return empty list on postprocessing error
 
         return detections_result
-    
