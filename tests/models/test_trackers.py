@@ -6,6 +6,7 @@ import torch
 import numpy as np
 from unittest.mock import MagicMock, AsyncMock, PropertyMock, patch
 from pathlib import Path
+import re
 
 from app.models.trackers import BotSortTracker
 
@@ -28,9 +29,15 @@ def mock_boxmot_botsort_class(mocker):
 def botsort_tracker_instance(mock_settings, mock_boxmot_botsort_class, mocker):
     """Provides an instance of BotSortTracker with mocked dependencies."""
     mocker.patch("app.models.trackers.settings", mock_settings)
-    # Mock torch.device to control device selection
-    mocker.patch("torch.device", side_effect=lambda x: MagicMock(type=x.split(":")[0] if ":" in x else x, index=0 if x.startswith("cuda") else None))
-    mocker.patch("app.utils.device_utils.get_boxmot_device_string", return_value="cpu") # Simplify device string
+    
+    actual_cpu_device = torch.device('cpu')
+    # Patch torch.device where it's imported and used by BotSortTracker for self.device initialization
+    mocker.patch("app.models.trackers.torch.device", return_value=actual_cpu_device)
+    
+    # Patch get_boxmot_device_string where it's imported and used by BotSortTracker
+    # This prevents the actual get_boxmot_device_string (and its isinstance check) from running.
+    mocker.patch("app.models.trackers.get_boxmot_device_string", return_value="cpu")
+    
     return BotSortTracker()
 
 
@@ -109,7 +116,8 @@ async def test_botsort_update_model_not_loaded(botsort_tracker_instance: BotSort
     tracker = botsort_tracker_instance
     dummy_detections = np.empty((0, 6))
     dummy_image = np.zeros((100, 100, 3), dtype=np.uint8)
-    with pytest.raises(RuntimeError, match="BotSort tracker not loaded. Call load_model() first."):
+    expected_message = "BotSort tracker not loaded. Call load_model() first."
+    with pytest.raises(RuntimeError, match=re.escape(expected_message)):
         await tracker.update(dummy_detections, dummy_image)
 
 @pytest.mark.asyncio

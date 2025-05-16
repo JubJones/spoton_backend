@@ -48,6 +48,7 @@ Repository = "https://github.com/JubJones/spoton_backend"
 dev = [
     "pytest>=8.2.0,<8.3.0",
     "pytest-asyncio>=0.23.0,<0.24.0",
+    "pytest-mock>=3.12.0,<3.13.0",
     "ruff>=0.4.2,<0.5.0",
     # Cython removed from here if it's a core build dependency for other packages
 ]

@@ -5,6 +5,8 @@ import pytest
 import torch
 import numpy as np
 from unittest.mock import MagicMock, PropertyMock, call
+import torchvision
+import re
 
 from app.models.detectors import FasterRCNNDetector
 from app.models.base_models import Detection, BoundingBox
@@ -16,12 +18,20 @@ def mock_torchvision_fasterrcnn(mocker):
     mock_model_instance = MagicMock(spec=torch.nn.Module) # More generic for .to, .eval
     mock_model_instance.return_value = [{"boxes": torch.empty(0, 4), "labels": torch.empty(0), "scores": torch.empty(0)}] # Default empty prediction
 
-    mock_weights_obj = MagicMock()
-    mock_weights_obj.transforms.return_value = MagicMock(return_value=torch.empty(3, 100, 100)) # Mock transform
+    mock_weights_obj = MagicMock() # Removed spec, will define attributes directly
+    mock_weights_obj.transforms = MagicMock(return_value=MagicMock(return_value=torch.empty(3, 100, 100))) # Mock transform method
     mock_weights_obj.meta = {'categories': ['__background__', 'person', 'car']} # Mock COCO names
 
     mocker.patch("torchvision.models.detection.fasterrcnn_resnet50_fpn_v2", return_value=mock_model_instance)
-    mocker.patch("torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT", new_callable=PropertyMock(return_value=mock_weights_obj))
+
+    # Mock the entire FasterRCNN_ResNet50_FPN_V2_Weights enum/class
+    # When FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT is accessed, it will use this PropertyMock
+    mock_weights_class = MagicMock()
+    type(mock_weights_class).DEFAULT = PropertyMock(return_value=mock_weights_obj) # Use type() for class properties
+    mocker.patch("torchvision.models.detection.FasterRCNN_ResNet50_FPN_V2_Weights", mock_weights_class)
+    # If the import is in app.models.detectors, this would be more targeted:
+    # mocker.patch("app.models.detectors.FasterRCNN_ResNet50_FPN_V2_Weights", mock_weights_class)
+
     return mock_model_instance, mock_weights_obj
 
 @pytest.fixture
@@ -31,8 +41,13 @@ def fasterrcnn_detector_instance(mock_settings, mock_torchvision_fasterrcnn, moc
     mocker.patch("app.models.detectors.settings", mock_settings)
     mocker.patch("app.utils.video_processing.cv2.cvtColor", side_effect=lambda x, code: x) # Avoid actual cv2 call
 
-    # Mock torch.device to control device selection for tests
-    mocker.patch("torch.device", side_effect=lambda x: MagicMock(type=x.split(":")[0] if ":" in x else x))
+    # Mock torch.device to return a real torch.device('cpu') to ensure compatibility with tensor.to()
+    actual_cpu_device = torch.device('cpu')
+    mocker.patch("app.models.detectors.torch.device", return_value=actual_cpu_device) # Patch where detector uses it
+    # If FasterRCNNDetector initializes self.device via a global torch.device call, 
+    # and not app.models.detectors.torch.device, then a broader patch might be needed, 
+    # or ensure self.device is set correctly post-init in tests.
+    # For now, assuming it uses torch.device imported within its own module scope.
 
     return FasterRCNNDetector()
 
@@ -113,7 +128,8 @@ async def test_fasterrcnn_detect_model_not_loaded(fasterrcnn_detector_instance: 
     """Tests detect call when model is not loaded."""
     detector = fasterrcnn_detector_instance
     dummy_image = np.zeros((100, 100, 3), dtype=np.uint8)
-    with pytest.raises(RuntimeError, match="Detector model not loaded. Call load_model() first."):
+    expected_message = "Detector model not loaded. Call load_model() first."
+    with pytest.raises(RuntimeError, match=re.escape(expected_message)):
         await detector.detect(dummy_image)
 
 @pytest.mark.asyncio
