@@ -1,3 +1,4 @@
+# FILE: tests/models/test_detectors.py
 """
 Unit tests for detector models in app.models.detectors.
 """
@@ -167,7 +168,7 @@ async def test_fasterrcnn_detect_successful(fasterrcnn_detector_instance: Faster
     assert isinstance(person_detection, Detection)
     assert person_detection.class_id == 1
     assert person_detection.class_name == "person"
-    assert person_detection.confidence == 0.9
+    assert person_detection.confidence == pytest.approx(0.9) # MODIFIED: Use pytest.approx
     assert isinstance(person_detection.bbox, BoundingBox)
     assert person_detection.bbox.to_list() == [10.0, 10.0, 60.0, 60.0] # Exact match
 
@@ -220,4 +221,4 @@ async def test_fasterrcnn_detect_bbox_clipping(fasterrcnn_detector_instance: Fas
 
     detections = await detector.detect(dummy_image_np)
     assert len(detections) == 1
-    assert detections[0].bbox.to_list() == [0.0, 0.0, float(img_w), float(img_h)] 
+    assert detections[0].bbox.to_list() == [0.0, 0.0, float(img_w), float(img_h)]

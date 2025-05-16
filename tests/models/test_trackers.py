@@ -179,12 +179,15 @@ async def test_botsort_reset_reinitializes_if_no_reset_method(botsort_tracker_in
     _, mock_botsort_instance = mock_boxmot_botsort_class
     del mock_botsort_instance.reset # Remove reset method to test fallback
 
+    # Spy on the tracker's load_model method.
+    # This spy is attached *after* the initial load_model call.
     mock_load_model_on_tracker = mocker.spy(tracker, "load_model")
     mocker.patch("asyncio.to_thread", side_effect=lambda func, *args, **kwargs: func(*args, **kwargs))
 
 
     await tracker.reset()
     
-    # load_model should have been called twice: once initially, once during reset
-    assert mock_load_model_on_tracker.call_count == 2
-    assert tracker._model_loaded_flag is True # Should be true after re-init 
+    # The spy will only count calls to load_model that happen *after* it was attached.
+    # In this case, it's the call within the reset() method's fallback logic.
+    assert mock_load_model_on_tracker.call_count == 1 # MODIFIED: Expected count is 1 for the spied call
+    assert tracker._model_loaded_flag is True # Should be true after re-init
