@@ -110,3 +110,31 @@ class AbstractTracker(ABC):
     async def reset(self):
         """Resets the tracker's state (e.g., for a new video sequence)."""
         pass
+
+
+class AbstractFeatureExtractor(ABC):
+    """Abstract base class for feature extractors (Strategy Pattern)."""
+
+    @abstractmethod
+    async def load_model(self):
+        """
+        Loads the feature extraction model into memory.
+        Should handle device placement.
+        """
+        pass
+
+    @abstractmethod
+    async def extract_features(self, image: np.ndarray, bboxes: List[BoundingBox]) -> List[Optional[np.ndarray]]:
+        """
+        Extracts feature embeddings from image regions defined by bounding boxes.
+
+        Args:
+            image: A NumPy array representing the image (e.g., in BGR or RGB format).
+            bboxes: A list of BoundingBox objects defining the regions of interest.
+
+        Returns:
+            A list of NumPy arrays, where each array is the feature embedding
+            for the corresponding bounding box. If feature extraction fails for a
+            bbox, the corresponding entry should be None.
+        """
+        pass
