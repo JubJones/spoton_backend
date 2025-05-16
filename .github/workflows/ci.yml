@@ -25,28 +25,28 @@ jobs:
     - name: Install uv
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.cargo/bin" >> $GITHUB_PATH # Add uv's typical install location to PATH
-        echo "$HOME/.local/bin" >> $GITHUB_PATH # Add uv's (alternative) install location to PATH
-        # Verify uv installation
-        uv --version
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        uv --version # Verify uv installation and PATH
 
     - name: Cache uv dependencies
       uses: actions/cache@v4
       with:
-        path: ~/.cache/uv
-        key: ${{ runner.os }}-uv-${{ hashFiles('**/pyproject.toml') }}-${{ hashFiles('**/poetry.lock') }}-${{ hashFiles('**/requirements*.txt') }} # Include lock files if you use them
+        path: ~/.cache/uv # uv's global cache directory
+        key: ${{ runner.os }}-uv-${{ matrix.python-version }}-${{ hashFiles('**/pyproject.toml') }}
         restore-keys: |
-          ${{ runner.os }}-uv-
+          ${{ runner.os }}-uv-${{ matrix.python-version }}-
 
     - name: Install PyTorch (CPU version)
       run: |
-        # Using uv to install PyTorch CPU version. Adjust versions if necessary.
-        # This matches the local development setup option from your README for CPU.
-        uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+        # Using uv to install PyTorch CPU version.
+        # Added --system flag to install into the system Python environment.
+        uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
 
     - name: Install project dependencies
       run: |
-        uv pip install ".[dev]"
+        # Added --system flag here as well.
+        uv pip install --system ".[dev]"
 
     - name: Run tests with pytest
       run: |
