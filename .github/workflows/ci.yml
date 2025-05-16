@@ -1,0 +1,53 @@
+name: Python CI
+
+on:
+  push:
+    branches: [ main, master ] # Adjust if your main branch has a different name
+  pull_request:
+    branches: [ main, master ] # Adjust if your main branch has a different name
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.9"] # Matches your pyproject.toml requires-python
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install uv
+      run: |
+        curl -LsSf https://astral.sh/uv/install.sh | sh
+        echo "$HOME/.cargo/bin" >> $GITHUB_PATH # Add uv's typical install location to PATH
+        echo "$HOME/.local/bin" >> $GITHUB_PATH # Add uv's (alternative) install location to PATH
+        # Verify uv installation
+        uv --version
+
+    - name: Cache uv dependencies
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/uv
+        key: ${{ runner.os }}-uv-${{ hashFiles('**/pyproject.toml') }}-${{ hashFiles('**/poetry.lock') }}-${{ hashFiles('**/requirements*.txt') }} # Include lock files if you use them
+        restore-keys: |
+          ${{ runner.os }}-uv-
+
+    - name: Install PyTorch (CPU version)
+      run: |
+        # Using uv to install PyTorch CPU version. Adjust versions if necessary.
+        # This matches the local development setup option from your README for CPU.
+        uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+
+    - name: Install project dependencies
+      run: |
+        uv pip install ".[dev]"
+
+    - name: Run tests with pytest
+      run: |
+        pytest
