@@ -2,7 +2,7 @@ from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings
 from typing import List, Optional, Dict, Tuple, Set
 from pathlib import Path
-from app.common_types import CameraID, ExitRuleModel, QuadrantName, CameraHandoffDetailConfig # MODIFIED: QuadrantName, ExitDirection removed
+from app.common_types import CameraID, ExitRuleModel, QuadrantName, CameraHandoffDetailConfig
 
 # Define a model for individual video set configurations
 class VideoSetEnvironmentConfig(BaseModel):
@@ -34,7 +34,7 @@ class Settings(BaseSettings):
 
     # Video Source Definitions
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
-        # --- Campus (s37) Environment --- # MODIFIED: Added campus video sets
+        # --- Campus (s37) Environment --- 
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="campus", cam_id="c01", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="campus", cam_id="c02", num_sub_videos=4),
         VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="campus", cam_id="c03", num_sub_videos=4),
@@ -48,7 +48,7 @@ class Settings(BaseSettings):
 
     # --- Handoff and Detailed Camera Configuration ---
     CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {
-        # --- Campus Environment (Videos: s37, Homography Scene: s47) ---
+        # --- Campus Environment (Videos: s37, Homography Scene: s47) --- 
         ("campus", "c01"): CameraHandoffDetailConfig(
             exit_rules=[
                 ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c03"), target_entry_area="bottom_left"),
@@ -63,19 +63,19 @@ class Settings(BaseSettings):
         ),
         ("campus", "c03"): CameraHandoffDetailConfig(
             exit_rules=[
-                ExitRuleModel(source_exit_quadrant=QuadrantName("bottom_left"), target_cam_id=CameraID("c01"), target_entry_area="upper_right"), # Reverse of c01->c03
+                ExitRuleModel(source_exit_quadrant=QuadrantName("bottom_left"), target_cam_id=CameraID("c01"), target_entry_area="upper_right"), 
                 ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c05"), target_entry_area="upper left"),
             ],
             homography_matrix_path="homography_points_c03_scene_s47.npz"
         ),
         ("campus", "c05"): CameraHandoffDetailConfig(
             exit_rules=[
-                ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c02"), target_entry_area="upper_right"), # Reverse of c02->c05
-                ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c03"), target_entry_area="upper_right"), # Reverse of c03->c05
+                ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c02"), target_entry_area="upper_right"), 
+                ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c03"), target_entry_area="upper_right"), 
             ],
             homography_matrix_path="homography_points_c05_scene_s47.npz"
         ),
-        # --- Factory Environment (Videos: s14, Homography Scene: s14) ---
+        # --- Factory Environment (Videos: s14, Homography Scene: s14) --- 
         ("factory", "c09"): CameraHandoffDetailConfig(
             exit_rules=[
                 ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c13"), target_entry_area="upper right", notes="wait; overlap c13/c16 possible"),
@@ -86,13 +86,16 @@ class Settings(BaseSettings):
         ("factory", "c12"): CameraHandoffDetailConfig(
             exit_rules=[
                 ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c13"), target_entry_area="upper left", notes="overlap c13 possible"),
+                ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c13"), target_entry_area="upper left", notes="overlap c13 possible"),
             ],
             homography_matrix_path="homography_points_c12_scene_s14.npz"
         ),
         ("factory", "c13"): CameraHandoffDetailConfig(
             exit_rules=[
                  ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c09"), target_entry_area="down", notes="wait; overlap c09 possible"),
+                 ExitRuleModel(source_exit_quadrant=QuadrantName("lower_right"), target_cam_id=CameraID("c09"), target_entry_area="down", notes="wait; overlap c09 possible"),
                  ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c12"), target_entry_area="upper left", notes="overlap c12 possible"),
+                 ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c12"), target_entry_area="upper left", notes="overlap c12 possible"),
             ],
             homography_matrix_path="homography_points_c13_scene_s14.npz"
         ),
@@ -102,17 +105,14 @@ class Settings(BaseSettings):
         ),
     }
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40, description="Min BBox area ratio in an exit quadrant to trigger handoff.")
-    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data", description="Directory relative to app root for homography .npz files.") # MODIFIED base dir name
+    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_points", description="Directory relative to app root for homography .npz files, matching Docker container path.")
 
 
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(
         default_factory=lambda: [
             # --- Factory Overlaps ---
-            ("c09", "c13"),
-            ("c09", "c16"),
-            ("c12", "c13"),
-            ("c13", "c16"),
-            # --- Campus Overlaps ---
+            ("c09", "c12"), ("c12", "c13"), ("c13", "c16"),
+            # --- Campus Overlaps --- 
             ("c01", "c03"),
             ("c02", "c03"),
             ("c03", "c05"),
@@ -146,8 +146,7 @@ class Settings(BaseSettings):
     TRACKER_HALF_PRECISION: bool = False
     TRACKER_PER_CLASS: bool = False
     
-    # ReID Model Type and Precision (example for BoxMOTFeatureExtractor if used standalone)
-    REID_MODEL_TYPE: str = "clip" # Example, could be 'osnet', etc.
+    REID_MODEL_TYPE: str = "clip" 
     REID_MODEL_HALF_PRECISION: bool = False
 
 
