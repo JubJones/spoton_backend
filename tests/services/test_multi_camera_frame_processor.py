@@ -16,8 +16,8 @@ from app.services.notification_service import NotificationService
 from app.services.reid_components import ReIDStateManager
 from app.common_types import (
     CameraID, TrackKey, GlobalID, FeatureVector, FrameBatch, FrameData, RawDetection,
-    TrackedObjectData, BoundingBoxXYXY, TrackID,
-    HandoffTriggerInfo, ExitRuleModel, ExitDirection, CameraHandoffDetailConfig
+    TrackedObjectData, BoundingBoxXYXY, TrackID, QuadrantName, # MODIFIED: Added QuadrantName
+    HandoffTriggerInfo, ExitRuleModel, CameraHandoffDetailConfig
 )
 # mock_settings is available from conftest.py
 
@@ -72,7 +72,7 @@ def multi_camera_processor_instance(
     mock_camera_tracker_factory,
     mock_homography_service,
     mock_notification_service, 
-    mock_settings,
+    mock_settings, # From conftest.py
     mocker
 ):
     """Provides an instance of MultiCameraFrameProcessor with mocked dependencies."""
@@ -148,6 +148,7 @@ def test_parse_raw_tracker_output_empty_or_malformed(multi_camera_processor_inst
     parsed_malformed = multi_camera_processor_instance._parse_raw_tracker_output(task_id, cam_id, malformed)
     assert parsed_malformed == []
 
+
 @pytest.mark.asyncio
 async def test_process_frame_batch_basic_flow(
     multi_camera_processor_instance: MultiCameraFrameProcessor,
@@ -156,7 +157,7 @@ async def test_process_frame_batch_basic_flow(
     mock_tracker_instance: AsyncMock, 
     mock_homography_service: MagicMock,
     mock_reid_manager: MagicMock,
-    mock_settings, 
+    mock_settings, # From conftest.py
     mocker
 ):
     task_id = uuid.uuid4()
@@ -227,7 +228,7 @@ async def test_process_frame_batch_basic_flow(
     assert tracked_obj.global_person_id == gid_assigned
     assert tracked_obj.bbox_xyxy == [10.0, 10.0, 20.0, 20.0]
     assert tracked_obj.confidence == pytest.approx(0.9)
-    assert tracked_obj.feature_vector == pytest.approx([0.1, 0.2, 0.3]) # MODIFIED
+    assert tracked_obj.feature_vector == pytest.approx([0.1, 0.2, 0.3]) 
     assert tracked_obj.map_coords == [50.0, 75.0] 
 
 
@@ -256,6 +257,63 @@ async def test_process_frame_batch_no_detections(
     call_args_tracker_update = mock_tracker_instance.update.call_args[0]
     assert np.array_equal(call_args_tracker_update[0], expected_empty_dets_for_tracker)
 
-    mock_reid_manager.associate_features_and_update_state.assert_not_called()
+    # Check if associate_features_and_update_state was called correctly (even if with empty data)
+    # Based on current logic, it IS called if active_track_keys_this_batch_set is not empty,
+    # which could be true if tracker outputs tracks even with no detections (e.g., lost tracks).
+    # If tracker outputs nothing, then it might not be called.
+    # For this test, mock_tracker_instance.update returns empty, so active_track_keys_this_batch_set will be empty.
+    mock_reid_manager.associate_features_and_update_state.assert_not_called() # MODIFIED based on current logic
     
     assert cam1_id not in batch_results or len(batch_results[cam1_id]) == 0
+
+
+@pytest.mark.asyncio
+async def test_check_handoff_triggers_new_quadrant_logic(
+    multi_camera_processor_instance: MultiCameraFrameProcessor,
+    mock_settings, # From conftest.py
+    mocker
+):
+    """Tests _check_handoff_triggers_for_camera with the new quadrant-based ExitRuleModel."""
+    task_id = uuid.uuid4()
+    env_id = "test_env"
+    cam_id_source = CameraID("c01")
+    frame_shape_hw = (200, 300) # H, W
+
+    # Configure a specific rule using source_exit_quadrant in mock_settings
+    target_cam = CameraID("c02")
+    exit_quad = QuadrantName("upper_right")
+    entry_area_desc = "left_side"
+    rule = ExitRuleModel(source_exit_quadrant=exit_quad, target_cam_id=target_cam, target_entry_area=entry_area_desc)
+    mock_settings.CAMERA_HANDOFF_DETAILS = {
+        (env_id, str(cam_id_source)): CameraHandoffDetailConfig(
+            exit_rules=[rule],
+            homography_matrix_path="dummy.npz" 
+        )
+    }
+    mock_settings.MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT = 0.5
+
+    # Tracked detection that overlaps significantly with the 'upper_right' quadrant
+    # upper_right for (W=300, H=200) is (150, 0, 300, 100)
+    # Bbox largely within this quadrant
+    tracked_dets_np = np.array([
+        [160, 10, 290, 90, 1, 0.9, 0] # x1, y1, x2, y2, track_id, conf, cls_id
+    ], dtype=np.float32)
+
+    triggers = multi_camera_processor_instance._check_handoff_triggers_for_camera(
+        task_id, env_id, cam_id_source, tracked_dets_np, frame_shape_hw
+    )
+
+    assert len(triggers) == 1
+    trigger_info = triggers[0]
+    assert trigger_info.source_track_key == (cam_id_source, TrackID(1))
+    assert trigger_info.rule == rule
+    assert trigger_info.source_bbox == [160.0, 10.0, 290.0, 90.0]
+
+    # Test with a track NOT in the quadrant
+    tracked_dets_np_no_trigger = np.array([
+        [10, 10, 50, 50, 2, 0.9, 0] 
+    ], dtype=np.float32)
+    triggers_no = multi_camera_processor_instance._check_handoff_triggers_for_camera(
+        task_id, env_id, cam_id_source, tracked_dets_np_no_trigger, frame_shape_hw
+    )
+    assert len(triggers_no) == 0
