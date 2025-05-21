@@ -3,14 +3,13 @@ Unit tests for the HomographyService in app.services.homography_service.
 """
 import pytest
 import numpy as np
-from pathlib import Path as StandardPath # Use StandardPath for actual path ops in test setup
+from pathlib import Path as StandardPath
 from unittest.mock import MagicMock, PropertyMock, call, AsyncMock
 
 from app.services.homography_service import HomographyService
 from app.core.config import Settings, CameraHandoffDetailConfig
-from app.common_types import CameraID, ExitRuleModel, ExitDirection
-# pathlib is imported in homography_service.py as `from pathlib import Path`
-# So, we need to patch 'app.services.homography_service.Path'
+from app.common_types import CameraID, ExitRuleModel
+
 
 @pytest.fixture
 def homography_service_instance(mock_settings):
