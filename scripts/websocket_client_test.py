@@ -190,7 +190,8 @@ async def main():
     """
     Main function to run the client. 
     """
-    environment_id_to_process = "factory" # Changed default to factory for testing with provided JSON
+    # environment_id_to_process = "factory" # Changed default to factory for testing with provided JSON
+    environment_id_to_process = "campus" # Changed default to factory for testing with provided JSON
     if len(sys.argv) > 1:
         environment_id_to_process = sys.argv[1]
         logger.info(f"Using environment_id from command line argument: '{environment_id_to_process}'")
