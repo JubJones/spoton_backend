@@ -7,7 +7,10 @@ import numpy as np
 from unittest.mock import MagicMock, PropertyMock, call
 
 from app.services.reid_components import ReIDStateManager
-from app.common_types import CameraID, TrackID, GlobalID, FeatureVector, TrackKey, HandoffTriggerInfo, ExitRuleModel, ExitDirection
+from app.common_types import ( # MODIFIED: ExitDirection removed, QuadrantName added
+    CameraID, TrackID, GlobalID, FeatureVector, TrackKey, QuadrantName,
+    HandoffTriggerInfo, ExitRuleModel
+)
 # mock_settings is available from conftest.py
 
 @pytest.fixture
@@ -32,8 +35,8 @@ def test_get_new_global_id(reid_manager_instance: ReIDStateManager):
     """Tests generation of new GlobalIDs."""
     gid1 = reid_manager_instance.get_new_global_id()
     gid2 = reid_manager_instance.get_new_global_id()
-    assert isinstance(gid1, str) # MODIFIED: NewType results in str at runtime
-    assert isinstance(gid2, str) # MODIFIED: NewType results in str at runtime
+    assert isinstance(gid1, str)
+    assert isinstance(gid2, str)
     assert gid1 != gid2
 
 def test_normalize_embedding(reid_manager_instance: ReIDStateManager):
@@ -76,16 +79,21 @@ def test_should_attempt_reid_for_track(reid_manager_instance: ReIDStateManager, 
     frame_count = 100
     mock_settings.REID_REFRESH_INTERVAL_FRAMES = 10
 
+    # Test Case 1: New track
     assert reid_manager_instance._should_attempt_reid_for_track(tk1, frame_count, {}) is True
 
+    # Test Case 2: Known track, due for refresh
     reid_manager_instance.track_to_global_id[tk1] = GlobalID("g1")
     reid_manager_instance.track_last_reid_frame[tk1] = frame_count - mock_settings.REID_REFRESH_INTERVAL_FRAMES
     assert reid_manager_instance._should_attempt_reid_for_track(tk1, frame_count, {}) is True
 
+    # Test Case 3: Known track, not due for refresh
     reid_manager_instance.track_last_reid_frame[tk1] = frame_count - 1
     assert reid_manager_instance._should_attempt_reid_for_track(tk1, frame_count, {}) is False
 
-    rule = ExitRuleModel(direction=ExitDirection("left"), target_cam_id=CameraID("c2"), target_entry_area="test")
+    # Test Case 4: Known track, not due for refresh, BUT has an active handoff trigger
+    # MODIFIED: Use source_exit_quadrant in ExitRuleModel
+    rule = ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c2"), target_entry_area="test_entry")
     trigger_info = HandoffTriggerInfo(source_track_key=tk1, rule=rule, source_bbox=[0,0,1,1])
     assert reid_manager_instance._should_attempt_reid_for_track(tk1, frame_count, {tk1: trigger_info}) is True
 
@@ -150,7 +158,9 @@ async def test_associate_features_match_lost_gallery(reid_manager_instance: ReID
     reid_manager_instance.lost_track_gallery[gid_lost] = (norm_feat_lost, 0) 
 
     tk_reappearing: TrackKey = (CameraID("c2"), TrackID(30))
-    feat_reappearing_norm = FV(norm_feat_lost * 0.99) 
+    # Ensure the reappearing feature is similar enough to the lost one
+    feat_reappearing_array = norm_feat_lost * 0.99 # Simulate slight change but still similar
+    feat_reappearing_norm = FV(feat_reappearing_array.tolist())
     feat_reappearing_norm = reid_manager_instance._normalize_embedding(feat_reappearing_norm)
     assert feat_reappearing_norm is not None
 
@@ -174,14 +184,18 @@ async def test_associate_features_conflict_resolution(reid_manager_instance: ReI
     reid_manager_instance.reid_gallery[gid_target] = feat_target_gallery
 
     cam_id = CameraID("c1")
-    tk1: TrackKey = (cam_id, TrackID(1))
-    tk2: TrackKey = (cam_id, TrackID(2))
+    tk1: TrackKey = (cam_id, TrackID(1)) # Higher similarity to gid_target
+    tk2: TrackKey = (cam_id, TrackID(2)) # Lower similarity to gid_target
 
-    feat1_norm = FV(np.array([0.95] + [0.01]*511)) 
+    # feat1 will be more similar to feat_target_gallery
+    feat1_array = np.array([0.95] + [0.01]*511) 
+    feat1_norm = FV(feat1_array.tolist())
     feat1_norm = reid_manager_instance._normalize_embedding(feat1_norm)
     assert feat1_norm is not None
 
-    feat2_norm = FV(np.array([0.90] + [0.02]*511)) 
+    # feat2 will be less similar to feat_target_gallery but still above threshold
+    feat2_array = np.array([0.90] + [0.02]*511) 
+    feat2_norm = FV(feat2_array.tolist())
     feat2_norm = reid_manager_instance._normalize_embedding(feat2_norm)
     assert feat2_norm is not None
 
@@ -191,10 +205,13 @@ async def test_associate_features_conflict_resolution(reid_manager_instance: ReI
 
     await reid_manager_instance.associate_features_and_update_state(features_input, active_tracks, {}, 0)
 
+    # tk1 (higher sim) should get gid_target
     assert reid_manager_instance.track_to_global_id.get(tk1) == gid_target
+    
+    # tk2 (lower sim) should get a new GID because tk1 already took gid_target for this camera
     gid_tk2 = reid_manager_instance.track_to_global_id.get(tk2)
     assert gid_tk2 is not None
-    assert gid_tk2 != gid_target
+    assert gid_tk2 != gid_target # Must be a new GID
     assert gid_tk2 in reid_manager_instance.reid_gallery 
     np.testing.assert_array_almost_equal(reid_manager_instance.reid_gallery[gid_tk2], feat2_norm)
 
@@ -231,17 +248,22 @@ async def test_update_galleries_lifecycle(reid_manager_instance: ReIDStateManage
     reid_manager_instance.global_id_last_seen_cam[gid3_old_main] = CameraID("c3")
 
 
+    # Frame 1: tk2 disappears
     active_tracks_frame1 = {tk1} 
     await reid_manager_instance.update_galleries_lifecycle(active_tracks_frame1, 1)
     assert tk2 not in reid_manager_instance.track_to_global_id
     assert gid2_will_disappear in reid_manager_instance.lost_track_gallery
+    # Check the frame number when it was added to lost gallery
     assert reid_manager_instance.lost_track_gallery[gid2_will_disappear][1] == 0 
 
+    # Frame 6: tk2 (gid2_will_disappear) should be purged from lost gallery (0 + 5 < 6)
     await reid_manager_instance.update_galleries_lifecycle(active_tracks_frame1, 6)
     assert gid2_will_disappear not in reid_manager_instance.lost_track_gallery
 
-    reid_manager_instance.global_id_last_seen_frame[gid1] = 9 
+    # Frame 10: Main gallery pruning. gid1 should remain, gid3_old_main should be pruned.
+    # Update last_seen_frame for gid1 to be recent enough to survive pruning.
+    reid_manager_instance.global_id_last_seen_frame[gid1] = 9 # Seen at frame 9, prune threshold is 7 frames old from frame 10 (i.e. < 10-7 = 3)
 
     await reid_manager_instance.update_galleries_lifecycle(active_tracks_frame1, 10)
-    assert gid3_old_main not in reid_manager_instance.reid_gallery
-    assert gid1 in reid_manager_instance.reid_gallery
+    assert gid3_old_main not in reid_manager_instance.reid_gallery # Pruned
+    assert gid1 in reid_manager_instance.reid_gallery # Should still be there
