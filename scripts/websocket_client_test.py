@@ -20,26 +20,21 @@ logger = logging.getLogger("websocket_client")
 
 # --- Configuration ---
 BACKEND_BASE_URL = "http://localhost:8000"
-WEBSOCKET_BASE_URL = "ws://localhost:8000" # For direct ws:// scheme
-# Note: If your server is behind a reverse proxy that terminates TLS,
-# and FastAPI/Uvicorn is running on HTTP, WEBSOCKET_BASE_URL might still be ws://
-# The Origin header needs to match what the server expects.
+WEBSOCKET_BASE_URL = "ws://localhost:8000"
 API_V1_PREFIX = "/api/v1"
 HEALTH_CHECK_URL = f"{BACKEND_BASE_URL}/health"
 
 
-async def check_backend_health(max_retries=5, delay_seconds=3):
+async def check_backend_health(max_retries=10, delay_seconds=5): # Increased retries for slower startups
     """Polls the /health endpoint until the backend is healthy or retries are exhausted."""
     logger.info(f"Checking backend health at {HEALTH_CHECK_URL}...")
     async with httpx.AsyncClient() as client:
         for attempt in range(max_retries):
             try:
-                response = await client.get(HEALTH_CHECK_URL, timeout=5.0)
-                response.raise_for_status() # Raise for 4xx/5xx responses
+                response = await client.get(HEALTH_CHECK_URL, timeout=10.0) # Increased timeout
+                response.raise_for_status()
                 health_data = response.json()
-                logger.info(f"Health check response: {health_data}")
-                # Define what "healthy enough for WebSocket" means.
-                # For example, all critical components loaded.
+                logger.info(f"Health check response (attempt {attempt + 1}): {health_data}")
                 if health_data.get("status") == "healthy" and \
                    health_data.get("detector_model_loaded") is True and \
                    health_data.get("prototype_tracker_loaded (reid_model)") is True and \
@@ -72,17 +67,15 @@ async def start_processing_task(environment_id: str = "campus"):
             response.raise_for_status()
             data = response.json()
             task_id = data.get("task_id")
-            ws_path = data.get("websocket_url") # This is a relative path like /ws/tracking/{task_id}
+            ws_path = data.get("websocket_url")
 
             if not task_id or not ws_path:
                 logger.error(f"Could not get task_id or websocket_url from response: {data}")
                 return None, None
 
-            # Construct full WebSocket URL using WEBSOCKET_BASE_URL and the relative path
             if not ws_path.startswith("/"):
-                ws_path = "/" + ws_path # Ensure leading slash
+                ws_path = "/" + ws_path
             websocket_full_url = f"{WEBSOCKET_BASE_URL}{ws_path}"
-
 
             logger.info(f"Task '{task_id}' initiated. WebSocket URL: {websocket_full_url}")
             return task_id, websocket_full_url
@@ -102,9 +95,6 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
     """
     logger.info(f"Attempting to connect to WebSocket: {websocket_url}")
 
-    # The origin header should match the scheme and authority of the WebSocket URL's server.
-    # For ws://localhost:8000, origin is http://localhost:8000
-    # For wss://example.com, origin is https://example.com
     parsed_ws_url = urlparse(websocket_url)
     origin_scheme = "http" if parsed_ws_url.scheme == "ws" else "https"
     origin_value = f"{origin_scheme}://{parsed_ws_url.netloc}"
@@ -112,23 +102,15 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
     logger.info(f"Client attempting WebSocket connection to: {websocket_url}")
     logger.info(f"Client will use origin parameter for connect: '{origin_value}'")
 
-
-    # Explicitly pass origin for websockets.connect
     connect_kwargs: Dict[str, Any] = {
         "origin": origin_value,
-        "ping_interval": 20, # Send pings every 20s
-        "ping_timeout": 20,  # Wait 20s for pong response
+        "ping_interval": 20,
+        "ping_timeout": 20,
     }
 
-
     try:
-        # Type ignore for websockets.connect due to potential mismatch in stub vs actual library with kwargs
         async with websockets.connect(websocket_url, **connect_kwargs) as websocket: # type: ignore
             logger.info(f"Successfully connected to WebSocket for task '{task_id}' at {websocket_url}")
-            if hasattr(websocket, 'request_headers'):
-                 logger.debug(f"  WebSocket Connection Request Headers (client-side perspective): {websocket.request_headers}") # type: ignore
-            if hasattr(websocket, 'response_headers'):
-                 logger.debug(f"  WebSocket Connection Response Headers (client-side perspective): {websocket.response_headers}") # type: ignore
 
             try:
                 while True:
@@ -136,16 +118,16 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                     try:
                         message = json.loads(message_str)
                         msg_type = message.get("type")
-                        payload_data = message.get("payload", {}) # Default to empty dict if no payload
+                        payload_data = message.get("payload", {})
 
                         if msg_type == "tracking_update":
-                            frame_idx = payload_data.get("frame_index", "N/A")
+                            global_frame_idx = payload_data.get("global_frame_index", "N/A") # Changed key
                             scene_id = payload_data.get("scene_id", "N/A")
                             ts_processed = payload_data.get("timestamp_processed_utc", "N/A")
                             cameras_data = payload_data.get("cameras", {})
 
                             logger.info(
-                                f"[TASK {task_id}][TRACKING_UPDATE] Frame: {frame_idx}, Scene: {scene_id}, TS: {ts_processed}"
+                                f"[TASK {task_id}][TRACKING_UPDATE] GlobalFrame: {global_frame_idx}, Scene: {scene_id}, TS: {ts_processed}"
                             )
                             for cam_id, cam_content in cameras_data.items():
                                 image_src = cam_content.get("image_source", "N/A")
@@ -178,16 +160,22 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                             logger.info(f"  Current Step: {payload_data.get('current_step')}")
                             if payload_data.get('details'):
                                 logger.info(f"  Details: {payload_data.get('details')}")
-                        elif msg_type == "media_available": # Handle new message type
+                        
+                        elif msg_type == "media_available":
                             batch_idx = payload_data.get("sub_video_batch_index", "N/A")
-                            media_urls = payload_data.get("media_urls", [])
+                            media_urls_list = payload_data.get("media_urls", [])
                             logger.info(f"[TASK {task_id}][MEDIA_AVAILABLE] Sub-video batch index: {batch_idx}")
-                            for media_entry in media_urls:
+                            for entry in media_urls_list:
                                 logger.info(
-                                    f"  Cam: {media_entry.get('camera_id')}, "
-                                    f"Filename: {media_entry.get('sub_video_filename')}, "
-                                    f"URL: {BACKEND_BASE_URL}{media_entry.get('url')}" # Construct full URL
+                                    f"  Cam: {entry.get('camera_id')}, File: {entry.get('sub_video_filename')}, "
+                                    f"URL: {BACKEND_BASE_URL}{entry.get('url')}, " # Construct full URL
+                                    f"StartGlobalFrame: {entry.get('start_global_frame_index')}, "
+                                    f"NumFramesInSubVideo: {entry.get('num_frames_in_sub_video')}"
                                 )
+                        elif msg_type == "batch_processing_complete":
+                            batch_idx = payload_data.get("sub_video_batch_index", "N/A")
+                            logger.info(f"[TASK {task_id}][BATCH_PROCESSING_COMPLETE] Sub-video batch index: {batch_idx} finished.")
+                        
                         else:
                             logger.warning(f"Received unknown message type ('{msg_type}') or malformed JSON: {message_str[:300]}")
 
@@ -196,30 +184,26 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                     except Exception as e:
                         logger.error(f"Error processing WebSocket message: {e}", exc_info=True)
 
-            except websockets.exceptions.ConnectionClosedOK: # type: ignore
+            except websockets.exceptions.ConnectionClosedOK:
                 logger.info(f"WebSocket connection (task {task_id}) closed normally.")
-            except websockets.exceptions.ConnectionClosedError as e: # type: ignore
+            except websockets.exceptions.ConnectionClosedError as e:
                 logger.error(f"WebSocket connection (task {task_id}) closed with error: {e}")
     
-    except websockets.exceptions.InvalidStatusCode as e_status: # type: ignore
-        # This exception is raised if the server responds with an HTTP error status code during handshake.
+    except websockets.exceptions.InvalidStatusCode as e_status:
         logger.error(f"Failed to connect: WebSocket handshake failed with status {e_status.status_code}.")
-        if e_status.status_code == 403: # Example: Forbidden
+        if e_status.status_code == 403:
              logger.error(
                 "A 403 (Forbidden) error was received during WebSocket handshake. "
-                f"This might be due to an incorrect 'Origin' header or other server-side restrictions. Client used origin: '{origin_value}'"
+                f"Client used origin: '{origin_value}'"
             )
-        # Log the response headers if available
-        if hasattr(e_status, 'headers') and e_status.headers: # type: ignore
-            logger.error(f"Server response headers: {e_status.headers}") # type: ignore
+        if hasattr(e_status, 'headers') and e_status.headers:
+            logger.error(f"Server response headers: {e_status.headers}")
             
-    except TypeError as te: # Catch potential TypeErrors from websockets.connect arguments
+    except TypeError as te:
         logger.error(f"TypeError during websockets.connect(): {te}", exc_info=True)
-        logger.error(f"This might indicate an incompatibility with websockets=={getattr(websockets, '__version__', 'unknown')} "
-                     f"and the arguments passed: {connect_kwargs}")
     except ConnectionRefusedError:
         logger.error(f"Connection refused for WebSocket: {websocket_url}. Is the server running and accessible?")
-    except Exception as e_outer: # Catch-all for other unexpected errors during connect or in the loop
+    except Exception as e_outer:
         logger.error(f"Outer error managing WebSocket connection for {websocket_url}: {e_outer}", exc_info=True)
 
 
@@ -234,11 +218,9 @@ async def main():
     else:
         logger.info(f"Using default environment_id: '{environment_id_to_process}'")
 
-    # --- Health Check before starting task ---
     if not await check_backend_health():
         logger.error("Backend not healthy. Exiting client.")
         return
-    # --- End Health Check ---
 
     task_id, ws_full_url = await start_processing_task(environment_id_to_process)
 
