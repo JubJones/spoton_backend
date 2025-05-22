@@ -6,17 +6,17 @@ from pathlib import Path
 from typing import Callable # For ASGIApp type hint
 
 from app.core.config import settings
-from app.core import event_handlers 
+from app.core import event_handlers
 from app.api.v1.endpoints import processing_tasks
+from app.api.v1.endpoints import media as media_endpoints
 from app.api import websockets as ws_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class HeaderLoggingMiddleware:
-    # The first argument after self MUST be named 'app' to match Starlette's instantiation
-    def __init__(self, app: Callable): # 'app' is the next application in the ASGI stack
-        self.app = app # Store it
+    def __init__(self, app: Callable):
+        self.app = app
 
     async def __call__(self, scope, receive, send):
         if scope["type"] in ("http", "websocket"):
@@ -36,8 +36,8 @@ class HeaderLoggingMiddleware:
                 logger.info(f"--- WebSocket Connection Attempt --- \n{log_message}")
             elif scope["type"] == "http" and scope.get("path", "").startswith("/ws/"):
                 logger.info(f"--- HTTP to WebSocket Upgrade Attempt --- \n{log_message}")
-        
-        await self.app(scope, receive, send) # Call the stored app
+
+        await self.app(scope, receive, send)
 
 @asynccontextmanager
 async def lifespan(app_instance: FastAPI):
@@ -46,7 +46,7 @@ async def lifespan(app_instance: FastAPI):
     Path(settings.LOCAL_FRAME_EXTRACTION_DIR).mkdir(parents=True, exist_ok=True)
     logger.info(f"Ensured local video download dir: {settings.LOCAL_VIDEO_DOWNLOAD_DIR}")
     logger.info(f"Ensured local frame extraction dir: {settings.LOCAL_FRAME_EXTRACTION_DIR}")
-    await event_handlers.on_startup(app_instance) 
+    await event_handlers.on_startup(app_instance)
     yield
     logger.info("Application shutdown sequence initiated...")
     await event_handlers.on_shutdown(app_instance)
@@ -55,29 +55,32 @@ app = FastAPI(
     title=settings.APP_NAME,
     debug=settings.DEBUG,
     version="0.1.0",
-    lifespan=lifespan, 
+    lifespan=lifespan,
     openapi_url=f"{settings.API_V1_PREFIX}/openapi.json",
-    docs_url=f"/docs", 
-    redoc_url=f"/redoc" 
+    docs_url=f"/docs",
+    redoc_url=f"/redoc"
 )
 
-# --- Middleware Stack Order Matters ---
-# This is the correct way to add middleware without additional args for its __init__
-app.add_middleware(HeaderLoggingMiddleware) 
+app.add_middleware(HeaderLoggingMiddleware)
 
 app.add_middleware(
-    CORSMiddleware, # CORSMiddleware.__init__ also takes 'app' as its first arg
-    allow_origins=["*"], 
-    allow_credentials=True, 
-    allow_methods=["*"], 
-    allow_headers=["*"], 
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 api_v1_router_prefix = settings.API_V1_PREFIX
 app.include_router(
     processing_tasks.router,
-    prefix=f"{api_v1_router_prefix}/processing-tasks", 
+    prefix=f"{api_v1_router_prefix}/processing-tasks",
     tags=["V1 - Processing Tasks"]
+)
+app.include_router(
+    media_endpoints.router,
+    prefix=f"{api_v1_router_prefix}/media",
+    tags=["V1 - Media Content"]
 )
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
 
@@ -87,23 +90,22 @@ async def read_root():
 
 @app.get("/health", tags=["Health"])
 async def health_check(request: Request):
-    # Using .get on app.state is safer in case an attribute was not set due to startup error
-    detector_state = request.app.state.get('detector')
-    tracker_factory_state = request.app.state.get('tracker_factory')
-    homography_service_state = request.app.state.get('homography_service')
+    detector_state = getattr(request.app.state, 'detector', None)
+    tracker_factory_state = getattr(request.app.state, 'tracker_factory', None)
+    homography_service_state = getattr(request.app.state, 'homography_service', None)
 
     detector_ready = detector_state and detector_state._model_loaded_flag
     tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
     homography_ready = homography_service_state and homography_service_state._preloaded
-    
+
     status_report = {
         "status": "healthy",
-        "detector_model_loaded": bool(detector_ready), # Ensure boolean
+        "detector_model_loaded": bool(detector_ready),
         "prototype_tracker_loaded (reid_model)": bool(tracker_factory_ready),
         "homography_matrices_precomputed": bool(homography_ready)
     }
     if not all([detector_ready, tracker_factory_ready, homography_ready]):
-        status_report["status"] = "degraded"
+        status_report["status"] = "degraded" # Or "starting_up" if more granular states are desired
         logger.warning(f"Health check: One or more components not fully ready: {status_report}")
-        
+
     return status_report
