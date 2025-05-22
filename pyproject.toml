@@ -38,8 +38,11 @@ dependencies = [
     "loguru>=0.7.2,<0.8.0",
     "httpx>=0.27.0,<0.28.0",
     "setuptools>=60.0.0",
-    "cython>=0.29.0,<0.30.0",
+    "cython>=0.29.0,<0.30.0", # Often a build dep for others like faiss
     "pip>=23.0,<25.0",
+    "faiss-cpu>=1.7.4,<1.8.0", # MODIFIED: Added faiss-cpu
+    # If using faiss-gpu:
+    # "faiss-gpu>=1.7.2,<1.8.0", # Ensure CUDA compatibility
 ]
 [project.urls]
 Homepage = "https://github.com/JubJones/spoton_backend"
@@ -50,7 +53,6 @@ dev = [
     "pytest-asyncio>=0.23.0,<0.24.0",
     "pytest-mock>=3.12.0,<3.13.0",
     "ruff>=0.4.2,<0.5.0",
-    # Cython removed from here if it's a core build dependency for other packages
 ]
 [tool.hatch.build.targets.wheel]
 packages = ["app"]
@@ -58,26 +60,9 @@ packages = ["app"]
 line-length = 88
 target-version = "py39"
 select = [
-    "E",
-    "W",
-    "F",
-    "I",
-    "UP",
-    "C90",
-    "N",
-    "D",
-    "ANN",
-    "BLE",
-    "B",
-    "A",
-    "RUF",
+    "E", "W", "F", "I", "UP", "C90", "N", "D", "ANN", "BLE", "B", "A", "RUF",
 ]
-ignore = [
-    "D203",
-    "D212",
-    # "ANN101", "ANN102", # Allow for now, can be enabled for stricter typing
-    "ANN401", # Allow Any types for now where Pydantic or external libs use them
-]
+ignore = [ "D203", "D212", "ANN401"]
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
