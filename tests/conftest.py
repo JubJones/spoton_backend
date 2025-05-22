@@ -1,4 +1,3 @@
-# FILE: tests/conftest.py
 """
 Global fixtures for the SpotOn backend test suite.
 """
@@ -6,9 +5,10 @@ import pytest
 from unittest.mock import MagicMock, PropertyMock
 from pathlib import Path
 from typing import List, Dict, Tuple, Any, Set, Optional
+import math
 
 from app.core.config import Settings, VideoSetEnvironmentConfig, CameraHandoffDetailConfig
-from app.common_types import CameraID, ExitRuleModel, QuadrantName # MODIFIED: QuadrantName, ExitDirection removed
+from app.common_types import CameraID, ExitRuleModel, QuadrantName
 
 @pytest.fixture(scope="session")
 def mock_settings_base_values() -> Dict[str, Any]:
@@ -16,6 +16,7 @@ def mock_settings_base_values() -> Dict[str, Any]:
     Provides a dictionary of base values for a mocked Settings object.
     Tests can override these by providing their own dictionary to mock_settings.
     """
+    base_cosine_sim_thresh = 0.6 # For deriving L2
     return {
         "APP_NAME": "SpotOn Test Backend",
         "API_V1_PREFIX": "/api/v1/test",
@@ -32,7 +33,7 @@ def mock_settings_base_values() -> Dict[str, Any]:
             VideoSetEnvironmentConfig(remote_base_key="video_test/c01", env_id="test_env", cam_id="c01", num_sub_videos=1),
             VideoSetEnvironmentConfig(remote_base_key="video_test/c02", env_id="test_env", cam_id="c02", num_sub_videos=1),
         ],
-        "CAMERA_HANDOFF_DETAILS": { # MODIFIED: Updated to use source_exit_quadrant
+        "CAMERA_HANDOFF_DETAILS": {
             ("test_env", "c01"): CameraHandoffDetailConfig(
                 exit_rules=[
                     ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c02"), target_entry_area="left_side")
@@ -66,7 +67,13 @@ def mock_settings_base_values() -> Dict[str, Any]:
         "TRACKER_PER_CLASS": False,
         "REID_MODEL_TYPE": "clip",
         "REID_MODEL_HALF_PRECISION": False,
-        "REID_SIMILARITY_THRESHOLD": 0.6,
+        
+        # --- MODIFIED/ADDED Re-ID Settings for Tests ---
+        "REID_SIMILARITY_METHOD": "faiss_l2", # Default for tests
+        "REID_SIMILARITY_THRESHOLD": base_cosine_sim_thresh, 
+        "REID_L2_DISTANCE_THRESHOLD": None, # Let it be derived by default
+        # --- END MODIFIED/ADDED ---
+        
         "REID_GALLERY_EMA_ALPHA": 0.85,
         "REID_REFRESH_INTERVAL_FRAMES": 15,
         "REID_LOST_TRACK_BUFFER_FRAMES": 150,
@@ -77,6 +84,8 @@ def mock_settings_base_values() -> Dict[str, Any]:
         "resolved_reid_weights_path": Path("./test_weights/test_clip_model.pt"),
         "resolved_homography_base_path": Path("./test_homography_data"),
         "normalized_possible_camera_overlaps": {tuple(sorted((CameraID("c01"), CameraID("c02"))))},
+        # Add the derived_l2_distance_threshold for the mock property
+        "derived_l2_distance_threshold": math.sqrt(max(0, 2 * (1 - base_cosine_sim_thresh))),
     }
 
 @pytest.fixture
@@ -87,7 +96,11 @@ def mock_settings(mocker, mock_settings_base_values: Dict[str, Any]) -> MagicMoc
     mocked_settings = MagicMock(spec=Settings)
 
     for key, value in mock_settings_base_values.items():
-        if key in ["resolved_reid_weights_path", "resolved_homography_base_path", "normalized_possible_camera_overlaps"]:
+        # For properties, mock them on the type of the mock
+        if key in ["resolved_reid_weights_path", 
+                   "resolved_homography_base_path", 
+                   "normalized_possible_camera_overlaps",
+                   "derived_l2_distance_threshold"]: # MODIFIED: Add new property
             prop_mock = PropertyMock(return_value=value)
             setattr(type(mocked_settings), key, prop_mock) 
         else:
@@ -97,37 +110,24 @@ def mock_settings(mocker, mock_settings_base_values: Dict[str, Any]) -> MagicMoc
     
     return mocked_settings
 
+# manage_test_dirs fixture remains the same
 @pytest.fixture(scope="session", autouse=True)
 def manage_test_dirs(mock_settings_base_values: Dict[str, Any]):
-    """
-    Automatically creates specified test directories before the test session
-    and cleans them up after the test session.
-    """
     import shutil
     import os
-
     project_root = Path(__file__).parent.parent 
-    
     dirs_to_manage_relative = [
         mock_settings_base_values["LOCAL_VIDEO_DOWNLOAD_DIR"],
         mock_settings_base_values["LOCAL_FRAME_EXTRACTION_DIR"],
         mock_settings_base_values["WEIGHTS_DIR"],
         mock_settings_base_values["HOMOGRAPHY_DATA_DIR"],
     ]
-    
     absolute_dirs_to_manage = [project_root / Path(d) for d in dirs_to_manage_relative]
-
     for test_dir_path in absolute_dirs_to_manage:
-        try:
-            os.makedirs(test_dir_path, exist_ok=True)
-        except OSError as e:
-            print(f"Warning: Could not create test directory {test_dir_path}: {e}")
-
+        try: os.makedirs(test_dir_path, exist_ok=True)
+        except OSError as e: print(f"Warning: Could not create test directory {test_dir_path}: {e}")
     yield 
-
     for test_dir_path in absolute_dirs_to_manage:
         if test_dir_path.exists():
-            try:
-                shutil.rmtree(test_dir_path)
-            except OSError as e:
-                print(f"Warning: Error cleaning up test directory {test_dir_path}: {e}")
+            try: shutil.rmtree(test_dir_path)
+            except OSError as e: print(f"Warning: Error cleaning up test directory {test_dir_path}: {e}")
