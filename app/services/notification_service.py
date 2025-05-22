@@ -1,7 +1,8 @@
 import logging
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from app.api.websockets import ConnectionManager
+from app.api.v1.schemas import MediaURLEntry
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +25,7 @@ class NotificationService:
 
         Args:
             task_id: The ID of the processing task.
-            update_payload: The dictionary containing the tracking data for the frame
-                            (e.g., camera_id, timestamp, frame_path, tracking_data list).
+            update_payload: The dictionary containing the tracking data for the frame.
         """
         if not task_id:
             logger.warning("Attempted to send tracking update with empty task_id.")
@@ -35,7 +35,6 @@ class NotificationService:
             "type": "tracking_update",
             "payload": update_payload
         }
-        # logger.debug(f"Broadcasting tracking update for task {task_id}")
         try:
             await self.manager.broadcast_to_task(task_id, message_to_send)
         except Exception as e:
@@ -47,8 +46,7 @@ class NotificationService:
 
         Args:
             task_id: The ID of the processing task.
-            status_payload: The dictionary containing the status information
-                            (e.g., status, progress, current_step, details).
+            status_payload: The dictionary containing the status information.
         """
         if not task_id:
             logger.warning("Attempted to send status update with empty task_id.")
@@ -56,10 +54,43 @@ class NotificationService:
 
         message_to_send = {
             "type": "status_update",
-            "payload": status_payload # Send the raw status dict as payload
+            "payload": status_payload
         }
-        # logger.info(f"Broadcasting status update for task {task_id}: {status_payload.get('status')} - {status_payload.get('current_step')}")
         try:
             await self.manager.broadcast_to_task(task_id, message_to_send)
         except Exception as e:
             logger.error(f"Error broadcasting status update for task {task_id}: {e}", exc_info=True)
+
+    async def send_media_available_notification(
+        self,
+        task_id: str,
+        sub_video_batch_index: int,
+        media_entries: List[MediaURLEntry]
+    ):
+        """
+        Sends a notification that a new batch of sub-videos is available for streaming.
+
+        Args:
+            task_id: The ID of the processing task.
+            sub_video_batch_index: The 0-indexed identifier for this batch of sub-videos.
+            media_entries: A list of MediaURLEntry objects, each containing camera_id and its backend URL.
+        """
+        if not task_id:
+            logger.warning("Attempted to send media available notification with empty task_id.")
+            return
+
+        # Convert MediaURLEntry objects to dictionaries for JSON serialization
+        media_urls_payload = [entry.model_dump() for entry in media_entries]
+
+        message_to_send = {
+            "type": "media_available",
+            "payload": {
+                "sub_video_batch_index": sub_video_batch_index,
+                "media_urls": media_urls_payload
+            }
+        }
+        logger.info(f"Broadcasting media_available for task {task_id}, batch index {sub_video_batch_index}, URLs: {len(media_urls_payload)}")
+        try:
+            await self.manager.broadcast_to_task(task_id, message_to_send)
+        except Exception as e:
+            logger.error(f"Error broadcasting media_available for task {task_id}: {e}", exc_info=True)
