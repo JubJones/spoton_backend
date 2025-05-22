@@ -11,6 +11,7 @@ import uuid
 from datetime import datetime, timezone
 from collections import defaultdict
 import numpy as np
+import math # For math.ceil
 
 import cv2 # OpenCV for video processing
 
@@ -38,12 +39,13 @@ class BatchedFrameProvider:
         self.video_paths_map = video_paths_map
         self.target_fps = target_fps
         self.loop_videos = loop_videos
-        
+
         self.video_captures: Dict[CameraID, cv2.VideoCapture] = {}
         self.video_actual_fps: Dict[CameraID, float] = {}
         self.frame_skip_intervals: Dict[CameraID, int] = {}
         self.frame_counters_read: Dict[CameraID, int] = defaultdict(int)
-        self.total_frames_in_video: Dict[CameraID, int] = {}
+        self.total_frames_in_video: Dict[CameraID, int] = {} # Original number of frames
+        self.num_processed_frames_per_video: Dict[CameraID, int] = {} # Expected frames after skipping
         self.current_frame_index_processed_per_cam: Dict[CameraID, int] = defaultdict(int)
 
         self._is_open = False
@@ -55,7 +57,7 @@ class BatchedFrameProvider:
             if not video_path.exists():
                 logger.error(f"[Task {self.task_id}][{cam_id}] Video file not found: {video_path}. Will skip this camera.")
                 continue
-            
+
             cap = cv2.VideoCapture(str(video_path))
             if not cap.isOpened():
                 logger.error(f"[Task {self.task_id}][{cam_id}] Could not open video: {video_path}. Will skip this camera.")
@@ -63,21 +65,35 @@ class BatchedFrameProvider:
 
             self.video_captures[cam_id] = cap
             actual_fps = cap.get(cv2.CAP_PROP_FPS)
-            self.video_actual_fps[cam_id] = actual_fps if actual_fps > 0 else 25.0 # Default if FPS read fails
-            self.total_frames_in_video[cam_id] = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.video_actual_fps[cam_id] = actual_fps if actual_fps > 0 else 25.0
+            total_original_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            self.total_frames_in_video[cam_id] = total_original_frames
 
             skip_interval = 1
             if self.target_fps > 0 and self.video_actual_fps[cam_id] > self.target_fps:
                 skip_interval = max(1, round(self.video_actual_fps[cam_id] / self.target_fps))
             self.frame_skip_intervals[cam_id] = skip_interval
-            
+
+            if total_original_frames > 0 and skip_interval > 0:
+                self.num_processed_frames_per_video[cam_id] = math.ceil(total_original_frames / skip_interval)
+            else:
+                self.num_processed_frames_per_video[cam_id] = 0
+
             logger.info(
                 f"[Task {self.task_id}][{cam_id}] Opened video {video_path.name}. "
                 f"Actual FPS: {self.video_actual_fps[cam_id]:.2f}, "
                 f"Target FPS: {self.target_fps}, Skip Interval: {skip_interval}, "
-                f"Total Frames: {self.total_frames_in_video[cam_id]}."
+                f"Total Original Frames: {self.total_frames_in_video[cam_id]}, "
+                f"Est. Processed Frames: {self.num_processed_frames_per_video[cam_id]}."
             )
         self._is_open = True
+
+    def get_num_processed_frames_for_camera(self, cam_id: CameraID) -> int:
+        """
+        Returns the estimated number of frames that will be processed (yielded)
+        for a given camera from its current sub-video, considering skip intervals.
+        """
+        return self.num_processed_frames_per_video.get(cam_id, 0)
 
     async def get_next_frame_batch(self) -> Tuple[FrameBatch, bool]:
         """
@@ -97,69 +113,49 @@ class BatchedFrameProvider:
 
         current_batch: FrameBatch = {}
         any_video_active = False
-        
+
         tasks = []
         for cam_id, cap in self.video_captures.items():
             tasks.append(self._read_frame_for_camera(cam_id, cap))
-        
+
         results = await asyncio.gather(*tasks)
 
         for cam_id_res, frame_data_res in results:
             current_batch[cam_id_res] = frame_data_res
             if frame_data_res is not None:
                 any_video_active = True
-        
-        # If looping and all videos ended, try to reopen them (simplistic loop for now)
+
         if not any_video_active and self.loop_videos and self.video_captures:
             logger.info(f"[Task {self.task_id}] All videos ended, looping enabled. Re-opening videos.")
-            self.close() # Close current captures
-            self._open_videos() # Re-open
-            # Retry getting the first batch after re-opening
-            # This recursive call is okay if loop_videos is typically False or for short demos.
-            # For long-running loops, a more robust state reset is needed.
+            self.close()
+            self._open_videos()
             if self._is_open:
-                 return await self.get_next_frame_batch() # Get the first batch of the new loop
-            else: # Failed to re-open
+                 return await self.get_next_frame_batch()
+            else:
                  return {}, False
-
 
         return current_batch, any_video_active
 
     async def _read_frame_for_camera(self, cam_id: CameraID, cap: cv2.VideoCapture) -> Tuple[CameraID, Optional[FrameData]]:
         """Helper to read a frame from a single camera respecting skip interval."""
-        # This function is synchronous internally but called via asyncio.gather
-        # cv2.VideoCapture.read() is blocking.
-        # To make this truly async per frame, each read needs to be in a thread.
-        # For now, asyncio.gather is used on these sync calls, meaning they block the event loop
-        # one by one when their turn comes in gather. This is okay if frame reads are fast.
-
         frame_image_np: Optional[np.ndarray] = None
-        pseudo_frame_path = "" # Used for logging/identification
+        pseudo_frame_path = ""
 
         if cap.isOpened():
             for _ in range(self.frame_skip_intervals[cam_id]):
                 ret, frame = await asyncio.to_thread(cap.read)
                 self.frame_counters_read[cam_id] += 1
                 if not ret:
-                    if self.loop_videos: # If looping, reset specific capture
-                        logger.debug(f"[Task {self.task_id}][{cam_id}] Video ended, will loop. Current read count: {self.frame_counters_read[cam_id]}.")
-                        # Simple reset: reopen this specific video
-                        # This part is tricky with async; for simplicity, we mark as ended for this batch
-                        # Looping is handled at the batch level for now.
-                        pass # Let the batch level handle looping
-                    break # Break from skip loop if video ends
-                frame_image_np = frame # Keep the last read frame within the skip window
+                    break
+                frame_image_np = frame
             
             if frame_image_np is not None:
                 self.current_frame_index_processed_per_cam[cam_id] +=1
-                # Construct a pseudo path for identification based on video name and frame index
                 video_file_name = Path(self.video_paths_map[cam_id]).name
                 pseudo_frame_path = f"cam_{cam_id}/{video_file_name}/frame_{self.current_frame_index_processed_per_cam[cam_id]:06d}.jpg"
                 return cam_id, (frame_image_np, pseudo_frame_path)
 
-        # logger.debug(f"[Task {self.task_id}][{cam_id}] Video ended or failed to read frame.")
         return cam_id, None
-
 
     def close(self):
         """Releases all video capture objects."""
@@ -179,11 +175,10 @@ class VideoDataManagerService:
         self.asset_downloader = asset_downloader
         self.video_sets_config: List[VideoSetEnvironmentConfig] = settings.VIDEO_SETS
         self.local_video_dir_base: Path = Path(settings.LOCAL_VIDEO_DOWNLOAD_DIR)
-        # For task-specific subdirectories, e.g., ./downloaded_videos/<task_id>/...
         logger.info("VideoDataManagerService initialized.")
 
     async def download_sub_videos_for_environment_batch(
-        self, task_id: uuid.UUID, environment_id: str, sub_video_index: int # 0-indexed
+        self, task_id: uuid.UUID, environment_id: str, sub_video_index: int
     ) -> Dict[CameraID, Path]:
         """
         Downloads a specific sub-video (by index) for all relevant cameras
@@ -192,11 +187,10 @@ class VideoDataManagerService:
         Args:
             task_id: The unique ID of the processing task.
             environment_id: The environment (e.g., "campus").
-            sub_video_index: The 0-based index of the sub-video (e.g., 0 for "sub_video_01.mp4").
+            sub_video_index: The 0-based index of the sub-video.
 
         Returns:
             A dictionary mapping CameraID to the local Path of the downloaded sub-video.
-            Empty dict if no videos found or downloads fail.
         """
         logger.info(
             f"[Task {task_id}] Downloading sub_video index {sub_video_index} for env '{environment_id}'."
@@ -215,7 +209,7 @@ class VideoDataManagerService:
             return {}
 
         download_coroutines = []
-        video_metadata_for_download = [] # Store (cam_id, remote_key, local_path)
+        video_metadata_for_download = []
 
         for cam_config in cameras_in_env:
             if sub_video_index >= cam_config.num_sub_videos:
@@ -225,11 +219,9 @@ class VideoDataManagerService:
                 )
                 continue
 
-            # sub_video_filename_pattern uses 1-based indexing for {idx}
             video_filename = cam_config.sub_video_filename_pattern.format(idx=sub_video_index + 1)
             remote_video_key = f"{cam_config.remote_base_key.strip('/')}/{video_filename}"
             
-            # Store in task_specific_video_dir / environment_id / camera_id / video_filename
             local_cam_video_download_dir = task_specific_video_dir / environment_id / cam_config.cam_id
             local_cam_video_download_dir.mkdir(parents=True, exist_ok=True)
             local_video_path = local_cam_video_download_dir / video_filename
@@ -250,7 +242,6 @@ class VideoDataManagerService:
                 )
             else:
                 logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
-                # Simulate successful coroutine for asyncio.gather
                 async def _mock_download_success(): return True
                 download_coroutines.append(_mock_download_success())
         
@@ -289,7 +280,7 @@ class VideoDataManagerService:
             task_id=task_id,
             video_paths_map=local_video_paths_map,
             target_fps=settings.TARGET_FPS,
-            jpeg_quality=settings.FRAME_JPEG_QUALITY, # Not directly used by provider, but for consistency
+            jpeg_quality=settings.FRAME_JPEG_QUALITY,
             loop_videos=loop_videos
         )
 
@@ -298,7 +289,6 @@ class VideoDataManagerService:
         task_specific_video_dir = self.local_video_dir_base / str(task_id)
         if task_specific_video_dir.exists():
             try:
-                # Use asyncio.to_thread for shutil.rmtree if it's blocking
                 import shutil
                 await asyncio.to_thread(shutil.rmtree, task_specific_video_dir)
                 logger.info(f"[Task {task_id}] Cleaned up downloaded video data from {task_specific_video_dir}.")
@@ -311,7 +301,6 @@ class VideoDataManagerService:
         """
         Determines the maximum number of sub-videos any camera in the specified
         environment has. This helps determine how many sub-video batches to process.
-        Returns 0 if environment or cameras not found.
         """
         max_subs = 0
         cameras_in_env = [
