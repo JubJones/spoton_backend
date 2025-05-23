@@ -1,5 +1,9 @@
 """
 API Endpoints for serving media files (sub-videos).
+
+NOTE: With the shift to sending frame images directly via WebSockets,
+this endpoint's role for primary real-time frontend display is deprecated.
+It may be retained for debugging, direct sub-video downloads, or alternative use cases.
 """
 import logging
 from pathlib import Path
@@ -15,15 +19,15 @@ router = APIRouter()
 
 @router.get(
     "/tasks/{task_id}/environments/{environment_id}/cameras/{camera_id}/sub_videos/{sub_video_filename}",
-    summary="Serve a specific sub-video file",
-    response_class=StreamingResponse # Use StreamingResponse for better large file handling
+    summary="Serve a specific sub-video file (DEPRECATED for primary frontend display)",
+    response_class=StreamingResponse 
 )
 async def serve_sub_video(
     task_id: uuid.UUID,
     environment_id: str,
     camera_id: str,
     sub_video_filename: str,
-    request: Request # To get base URL if needed, or for range requests later
+    request: Request 
 ):
     """
     Streams a specific sub-video file that has been downloaded by the backend
@@ -31,11 +35,12 @@ async def serve_sub_video(
 
     The file path is constructed based on the application's local video download directory
     and the provided path parameters.
+
+    **Note:** This endpoint is considered deprecated for the primary real-time frontend display,
+    as frame images are now sent directly via WebSockets in `tracking_update` messages.
+    It can be used for debugging or allowing users to download full sub-video segments.
     """
     try:
-        # Construct the path to the video file in the local cache
-        # This path structure must match exactly how VideoDataManagerService saves files.
-        # LOCAL_VIDEO_DOWNLOAD_DIR / task_id / environment_id / camera_id / sub_video_filename
         base_download_dir = Path(settings.LOCAL_VIDEO_DOWNLOAD_DIR)
         video_file_path = base_download_dir / str(task_id) / environment_id / camera_id / sub_video_filename
 
@@ -51,21 +56,15 @@ async def serve_sub_video(
                 detail="Video file not found."
             )
 
-        # Determine appropriate media type (basic for now)
-        media_type = "video/mp4" # Assume MP4, can be more dynamic if needed
-
-        # FastAPI's FileResponse handles range requests automatically if the underlying
-        # starlette.responses.FileResponse is used, which it is.
-        # For more control or if using a raw StreamingResponse with a file iterator,
-        # range request handling would need to be implemented manually.
+        media_type = "video/mp4" 
         return FileResponse(
             path=video_file_path,
             media_type=media_type,
-            filename=sub_video_filename # Suggests a download filename to the browser
+            filename=sub_video_filename
         )
 
     except HTTPException:
-        raise # Re-raise HTTPException to ensure FastAPI handles it
+        raise 
     except Exception as e:
         logger.exception(
             f"Error serving video file {sub_video_filename} for task {task_id}: {e}"

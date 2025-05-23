@@ -39,7 +39,8 @@ class TrackedPersonData(BaseModel):
 
 class CameraTracksData(BaseModel):
     """Holds tracking data for a single camera in a frame for WebSocket output."""
-    image_source: str = Field(..., description="Filename of the image source for this camera (e.g., '000000.jpg').")
+    image_source: str = Field(..., description="Filename or identifier of the image source for this camera (e.g., '000000.jpg').")
+    frame_image_base64: Optional[str] = Field(None, description="Base64 encoded string of the frame image (e.g., JPEG). Null if frame not available for this camera in this batch.")
     tracks: List[TrackedPersonData] = Field(default_factory=list)
 
 class WebSocketTrackingMessagePayload(BaseModel):
@@ -51,21 +52,28 @@ class WebSocketTrackingMessagePayload(BaseModel):
 
 
 # --- Schemas for Media Availability and Batch Completion ---
-class MediaURLEntry(BaseModel):
-    """Represents a single media URL entry for a camera within a sub-video batch."""
-    camera_id: str = Field(..., description="The camera ID this media URL pertains to.")
-    sub_video_filename: str = Field(..., description="The filename of the sub-video.")
-    url: str = Field(..., description="The backend-relative HTTP URL to fetch this sub-video.")
-    start_global_frame_index: int = Field(..., description="Global frame index corresponding to the start of this sub-video.")
-    num_frames_in_sub_video: int = Field(..., description="Expected number of frames in this sub-video at the processing FPS.")
+# MediaURLEntry and WebSocketMediaAvailablePayload are no longer needed for the primary frontend flow.
+# They are removed. If needed for other purposes (e.g. debugging endpoint), they could be reinstated.
 
-class WebSocketMediaAvailablePayload(BaseModel):
-    """Payload for the 'media_available' WebSocket message."""
-    sub_video_batch_index: int = Field(..., description="0-indexed identifier for this batch of sub-videos.")
-    media_urls: List[MediaURLEntry] = Field(default_factory=list, description="List of media URLs for the current batch.")
+# class MediaURLEntry(BaseModel):
+#     """Represents a single media URL entry for a camera within a sub-video batch."""
+#     camera_id: str = Field(..., description="The camera ID this media URL pertains to.")
+#     sub_video_filename: str = Field(..., description="The filename of the sub-video.")
+#     url: str = Field(..., description="The backend-relative HTTP URL to fetch this sub-video.")
+#     start_global_frame_index: int = Field(..., description="Global frame index corresponding to the start of this sub-video.")
+#     num_frames_in_sub_video: int = Field(..., description="Expected number of frames in this sub-video at the processing FPS.")
+
+# class WebSocketMediaAvailablePayload(BaseModel):
+#     """Payload for the 'media_available' WebSocket message. DEPRECATED for primary frontend use."""
+#     sub_video_batch_index: int = Field(..., description="0-indexed identifier for this batch of sub-videos.")
+#     media_urls: List[MediaURLEntry] = Field(default_factory=list, description="List of media URLs for the current batch.")
 
 class WebSocketBatchProcessingCompletePayload(BaseModel):
-    """Payload for the 'batch_processing_complete' WebSocket message."""
+    """
+    Payload for the 'batch_processing_complete' WebSocket message.
+    This message's relevance to the frontend is reduced as video synchronization is now direct.
+    It can still signal the backend's completion of a logical processing unit (a sub-video batch).
+    """
     sub_video_batch_index: int = Field(..., description="0-indexed identifier of the sub-video batch that has finished processing.")
 
 
@@ -75,5 +83,5 @@ class WebSocketMessage(BaseModel):
     Generic structure for messages pushed via WebSocket.
     The payload field's structure depends on the 'type' field.
     """
-    type: str = Field(..., description="Type of WebSocket message (e.g., 'tracking_update', 'status_update', 'media_available', 'batch_processing_complete').")
+    type: str = Field(..., description="Type of WebSocket message (e.g., 'tracking_update', 'status_update', 'batch_processing_complete').")
     payload: Dict[str, Any] = Field(..., description="The actual message content, structure depends on 'type'.")

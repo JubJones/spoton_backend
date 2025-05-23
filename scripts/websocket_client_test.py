@@ -9,6 +9,8 @@ import logging
 import sys
 from urllib.parse import urlparse
 from typing import Dict, List, Tuple, Optional, Any
+import base64 
+from pathlib import Path 
 
 # Configure basic logging for the client
 logging.basicConfig(
@@ -23,15 +25,17 @@ BACKEND_BASE_URL = "http://localhost:8000"
 WEBSOCKET_BASE_URL = "ws://localhost:8000"
 API_V1_PREFIX = "/api/v1"
 HEALTH_CHECK_URL = f"{BACKEND_BASE_URL}/health"
+SAVE_DECODED_IMAGES = True # << MODIFIED: Default to True for easier testing
+SAVED_IMAGES_OUTPUT_DIR = Path("ws_received_images")
+MAX_SAVED_IMAGES_PER_CAM_PER_TASK = 3 
 
-
-async def check_backend_health(max_retries=10, delay_seconds=5): # Increased retries for slower startups
+async def check_backend_health(max_retries=15, delay_seconds=5): # Increased retries slightly
     """Polls the /health endpoint until the backend is healthy or retries are exhausted."""
     logger.info(f"Checking backend health at {HEALTH_CHECK_URL}...")
     async with httpx.AsyncClient() as client:
         for attempt in range(max_retries):
             try:
-                response = await client.get(HEALTH_CHECK_URL, timeout=10.0) # Increased timeout
+                response = await client.get(HEALTH_CHECK_URL, timeout=10.0)
                 response.raise_for_status()
                 health_data = response.json()
                 logger.info(f"Health check response (attempt {attempt + 1}): {health_data}")
@@ -54,9 +58,7 @@ async def check_backend_health(max_retries=10, delay_seconds=5): # Increased ret
 
 
 async def start_processing_task(environment_id: str = "campus"):
-    """
-    Sends a request to start a processing task.
-    """
+    """Sends a request to start a processing task."""
     start_url = f"{BACKEND_BASE_URL}{API_V1_PREFIX}/processing-tasks/start"
     payload = {"environment_id": environment_id}
     logger.info(f"Requesting to start processing for environment: '{environment_id}' at {start_url}")
@@ -89,27 +91,24 @@ async def start_processing_task(environment_id: str = "campus"):
 
 
 async def listen_to_websocket(websocket_url: str, task_id: str):
-    """
-    Connects to the WebSocket and listens for messages.
-    Logs detailed tracking information including map coordinates.
-    """
+    """Connects to the WebSocket and listens for messages."""
     logger.info(f"Attempting to connect to WebSocket: {websocket_url}")
 
     parsed_ws_url = urlparse(websocket_url)
     origin_scheme = "http" if parsed_ws_url.scheme == "ws" else "https"
     origin_value = f"{origin_scheme}://{parsed_ws_url.netloc}"
     
-    logger.info(f"Client attempting WebSocket connection to: {websocket_url}")
-    logger.info(f"Client will use origin parameter for connect: '{origin_value}'")
-
     connect_kwargs: Dict[str, Any] = {
         "origin": origin_value,
         "ping_interval": 20,
         "ping_timeout": 20,
+        "max_size": 2**24, 
     }
+    
+    saved_images_this_task_per_cam: Dict[str, int] = {} 
 
     try:
-        async with websockets.connect(websocket_url, **connect_kwargs) as websocket: # type: ignore
+        async with websockets.connect(websocket_url, **connect_kwargs) as websocket: 
             logger.info(f"Successfully connected to WebSocket for task '{task_id}' at {websocket_url}")
 
             try:
@@ -121,7 +120,7 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                         payload_data = message.get("payload", {})
 
                         if msg_type == "tracking_update":
-                            global_frame_idx = payload_data.get("global_frame_index", "N/A") # Changed key
+                            global_frame_idx = payload_data.get("global_frame_index", "N/A")
                             scene_id = payload_data.get("scene_id", "N/A")
                             ts_processed = payload_data.get("timestamp_processed_utc", "N/A")
                             cameras_data = payload_data.get("cameras", {})
@@ -131,9 +130,31 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                             )
                             for cam_id, cam_content in cameras_data.items():
                                 image_src = cam_content.get("image_source", "N/A")
+                                frame_image_base64 = cam_content.get("frame_image_base64")
                                 tracking_data_list = cam_content.get('tracks', [])
+                                
+                                img_info = "NoImage"
+                                if frame_image_base64:
+                                    img_info = f"Base64ImgLen:{len(frame_image_base64)}"
+                                    
+                                    if SAVE_DECODED_IMAGES:
+                                        cam_save_count = saved_images_this_task_per_cam.get(cam_id, 0)
+                                        if cam_save_count < MAX_SAVED_IMAGES_PER_CAM_PER_TASK:
+                                            try:
+                                                img_bytes = base64.b64decode(frame_image_base64)
+                                                save_dir = SAVED_IMAGES_OUTPUT_DIR / task_id / cam_id
+                                                save_dir.mkdir(parents=True, exist_ok=True)
+                                                img_filename = f"gframe_{global_frame_idx}_cam_{cam_id}.jpg"
+                                                with open(save_dir / img_filename, "wb") as f_img:
+                                                    f_img.write(img_bytes)
+                                                logger.debug(f"Saved decoded image: {save_dir / img_filename}")
+                                                saved_images_this_task_per_cam[cam_id] = cam_save_count + 1
+                                            except Exception as e_dec:
+                                                logger.error(f"Error decoding/saving image for cam {cam_id} gframe {global_frame_idx}: {e_dec}")
+
+
                                 logger.info(
-                                    f"  Camera: {cam_id}, ImgSrc: {image_src}, Tracks: {len(tracking_data_list)}"
+                                    f"  Camera: {cam_id}, ImgSrc: {image_src}, {img_info}, Tracks: {len(tracking_data_list)}"
                                 )
                                 for i, person_data in enumerate(tracking_data_list):
                                     bbox_xyxy = person_data.get('bbox_xyxy', 'N/A')
@@ -161,20 +182,9 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
                             if payload_data.get('details'):
                                 logger.info(f"  Details: {payload_data.get('details')}")
                         
-                        elif msg_type == "media_available":
-                            batch_idx = payload_data.get("sub_video_batch_index", "N/A")
-                            media_urls_list = payload_data.get("media_urls", [])
-                            logger.info(f"[TASK {task_id}][MEDIA_AVAILABLE] Sub-video batch index: {batch_idx}")
-                            for entry in media_urls_list:
-                                logger.info(
-                                    f"  Cam: {entry.get('camera_id')}, File: {entry.get('sub_video_filename')}, "
-                                    f"URL: {BACKEND_BASE_URL}{entry.get('url')}, " # Construct full URL
-                                    f"StartGlobalFrame: {entry.get('start_global_frame_index')}, "
-                                    f"NumFramesInSubVideo: {entry.get('num_frames_in_sub_video')}"
-                                )
                         elif msg_type == "batch_processing_complete":
                             batch_idx = payload_data.get("sub_video_batch_index", "N/A")
-                            logger.info(f"[TASK {task_id}][BATCH_PROCESSING_COMPLETE] Sub-video batch index: {batch_idx} finished.")
+                            logger.info(f"[TASK {task_id}][BATCH_PROCESSING_COMPLETE] Sub-video batch index: {batch_idx} finished processing by backend.")
                         
                         else:
                             logger.warning(f"Received unknown message type ('{msg_type}') or malformed JSON: {message_str[:300]}")
@@ -208,15 +218,25 @@ async def listen_to_websocket(websocket_url: str, task_id: str):
 
 
 async def main():
-    """
-    Main function to run the client.
-    """
+    """Main function to run the client."""
+    global SAVE_DECODED_IMAGES 
     environment_id_to_process = "campus"
-    if len(sys.argv) > 1:
-        environment_id_to_process = sys.argv[1]
+    
+    user_args = sys.argv[1:]
+    if len(user_args) > 0 and not user_args[0].startswith("--"):
+        environment_id_to_process = user_args.pop(0)
         logger.info(f"Using environment_id from command line argument: '{environment_id_to_process}'")
+    
+    if "--save-images" in user_args:
+        SAVE_DECODED_IMAGES = True
+        logger.info("SAVE_DECODED_IMAGES flag set. Will attempt to save first few received images.")
     else:
-        logger.info(f"Using default environment_id: '{environment_id_to_process}'")
+        # If not explicitly passed, keep the default from the top of the script
+        if SAVE_DECODED_IMAGES:
+            logger.info("SAVE_DECODED_IMAGES is True by default. Saving images to ./ws_received_images/")
+        else:
+            logger.info("SAVE_DECODED_IMAGES is False. Not saving images.")
+
 
     if not await check_backend_health():
         logger.error("Backend not healthy. Exiting client.")
@@ -225,6 +245,9 @@ async def main():
     task_id, ws_full_url = await start_processing_task(environment_id_to_process)
 
     if task_id and ws_full_url:
+        if SAVE_DECODED_IMAGES:
+            SAVED_IMAGES_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+            logger.info(f"Saving decoded images to: {SAVED_IMAGES_OUTPUT_DIR.resolve()}")
         await listen_to_websocket(ws_full_url, task_id)
     else:
         logger.error("Failed to start task or get WebSocket URL. Exiting.")
