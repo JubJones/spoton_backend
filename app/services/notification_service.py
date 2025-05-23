@@ -2,7 +2,8 @@ import logging
 from typing import Dict, Any, List
 
 from app.api.websockets import ConnectionManager
-from app.api.v1.schemas import MediaURLEntry, WebSocketMediaAvailablePayload, WebSocketBatchProcessingCompletePayload
+# Removed MediaURLEntry as it's no longer part of WebSocketMediaAvailablePayload
+from app.api.v1.schemas import WebSocketBatchProcessingCompletePayload # WebSocketMediaAvailablePayload removed
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class NotificationService:
     async def send_tracking_update(self, task_id: str, update_payload_dict: Dict[str, Any]):
         """
         Sends tracking updates to all clients connected for a specific task.
+        The payload now includes base64 encoded frame images.
 
         Args:
             task_id: The ID of the processing task.
@@ -61,34 +63,18 @@ class NotificationService:
         except Exception as e:
             logger.error(f"Error broadcasting status update for task {task_id}: {e}", exc_info=True)
 
-    async def send_media_available_notification(
-        self,
-        task_id: str,
-        payload: WebSocketMediaAvailablePayload # Use the Pydantic model directly
-    ):
-        """
-        Sends a notification that a new batch of sub-videos is available for streaming.
-
-        Args:
-            task_id: The ID of the processing task.
-            payload: The WebSocketMediaAvailablePayload object.
-        """
-        if not task_id:
-            logger.warning("Attempted to send media available notification with empty task_id.")
-            return
-
-        message_to_send = {
-            "type": "media_available",
-            "payload": payload.model_dump(exclude_none=True) # Convert Pydantic model to dict
-        }
-        logger.info(
-            f"Broadcasting media_available for task {task_id}, "
-            f"batch index {payload.sub_video_batch_index}, URLs: {len(payload.media_urls)}"
-        )
-        try:
-            await self.manager.broadcast_to_task(task_id, message_to_send)
-        except Exception as e:
-            logger.error(f"Error broadcasting media_available for task {task_id}: {e}", exc_info=True)
+    # The send_media_available_notification method is removed as per the new design.
+    # async def send_media_available_notification(
+    #     self,
+    #     task_id: str,
+    #     payload: WebSocketMediaAvailablePayload # Use the Pydantic model directly
+    # ):
+    #     """
+    #     DEPRECATED: Sends a notification that a new batch of sub-videos is available for streaming.
+    #     Frame images are now sent directly in 'tracking_update' messages.
+    #     """
+    #     # logger.warning(f"send_media_available_notification called for task {task_id}, but it's deprecated.")
+    #     pass # Or raise an error, or log more prominently. For now, just pass.
 
     async def send_batch_processing_complete_notification(
         self,
@@ -97,6 +83,7 @@ class NotificationService:
     ):
         """
         Sends a notification that a sub-video batch processing is complete.
+        Its utility for frontend is reduced, but can be used for backend logic or advanced clients.
 
         Args:
             task_id: The ID of the processing task.

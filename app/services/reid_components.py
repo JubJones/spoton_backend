@@ -179,7 +179,7 @@ class ReIDStateManager:
             elif self.similarity_method == "inner_product":
                 scores = query_embeddings @ gallery_embeddings.T
             else: return None
-            return scores # No clipping here, let caller handle based on metric type
+            return scores
         except Exception as e:
             logger.error(f"[Task {self.task_id}] cdist-based score calculation failed: {e}", exc_info=True)
             return None
@@ -222,33 +222,47 @@ class ReIDStateManager:
         return True
 
     def _update_gallery_with_ema(
-        self, gid: GlobalID, new_embedding: FeatureVector, matched_gallery_type: str
-    ):
+        self, gid: GlobalID, new_embedding: FeatureVector, tk_for_log: TrackKey, matched_gallery_type: str
+    ): # Added tk_for_log parameter
         alpha = settings.REID_GALLERY_EMA_ALPHA
         current_gallery_embedding: Optional[FeatureVector] = None
         new_embedding_norm = self._normalize_embedding(new_embedding)
-        if new_embedding_norm is None or new_embedding_norm.size == 0: return
+        if new_embedding_norm is None or new_embedding_norm.size == 0:
+            logger.debug(f"[Task {self.task_id}][{tk_for_log}] EMA update skipped for GID {gid}: new embedding is empty/invalid.")
+            return
+        
         self.faiss_index_dirty = True 
         if matched_gallery_type == 'lost':
             if gid in self.lost_track_gallery:
-                lost_embedding, _ = self.lost_track_gallery.pop(gid)
+                lost_embedding, _ = self.lost_track_gallery.pop(gid) # Remove from lost as it's becoming active again
                 current_gallery_embedding = self._normalize_embedding(lost_embedding)
-            elif gid in self.reid_gallery:
+                logger.debug(f"[Task {self.task_id}][{tk_for_log}] GID {gid} matched from lost gallery. Feature will be updated in main gallery.")
+            elif gid in self.reid_gallery: # Should ideally not happen if lost was correctly managed, but as fallback
                 current_gallery_embedding = self.reid_gallery.get(gid)
-        elif matched_gallery_type in ['main', 'main_2pass']:
+                logger.debug(f"[Task {self.task_id}][{tk_for_log}] GID {gid} (matched as 'lost') found in main gallery. Updating main.")
+            else: # GID marked as 'lost' match but not found in either gallery - this is unusual
+                logger.warning(f"[Task {self.task_id}][{tk_for_log}] GID {gid} matched as 'lost' but not found in lost_track_gallery or reid_gallery. Initializing with new feature.")
+
+        elif matched_gallery_type in ['main', 'main_2pass']: # 'main_2pass' was a typo or old logic, just 'main' is typical here
             current_gallery_embedding = self.reid_gallery.get(gid)
+            if current_gallery_embedding is None:
+                logger.warning(f"[Task {self.task_id}][{tk_for_log}] GID {gid} matched as 'main' but not found in reid_gallery. Initializing with new feature.")
+        
         if current_gallery_embedding is not None and current_gallery_embedding.size > 0:
             updated_embedding = (alpha * current_gallery_embedding + (1.0 - alpha) * new_embedding_norm)
             self.reid_gallery[gid] = self._normalize_embedding(updated_embedding)
-        else:
+            # logger.debug(f"[Task {self.task_id}][{tk_for_log}] GID {gid} feature updated via EMA (from {matched_gallery_type}).")
+        else: # If no existing embedding or it was empty, use the new one directly
             self.reid_gallery[gid] = new_embedding_norm
+            # logger.debug(f"[Task {self.task_id}][{tk_for_log}] GID {gid} feature initialized with new embedding (from {matched_gallery_type}).")
+
 
     async def associate_features_and_update_state(
         self,
         all_tracks_with_features: Dict[TrackKey, FeatureVector],
         active_track_keys_this_frame: Set[TrackKey],
         active_triggers_map: Dict[TrackKey, HandoffTriggerInfo],
-        current_frame_idx: int # Renamed from frame_processed_count
+        current_frame_idx: int
     ):
         query_features: Dict[TrackKey, FeatureVector] = {}
         for tk, feat in all_tracks_with_features.items():
@@ -264,20 +278,19 @@ class ReIDStateManager:
 
         query_track_keys_list = list(query_features.keys())
         query_embeddings_np = np.array([query_features[tk] for tk in query_track_keys_list], dtype=np.float32)
-        if query_embeddings_np.ndim == 1 and query_embeddings_np.size > 0 : # Handle single query
+        if query_embeddings_np.ndim == 1 and query_embeddings_np.size > 0 : 
             query_embeddings_np = query_embeddings_np.reshape(1,-1)
 
 
         tentative_assignments: Dict[TrackKey, Tuple[Optional[GlobalID], float, str]] = {}
         
-        if query_embeddings_np.size == 0: # No valid queries to process
+        if query_embeddings_np.size == 0: 
             await self.update_galleries_lifecycle(active_track_keys_this_frame, current_frame_idx)
             return
 
         if "faiss" in self.similarity_method:
-            if not FAISS_AVAILABLE: # Should have been caught in __init__ if method was faiss_*
+            if not FAISS_AVAILABLE: 
                 logger.error(f"[Task {self.task_id}] FAISS method '{self.similarity_method}' selected but FAISS not available during association. Skipping Re-ID for this frame.")
-                # Assign new IDs to all queries as a fallback
                 for tk_query in query_track_keys_list:
                     new_gid = self.get_new_global_id()
                     tentative_assignments[tk_query] = (new_gid, -1.0 if not self.is_distance_metric else float('inf'), "new_no_faiss")
@@ -287,12 +300,11 @@ class ReIDStateManager:
 
                 if self.faiss_index and self.faiss_index.ntotal > 0:
                     k_neighbors = 1
-                    # FAISS search can be run in thread pool if it's CPU-bound and blocking
                     raw_scores_faiss, indices_faiss = await asyncio.to_thread(
                         self.faiss_index.search, query_embeddings_np, k_neighbors
                     )
                     for i, tk_query in enumerate(query_track_keys_list):
-                        if indices_faiss[i, 0] < 0: continue # No neighbor found
+                        if indices_faiss[i, 0] < 0: continue 
                         
                         matched_faiss_gallery_idx = indices_faiss[i, 0]
                         score_or_dist = float(raw_scores_faiss[i, 0])
@@ -303,21 +315,21 @@ class ReIDStateManager:
                         if self.similarity_method == "faiss_ip":
                             match_passes_threshold = score_or_dist >= self.effective_threshold
                         elif self.similarity_method == "faiss_l2":
-                            match_passes_threshold = score_or_dist <= (self.effective_threshold ** 2)
+                            # FAISS L2 returns squared L2, so compare against squared threshold
+                            match_passes_threshold = score_or_dist <= (self.effective_threshold ** 2) 
                         
                         if match_passes_threshold:
                             if self._apply_handoff_filter_for_match(tk_query, matched_gid, active_triggers_map):
                                 tentative_assignments[tk_query] = (matched_gid, score_or_dist, matched_type)
                             else: tentative_assignments[tk_query] = (None, score_or_dist, "filtered_handoff")
                         else: tentative_assignments[tk_query] = (None, score_or_dist, "below_threshold")
-                else: # FAISS index is empty
+                else: 
                     logger.debug(f"[Task {self.task_id}] FAISS index empty. All queries will get new GIDs.")
-                    for tk_query in query_track_keys_list: # Assign new GID if FAISS index is empty
+                    for tk_query in query_track_keys_list: 
                         tentative_assignments[tk_query] = (None, -1.0 if not self.is_distance_metric else float('inf'), "new_empty_gallery")
 
 
         else: # cdist based methods
-            # For cdist, we combine main and lost galleries for comparison
             gallery_gids_cdist: List[GlobalID] = []
             gallery_embeddings_list_cdist: List[FeatureVector] = []
             gallery_types_cdist: List[str] = []
@@ -356,13 +368,12 @@ class ReIDStateManager:
                                 tentative_assignments[tk_query] = (matched_gid, score_val, matched_type)
                             else: tentative_assignments[tk_query] = (None, score_val, "filtered_handoff")
                         else: tentative_assignments[tk_query] = (None, float(best_scores[i]), "below_threshold")
-            else: # cdist gallery is empty
+            else: 
                  logger.debug(f"[Task {self.task_id}] Combined gallery for cdist empty. All queries will get new GIDs.")
                  for tk_query in query_track_keys_list:
                     tentative_assignments[tk_query] = (None, -1.0 if not self.is_distance_metric else float('inf'), "new_empty_gallery")
 
 
-        # --- Conflict resolution and final assignment logic (unchanged conceptually) ---
         current_assignments = tentative_assignments.copy()
         for i, tk in enumerate(query_track_keys_list):
             if tk not in current_assignments or current_assignments[tk][0] is None:
@@ -385,7 +396,6 @@ class ReIDStateManager:
             if len(track_score_list_with_type) > 1:
                 sort_reverse = not self.is_distance_metric
                 track_score_list_with_type.sort(key=lambda x: x[1], reverse=sort_reverse)
-                # winner_tk, _, _ = track_score_list_with_type[0] # Winner is kept
                 for i_conflict in range(1, len(track_score_list_with_type)):
                     reverted_tk, _, _ = track_score_list_with_type[i_conflict]
                     reverted_score = float('inf') if self.is_distance_metric else -1.0
@@ -399,9 +409,10 @@ class ReIDStateManager:
                 self.global_id_last_seen_frame[gid] = current_frame_idx
                 if type_str not in ["new", "reverted_conflict", "filtered_handoff", "below_threshold", "new_empty_gallery", "new_no_faiss"]:
                     original_embedding_for_update = query_features[tk]
-                    self._update_gallery_with_ema(gid, original_embedding_for_update, tk, type_str) # Pass tk for logging if needed
+                    # Call _update_gallery_with_ema with the correct signature
+                    self._update_gallery_with_ema(gid, original_embedding_for_update, tk, type_str)
         
-        if reverted_keys_for_second_pass: # Simplified: assign new GIDs to reverted for now
+        if reverted_keys_for_second_pass: 
             for tk_reverted in reverted_keys_for_second_pass:
                 new_gid_for_reverted = self.get_new_global_id()
                 self.track_to_global_id[tk_reverted] = new_gid_for_reverted
@@ -416,8 +427,6 @@ class ReIDStateManager:
 
 
     async def update_galleries_lifecycle(self, active_track_keys_this_frame: Set[TrackKey], current_frame_idx: int):
-        # This method remains conceptually the same.
-        # Key change: Set self.faiss_index_dirty = True if self.reid_gallery is modified.
         all_previously_known_track_keys = set(self.track_to_global_id.keys())
         disappeared_track_keys = all_previously_known_track_keys - active_track_keys_this_frame
 
@@ -431,9 +440,6 @@ class ReIDStateManager:
                     if gid not in self.lost_track_gallery:
                         last_active_frame_for_gid = self.global_id_last_seen_frame.get(gid, current_frame_idx -1)
                         self.lost_track_gallery[gid] = (feature, last_active_frame_for_gid)
-                        # Note: Moving to lost doesn't change the *content* of reid_gallery used for FAISS index
-                        # so faiss_index_dirty might not need to be set here unless lost_gallery also contributes to index.
-                        # For now, assume FAISS index is only from main reid_gallery.
         
         expired_lost_gids = [
             gid for gid, (_, frame_added_to_lost) in self.lost_track_gallery.items()
