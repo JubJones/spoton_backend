@@ -13,13 +13,14 @@ from app.services.reid_components import ReIDStateManager
 from app.services.notification_service import NotificationService
 from app.core.config import settings
 from app.api.v1 import schemas as api_schemas
-from app.common_types import CameraID
+from app.common_types import CameraID, FrameData # Added FrameData
 from app.api.v1.schemas import (
-    MediaURLEntry,
-    WebSocketMediaAvailablePayload,
+    # MediaURLEntry, # No longer used here
+    # WebSocketMediaAvailablePayload, # No longer used here
     WebSocketBatchProcessingCompletePayload,
-    WebSocketTrackingMessagePayload # For constructing tracking payload
+    WebSocketTrackingMessagePayload
 )
+from app.utils.video_processing import encode_frame_to_base64 # Import new utility
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,8 @@ class PipelineOrchestratorService:
             "environment_id": environment_id,
             "total_sub_video_batches": 0,
             "completed_sub_video_batches": 0,
-            "current_global_frame_index_offset": 0, # Tracks the start index for the current batch
-            "processed_frames_count_total": 0 # Overall frames processed for the task
+            "current_global_frame_index_offset": 0,
+            "processed_frames_count_total": 0
         }
         TASK_REID_MANAGERS[task_id] = ReIDStateManager(task_id=task_id)
         logger.info(f"Processing task {task_id} initialized for environment: {environment_id}. ReIDStateManager created.")
@@ -65,11 +66,10 @@ class PipelineOrchestratorService:
     async def _send_task_status_notification(self, task_id: uuid.UUID):
         if task_id not in PROCESSING_TASKS_DB: return
         task_data = PROCESSING_TASKS_DB[task_id]
-        # Exclude non-serializable or internal fields before sending
         serializable_task_data = {
             k: (v.isoformat() if isinstance(v, datetime) else v)
             for k, v in task_data.items()
-            if k not in ["current_global_frame_index_offset"] # Example of an internal field
+            if k not in ["current_global_frame_index_offset"]
         }
         await self.notification_service.send_status_update(str(task_id), serializable_task_data)
 
@@ -85,16 +85,14 @@ class PipelineOrchestratorService:
         if current_step: task_data["current_step"] = current_step
         if details: task_data["details"] = details
 
-        if increment_processed_frames: # This counter now tracks individual frames processed
+        if increment_processed_frames:
             task_data["processed_frames_count_total"] = task_data.get("processed_frames_count_total", 0) + increment_processed_frames
 
         if task_data["total_sub_video_batches"] > 0:
-            # Progress can be based on completed batches, or more granularly on total frames if estimate is good
             overall_progress = (task_data["completed_sub_video_batches"] / task_data["total_sub_video_batches"])
             task_data["progress"] = max(0.0, min(1.0, progress if progress is not None else overall_progress))
         else:
             task_data["progress"] = progress if progress is not None else 0.0
-
 
         log_msg = f"Task {task_id} status: {task_data['status']}"
         if current_step: log_msg += f" - Step: {current_step}"
@@ -130,12 +128,7 @@ class PipelineOrchestratorService:
                 raise ValueError(f"No sub-videos found or configured for environment '{environment_id}'.")
 
             PROCESSING_TASKS_DB[task_id]["total_sub_video_batches"] = max_sub_video_batches
-            
-            # Initialize current_global_frame_index_offset for the task
-            # This will be the starting global frame index for the *next* batch to be processed.
-            # It increments by the number of frames processed in the previous batch.
             PROCESSING_TASKS_DB[task_id]["current_global_frame_index_offset"] = 0
-
 
             for sub_video_batch_idx in range(max_sub_video_batches):
                 sub_video_batch_start_time = time.time()
@@ -159,33 +152,7 @@ class PipelineOrchestratorService:
 
                 frame_provider = self.video_data_manager.get_batched_frame_provider(task_id, local_video_paths_map)
 
-                media_url_entries: List[MediaURLEntry] = []
-                for cam_id, local_path in local_video_paths_map.items():
-                    video_filename = local_path.name
-                    num_frames_in_this_sub_video = frame_provider.get_num_processed_frames_for_camera(cam_id)
-                    media_url = (
-                        f"{settings.API_V1_PREFIX}/media/tasks/{task_id}"
-                        f"/environments/{environment_id}/cameras/{str(cam_id)}"
-                        f"/sub_videos/{video_filename}"
-                    )
-                    media_url_entries.append(
-                        MediaURLEntry(
-                            camera_id=str(cam_id),
-                            sub_video_filename=video_filename,
-                            url=media_url,
-                            start_global_frame_index=start_global_frame_index_for_this_batch,
-                            num_frames_in_sub_video=num_frames_in_this_sub_video
-                        )
-                    )
-
-                if media_url_entries:
-                    media_available_payload = WebSocketMediaAvailablePayload(
-                        sub_video_batch_index=sub_video_batch_idx,
-                        media_urls=media_url_entries
-                    )
-                    await self.notification_service.send_media_available_notification(
-                        str(task_id), media_available_payload
-                    )
+                # The 'media_available' notification is removed. Frontend gets images in tracking_update.
 
                 await self.tracker_factory.reset_all_trackers_for_task(task_id)
                 logger.info(f"[Task {task_id}] Trackers reset for sub-video batch {current_sub_video_human_idx}.")
@@ -201,7 +168,6 @@ class PipelineOrchestratorService:
                         await asyncio.sleep(0.001)
                         continue
                     
-                    # Current global frame index for this specific frame batch
                     current_global_frame_idx = start_global_frame_index_for_this_batch + frames_processed_in_this_batch
                     
                     await self.update_task_status(
@@ -217,17 +183,26 @@ class PipelineOrchestratorService:
                         task_id, environment_id, reid_manager, frame_batch_dict, current_global_frame_idx
                     )
 
-                    # Prepare WebSocketTrackingMessagePayload
                     ws_cameras_data: Dict[str, api_schemas.CameraTracksData] = {}
                     all_relevant_cam_ids_for_env = {
                         vs_config.cam_id for vs_config in settings.VIDEO_SETS if vs_config.env_id == environment_id
                     }
 
+                    # Encode frames and prepare payload
                     for cam_id_str_config in all_relevant_cam_ids_for_env:
+                        cam_id_obj = CameraID(cam_id_str_config)
                         image_source_filename = f"{current_global_frame_idx:06d}.jpg" # Example identifier
                         
-                        # Get tracks for this camera from the processed_data_batch_output
-                        tracks_for_this_cam_data = processed_data_batch_output.get(CameraID(cam_id_str_config), [])
+                        current_frame_data_for_cam: Optional[FrameData] = frame_batch_dict.get(cam_id_obj)
+                        frame_image_b64: Optional[str] = None
+                        if current_frame_data_for_cam:
+                            frame_np, _ = current_frame_data_for_cam
+                            if frame_np is not None:
+                                frame_image_b64 = await encode_frame_to_base64(
+                                    frame_np, jpeg_quality=settings.FRAME_JPEG_QUALITY
+                                )
+                        
+                        tracks_for_this_cam_data = processed_data_batch_output.get(cam_id_obj, [])
                         
                         api_person_data_list = [
                             api_schemas.TrackedPersonData(
@@ -238,6 +213,7 @@ class PipelineOrchestratorService:
                         ]
                         ws_cameras_data[cam_id_str_config] = api_schemas.CameraTracksData(
                             image_source=image_source_filename,
+                            frame_image_base64=frame_image_b64, # Add encoded image
                             tracks=api_person_data_list
                         )
 
@@ -252,24 +228,23 @@ class PipelineOrchestratorService:
                     )
                     
                     frames_processed_in_this_batch += 1
-                    await self.update_task_status(task_id, increment_processed_frames=1) # Increment total frames
-                    await asyncio.sleep(0.001)
+                    await self.update_task_status(task_id, increment_processed_frames=1)
+                    await asyncio.sleep(0.001) # Yield control
 
                 frame_provider.close()
                 
-                # Update offset for the next batch
                 PROCESSING_TASKS_DB[task_id]["current_global_frame_index_offset"] += frames_processed_in_this_batch
                 
-                # Send batch processing complete notification
                 batch_complete_payload = WebSocketBatchProcessingCompletePayload(
                     sub_video_batch_index=sub_video_batch_idx
                 )
+                # This notification's role for frontend is diminished, but can be kept for backend state logic
                 await self.notification_service.send_batch_processing_complete_notification(
                     str(task_id), batch_complete_payload
                 )
 
                 PROCESSING_TASKS_DB[task_id]["completed_sub_video_batches"] += 1
-                await self.update_task_status(task_id) # Update progress based on completed batches
+                await self.update_task_status(task_id)
                 logger.info(
                     f"[Task {task_id}] Finished sub-video batch {current_sub_video_human_idx} "
                     f"in {(time.time() - sub_video_batch_start_time):.2f}s. "
@@ -295,6 +270,5 @@ class PipelineOrchestratorService:
             if self.multi_camera_processor:
                  await self.multi_camera_processor.clear_task_resources(task_id, environment_id)
             TASK_REID_MANAGERS.pop(task_id, None)
-            # Remove internal tracking field before final status update if it's sent from here
             PROCESSING_TASKS_DB.get(task_id, {}).pop("current_global_frame_index_offset", None)
             logger.info(f"[Task {task_id}] Pipeline execution finished (Status: {PROCESSING_TASKS_DB.get(task_id, {}).get('status')}). Cleaned up resources.")
