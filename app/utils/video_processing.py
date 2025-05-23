@@ -5,6 +5,7 @@ from typing import List, Tuple, Optional
 from pathlib import Path
 import logging
 import numpy as np # Import numpy
+import base64 # For image encoding
 
 logger = logging.getLogger(__name__)
 
@@ -115,3 +116,51 @@ def ensure_rgb(image: np.ndarray) -> np.ndarray:
     elif image.ndim == 2: # Grayscale
         return cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
     return image # Return as-is if not 3-channel BGR or grayscale
+
+
+async def encode_frame_to_base64(
+    frame_np: np.ndarray,
+    format_ext: str = ".jpg",
+    jpeg_quality: int = 75
+) -> Optional[str]:
+    """
+    Encodes a NumPy frame array to a base64 string.
+
+    Args:
+        frame_np: The frame image as a NumPy array (BGR format from OpenCV).
+        format_ext: The desired image format extension (e.g., ".jpg", ".png").
+        jpeg_quality: Quality for JPEG encoding (0-100), ignored for PNG.
+
+    Returns:
+        A base64 encoded string of the image, or None if encoding fails.
+    """
+    if frame_np is None or frame_np.size == 0:
+        logger.warning("Attempted to encode an empty frame.")
+        return None
+
+    encode_params = []
+    if format_ext.lower() == ".jpg" or format_ext.lower() == ".jpeg":
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
+    elif format_ext.lower() == ".png":
+        # PNG_COMPRESSION is 0-9, higher is more compression but slower.
+        # Default is often around 3-6. Let's use a moderate default.
+        encode_params = [cv2.IMWRITE_PNG_COMPRESSION, 3]
+    else:
+        logger.warning(f"Unsupported image format for encoding: {format_ext}. Defaulting to JPEG.")
+        format_ext = ".jpg"
+        encode_params = [cv2.IMWRITE_JPEG_QUALITY, jpeg_quality]
+
+    try:
+        # cv2.imencode is synchronous, run in thread pool for async context
+        success, encoded_image_bytes = await asyncio.to_thread(
+            cv2.imencode, format_ext, frame_np, encode_params
+        )
+        if not success:
+            logger.error(f"Failed to encode frame to {format_ext.upper()}.")
+            return None
+
+        base64_encoded_string = base64.b64encode(encoded_image_bytes).decode('utf-8')
+        return base64_encoded_string
+    except Exception as e:
+        logger.error(f"Error during frame encoding to base64: {e}", exc_info=True)
+        return None
