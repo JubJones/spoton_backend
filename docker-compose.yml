@@ -1,5 +1,10 @@
 version: '3.8'
 
+# GPU Support Configuration:
+# 1. Set PYTORCH_VARIANT_BUILD=cu121 in .env file for GPU support
+# 2. Ensure NVIDIA Container Toolkit is installed on host
+# 3. For CPU-only: Set PYTORCH_VARIANT_BUILD=cpu and comment out deploy section
+
 services:
   backend:
     build:
@@ -18,15 +23,15 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       # The application inside will check torch.cuda.is_available()
-      # To enable GPU access for the container, uncomment 'deploy' section.
-      # This requires NVIDIA Container Toolkit on the host.
-    # deploy:
-    #   resources:
-    #     reservations:
-    #       devices:
-    #         - driver: nvidia
-    #           count: all # 1 or 'all' to pass all GPUs
-    #           capabilities: [gpu] # 'gpu' is equivalent to 'utility,compute'
+      # GPU access enabled by default (requires NVIDIA Container Toolkit on host)
+      # For CPU-only deployment, set PYTORCH_VARIANT_BUILD=cpu and comment out deploy section
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all # 1 or 'all' to pass all GPUs
+              capabilities: [gpu] # 'gpu' is equivalent to 'utility,compute'
     depends_on:
       redis:
         condition: service_healthy

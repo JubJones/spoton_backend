@@ -40,9 +40,12 @@ dependencies = [
     "setuptools>=60.0.0",
     "cython>=0.29.0,<0.30.0", # Often a build dep for others like faiss
     "pip>=23.0,<25.0",
-    "faiss-cpu>=1.7.4,<1.8.0", # MODIFIED: Added faiss-cpu
-    # If using faiss-gpu:
-    # "faiss-gpu>=1.7.2,<1.8.0", # Ensure CUDA compatibility
+    "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS (default)
+    "transformers>=4.36.0,<4.37.0", # For CLIP model support
+    "clip-by-openai>=1.0", # OpenAI CLIP implementation
+    "accelerate>=0.24.0,<0.25.0", # For GPU acceleration
+    "scipy>=1.11.0,<1.12.0", # Required for advanced similarity calculations
+    "ultralytics>=8.0.0,<8.1.0", # YOLOv8 implementation
 ]
 [project.urls]
 Homepage = "https://github.com/JubJones/spoton_backend"
@@ -53,6 +56,18 @@ dev = [
     "pytest-asyncio>=0.23.0,<0.24.0",
     "pytest-mock>=3.12.0,<3.13.0",
     "ruff>=0.4.2,<0.5.0",
+]
+gpu = [
+    "faiss-gpu>=1.7.4,<1.8.0", # GPU version of FAISS (requires CUDA)
+    "torch>=2.2.0+cu121", # PyTorch with CUDA 12.1 support
+    "torchvision>=0.17.0+cu121", # TorchVision with CUDA 12.1 support
+    "torchaudio>=2.2.0+cu121", # TorchAudio with CUDA 12.1 support
+]
+cpu = [
+    "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS
+    "torch>=2.2.0", # PyTorch CPU version
+    "torchvision>=0.17.0", # TorchVision CPU version
+    "torchaudio>=2.2.0", # TorchAudio CPU version
 ]
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

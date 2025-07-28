@@ -1,5 +1,6 @@
 # ---- Base Stage ----
 # Using a specific Python version for better reproducibility
+# CUDA 12.1 compatible base image for GPU support
 FROM python:3.9.18-bullseye as base
 
 # Set environment variables
@@ -36,29 +37,64 @@ ARG TORCH_VERSION="2.2.1"
 ARG TORCHVISION_VERSION="0.17.1"
 ARG TORCHAUDIO_VERSION="2.2.1"
 
+# Install CUDA 12.1 dependencies for GPU support
+RUN if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
+    apt-get update && apt-get install -y --no-install-recommends \
+    wget gnupg2 software-properties-common && \
+    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/ /" > /etc/apt/sources.list.d/cuda.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    cuda-runtime-12-1 \
+    cuda-libraries-12-1 \
+    cuda-libraries-dev-12-1 \
+    libcudnn8 \
+    libcudnn8-dev && \
+    rm -rf /var/lib/apt/lists/*; \
+    fi
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender-dev libopenblas-dev \
     build-essential python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Set CUDA environment variables for GPU support
+ENV CUDA_HOME=/usr/local/cuda-12.1
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 RUN uv venv /opt/venv --python $(which python)
 ENV PATH="/opt/venv/bin:$PATH"
 
+# Copy and run GPU dependencies installation script
+COPY scripts/install_gpu_deps.sh /tmp/install_gpu_deps.sh
+RUN chmod +x /tmp/install_gpu_deps.sh
+
 RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT} using /root/.local/bin/uv" && \
-    if [ "${PYTORCH_VARIANT}" = "cu118" ]; then \
+    if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
+    /root/.local/bin/uv pip install --no-cache-dir \
+    torch==${TORCH_VERSION}+cu121 \
+    torchvision==${TORCHVISION_VERSION}+cu121 \
+    torchaudio==${TORCHAUDIO_VERSION}+cu121 \
+    --index-url https://download.pytorch.org/whl/cu121 && \
+    /root/.local/bin/uv pip install --no-cache-dir faiss-gpu>=1.7.4,<1.8.0; \
+    elif [ "${PYTORCH_VARIANT}" = "cu118" ]; then \
     /root/.local/bin/uv pip install --no-cache-dir \
     torch==${TORCH_VERSION}+cu118 \
     torchvision==${TORCHVISION_VERSION}+cu118 \
     torchaudio==${TORCHAUDIO_VERSION}+cu118 \
-    --index-url https://download.pytorch.org/whl/cu118; \
+    --index-url https://download.pytorch.org/whl/cu118 && \
+    /root/.local/bin/uv pip install --no-cache-dir faiss-gpu>=1.7.4,<1.8.0; \
     elif [ "${PYTORCH_VARIANT}" = "cpu" ]; then \
     /root/.local/bin/uv pip install --no-cache-dir \
     torch==${TORCH_VERSION} \
     torchvision==${TORCHVISION_VERSION} \
     torchaudio==${TORCHAUDIO_VERSION} \
-    --index-url https://download.pytorch.org/whl/cpu; \
+    --index-url https://download.pytorch.org/whl/cpu && \
+    /root/.local/bin/uv pip install --no-cache-dir faiss-cpu>=1.7.4,<1.8.0; \
     else \
-    echo "Error: Invalid PYTORCH_VARIANT. Must be 'cpu' or 'cu118'." && exit 1; \
+    echo "Error: Invalid PYTORCH_VARIANT. Must be 'cpu', 'cu118', or 'cu121'." && exit 1; \
     fi
 
 # ---- Builder Stage ----
@@ -72,6 +108,9 @@ RUN uv pip install --no-cache-dir ".[dev]"
 # ---- Runtime Stage ----
 FROM base as runtime
 
+ARG PYTORCH_VARIANT=cpu
+
+# Install runtime dependencies including CUDA runtime for GPU support
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1-mesa-glx \
     libglib2.0-0 \
@@ -79,7 +118,24 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxext6 \
     libxrender1 \
     libopenblas-base \
-    && rm -rf /var/lib/apt/lists/*
+    && if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
+    apt-get install -y --no-install-recommends \
+    wget gnupg2 software-properties-common && \
+    wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \
+    echo "deb https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/ /" > /etc/apt/sources.list.d/cuda.list && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    cuda-runtime-12-1 \
+    cuda-libraries-12-1 \
+    libcudnn8; \
+    fi && \
+    rm -rf /var/lib/apt/lists/*
+
+# Set CUDA environment variables for runtime
+ENV CUDA_HOME=/usr/local/cuda-12.1
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+ENV LD_LIBRARY_PATH=${CUDA_HOME}/lib64:${LD_LIBRARY_PATH}
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH"
