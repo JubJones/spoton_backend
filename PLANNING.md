@@ -285,6 +285,285 @@ app/
 
 ---
 
+## API Design & Endpoints
+
+### 🌐 **HTTP REST API Specification**
+
+#### **Environment & Configuration Endpoints**
+- [ ] **Environment Management**
+  - **Files to Create**: `app/api/v1/endpoints/environments.py`
+  - **Endpoints**:
+    - `GET /api/v1/environments` - Get available monitoring environments
+    - `GET /api/v1/environments/{env_id}` - Get specific environment details
+    - `GET /api/v1/environments/{env_id}/cameras` - Get camera configurations
+    - `GET /api/v1/environments/{env_id}/zones` - Get zone definitions
+  - **Response Schema**: `app/api/v1/schemas/environment.py`
+  - **Purpose**: **Landing Page** - Environment selection and configuration
+
+- [ ] **Camera Configuration Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/cameras.py`
+  - **Endpoints**:
+    - `GET /api/v1/cameras` - Get all cameras
+    - `GET /api/v1/cameras/{camera_id}` - Get specific camera details
+    - `GET /api/v1/cameras/{camera_id}/calibration` - Get homography data
+    - `PUT /api/v1/cameras/{camera_id}/settings` - Update camera settings
+  - **Response Schema**: `app/api/v1/schemas/camera.py`
+  - **Purpose**: **Settings Page** - Camera configuration and calibration
+
+- [ ] **Zone & Layout Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/zones.py`
+  - **Endpoints**:
+    - `GET /api/v1/zones` - Get all zones
+    - `GET /api/v1/zones/{zone_id}/layout` - Get floor plan and spatial layout
+    - `GET /api/v1/zones/{zone_id}/cameras` - Get zone camera mappings
+  - **Response Schema**: `app/api/v1/schemas/zone.py`
+  - **Purpose**: **Group View Page** - Spatial mapping and floor plans
+
+#### **Real-Time Processing Endpoints**
+- [ ] **Session Management**
+  - **Files to Create**: `app/api/v1/endpoints/sessions.py`
+  - **Endpoints**:
+    - `POST /api/v1/sessions/start` - Start tracking session
+    - `GET /api/v1/sessions/{session_id}/status` - Get session status
+    - `PUT /api/v1/sessions/{session_id}/pause` - Pause/resume session
+    - `DELETE /api/v1/sessions/{session_id}` - Stop session
+  - **Response Schema**: `app/api/v1/schemas/session.py`
+  - **Purpose**: **Group View Page** - Session control and management
+
+- [ ] **Detection & Tracking Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/tracking.py`
+  - **Endpoints**:
+    - `GET /api/v1/tracking/active` - Get active tracking data
+    - `GET /api/v1/tracking/persons/{person_id}` - Get person details
+    - `POST /api/v1/tracking/persons/{person_id}/follow` - Start following person
+    - `DELETE /api/v1/tracking/persons/{person_id}/follow` - Stop following
+  - **Response Schema**: `app/api/v1/schemas/tracking.py`
+  - **Purpose**: **Detail View Page** - Person tracking and interaction
+
+#### **Analytics & Historical Data Endpoints**
+- [ ] **Analytics Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/analytics.py`
+  - **Endpoints**:
+    - `GET /api/v1/analytics/detections` - Historical detection statistics
+    - `GET /api/v1/analytics/tracking` - Person tracking history
+    - `GET /api/v1/analytics/heatmap` - Movement heat map data
+    - `GET /api/v1/analytics/occupancy` - Occupancy trends
+  - **Query Parameters**: `start_time`, `end_time`, `zone_id`, `camera_id`
+  - **Response Schema**: `app/api/v1/schemas/analytics.py`
+  - **Purpose**: **Analytics Page** - Historical data analysis
+
+- [ ] **Person Journey Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/journey.py`
+  - **Endpoints**:
+    - `GET /api/v1/persons/{person_id}/journey` - Get complete person journey
+    - `GET /api/v1/persons/{person_id}/trajectory` - Get spatial trajectory
+    - `GET /api/v1/persons/search` - Search persons by criteria
+  - **Response Schema**: `app/api/v1/schemas/journey.py`
+  - **Purpose**: **Detail View Page** - Individual person analysis
+
+#### **System Management Endpoints**
+- [ ] **Health & Status Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/system.py`
+  - **Endpoints**:
+    - `GET /api/v1/system/health` - System health and readiness
+    - `GET /api/v1/system/performance` - Performance metrics
+    - `GET /api/v1/system/status` - Current system status
+  - **Response Schema**: `app/api/v1/schemas/system.py`
+  - **Purpose**: **All Pages** - System status and health monitoring
+
+- [ ] **Export & Reporting Endpoints**
+  - **Files to Create**: `app/api/v1/endpoints/export.py`
+  - **Endpoints**:
+    - `GET /api/v1/export/detections` - Export detection data (CSV/JSON)
+    - `GET /api/v1/export/tracking` - Export tracking data
+    - `GET /api/v1/export/screenshots` - Export screenshots
+    - `POST /api/v1/export/report` - Generate custom report
+  - **Response Schema**: `app/api/v1/schemas/export.py`
+  - **Purpose**: **Analytics Page** - Data export and reporting
+
+### 🔄 **WebSocket Protocol Specification**
+
+#### **Connection Management**
+- [ ] **WebSocket Handler Implementation**
+  - **Files to Create**: `app/api/websockets/connection_manager.py`
+  - **Connection Types**:
+    - `wss://host/ws/tracking/{session_id}` - Real-time tracking data
+    - `wss://host/ws/system/{session_id}` - System status updates
+  - **Authentication**: JWT token validation on connection
+  - **Purpose**: Real-time data streaming for all frontend pages
+
+#### **Message Protocol Design**
+- [ ] **Frame Data Messages**
+  - **Files to Create**: `app/api/websockets/frame_handler.py`
+  - **Message Type**: `frame_data`
+  - **Format**: Binary JPEG + JSON metadata
+  - **Schema**:
+    ```python
+    class FrameMessage:
+        type: str = "frame_data"
+        frame_index: int
+        scene_id: str
+        timestamp_utc: str
+        cameras: Dict[str, CameraFrame]
+    
+    class CameraFrame:
+        image_source: str
+        tracks: List[TrackData]
+        frame_quality: float
+    ```
+  - **Purpose**: **Group View Page** - Live camera feeds with detection overlays
+
+- [ ] **Tracking Update Messages**
+  - **Files to Create**: `app/api/websockets/tracking_handler.py`
+  - **Message Type**: `tracking_update`
+  - **Schema**:
+    ```python
+    class TrackingMessage:
+        type: str = "tracking_update"
+        person_id: int
+        global_id: int
+        camera_transitions: List[CameraTransition]
+        current_position: MapCoordinate
+        trajectory_path: List[MapCoordinate]
+    ```
+  - **Purpose**: **Detail View Page** - Person tracking updates
+
+- [ ] **System Status Messages**
+  - **Files to Create**: `app/api/websockets/status_handler.py`
+  - **Message Type**: `system_status`
+  - **Schema**:
+    ```python
+    class SystemStatusMessage:
+        type: str = "system_status"
+        cameras_active: int
+        processing_fps: float
+        connection_quality: str
+        memory_usage: float
+        gpu_utilization: float
+    ```
+  - **Purpose**: **All Pages** - System health indicators
+
+#### **Performance Optimization**
+- [ ] **Message Compression & Batching**
+  - **Files to Create**: `app/api/websockets/compression.py`
+  - **Implementation Details**:
+    - Binary frame data compression using JPEG optimization
+    - JSON metadata compression using gzip
+    - Message batching for multiple camera updates
+    - Selective updates (only changed data)
+  - **Purpose**: Efficient real-time data delivery
+
+### 📊 **Data Schemas & Models**
+
+#### **Core Data Models**
+- [ ] **Detection Schema**
+  - **Files to Create**: `app/api/v1/schemas/detection.py`
+  - **Schema**:
+    ```python
+    class DetectionResponse:
+        id: str
+        camera_id: str
+        bbox: BoundingBox
+        confidence: float
+        timestamp: datetime
+        class_id: int
+        person_crop: Optional[str]  # base64 encoded
+    
+    class BoundingBox:
+        x: float
+        y: float
+        width: float
+        height: float
+        normalized: bool
+    ```
+
+- [ ] **Tracking Schema**
+  - **Files to Create**: `app/api/v1/schemas/tracking.py`
+  - **Schema**:
+    ```python
+    class PersonIdentity:
+        global_id: int
+        local_tracks: Dict[str, int]  # camera_id -> track_id
+        first_seen: datetime
+        last_seen: datetime
+        cameras_seen: List[str]
+        confidence: float
+    
+    class TrackData:
+        track_id: int
+        global_id: int
+        bbox: BoundingBox
+        confidence: float
+        map_coords: Optional[Tuple[float, float]]
+    ```
+
+- [ ] **Mapping Schema**
+  - **Files to Create**: `app/api/v1/schemas/mapping.py`
+  - **Schema**:
+    ```python
+    class MapCoordinate:
+        x: float
+        y: float
+        coordinate_system: str
+        timestamp: datetime
+        confidence: float
+    
+    class Trajectory:
+        person_id: int
+        path_points: List[MapCoordinate]
+        start_time: datetime
+        end_time: datetime
+        total_distance: float
+        cameras_traversed: List[str]
+    ```
+
+#### **API Response Models**
+- [ ] **Standardized Response Format**
+  - **Files to Create**: `app/api/v1/schemas/common.py`
+  - **Schema**:
+    ```python
+    class APIResponse[T]:
+        success: bool
+        data: Optional[T]
+        error: Optional[str]
+        message: Optional[str]
+        timestamp: datetime
+    
+    class PaginatedResponse[T]:
+        items: List[T]
+        total: int
+        page: int
+        per_page: int
+        has_next: bool
+        has_prev: bool
+    ```
+
+### 🔐 **Authentication & Security**
+
+#### **Authentication Implementation**
+- [ ] **JWT Authentication**
+  - **Files to Create**: `app/core/auth.py`, `app/api/v1/auth/`
+  - **Implementation**:
+    - JWT token generation and validation
+    - Role-based access control (Admin, Operator, Viewer)
+    - Token refresh mechanism
+    - WebSocket connection authentication
+  - **Endpoints**:
+    - `POST /api/v1/auth/login` - User authentication
+    - `POST /api/v1/auth/refresh` - Token refresh
+    - `POST /api/v1/auth/logout` - User logout
+
+#### **API Security**
+- [ ] **Security Middleware**
+  - **Files to Create**: `app/middleware/security.py`
+  - **Implementation**:
+    - CORS configuration for frontend origins
+    - Rate limiting for API endpoints
+    - Request validation and sanitization
+    - Error handling without information leakage
+
+---
+
 ## Phase 2: Real-Time Streaming (Weeks 2-4)
 *Priority: High | Parallel with: Frontend Phase 2*
 
