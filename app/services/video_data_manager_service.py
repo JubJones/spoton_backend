@@ -17,7 +17,7 @@ import cv2 # OpenCV for video processing
 
 from app.core.config import settings, VideoSetEnvironmentConfig
 from app.utils.asset_downloader import AssetDownloader
-from app.common_types import CameraID, FrameBatch, FrameData
+from app.shared.types import CameraID, FrameBatch, FrameData
 
 logger = logging.getLogger(__name__)
 

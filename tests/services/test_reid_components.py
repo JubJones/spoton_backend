@@ -9,7 +9,7 @@ from unittest.mock import MagicMock, PropertyMock, call, patch
 import asyncio 
 
 from app.services.reid_components import ReIDStateManager, FAISS_AVAILABLE 
-from app.common_types import (
+from app.shared.types import (
     CameraID, TrackID, GlobalID, FeatureVector, TrackKey, QuadrantName,
     HandoffTriggerInfo, ExitRuleModel
 )

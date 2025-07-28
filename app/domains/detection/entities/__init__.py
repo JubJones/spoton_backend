@@ -1,0 +1,1 @@
+"""Detection entities and value objects."""

@@ -14,7 +14,7 @@ import torch
 import cv2 
 
 from app.models.base_models import AbstractDetector
-from app.common_types import (
+from app.shared.types import (
     CameraID, TrackKey, GlobalID, FeatureVector, FrameBatch, RawDetection,
     TrackedObjectData, BoundingBoxXYXY, TrackID, QuadrantName, # MODIFIED: QuadrantName
     HandoffTriggerInfo, ExitRuleModel, CameraHandoffDetailConfig,

@@ -9,7 +9,7 @@ from typing import Optional, Tuple
 import cv2
 import numpy as np
 
-from app.common_types import CameraID # Relative import
+from app.shared.types import CameraID # Relative import
 
 logger = logging.getLogger(__name__)
 

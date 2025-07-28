@@ -10,7 +10,7 @@ import numpy as np
 import cv2 # For cv2.findHomography
 
 from app.core.config import Settings # Use the main Settings class
-from app.common_types import CameraID, CameraHandoffDetailConfig
+from app.shared.types import CameraID, CameraHandoffDetailConfig
 
 logger = logging.getLogger(__name__)
 

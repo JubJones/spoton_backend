@@ -12,7 +12,7 @@ from typing import Dict, List, Tuple, Optional, Set, Any
 import numpy as np
 from scipy.spatial.distance import cdist
 
-from app.common_types import (
+from app.shared.types import (
     CameraID, TrackID, GlobalID, FeatureVector, TrackKey, HandoffTriggerInfo
 )
 from app.core.config import settings
