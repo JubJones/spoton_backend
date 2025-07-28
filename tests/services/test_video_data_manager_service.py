@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, AsyncMock, PropertyMock, call, patch
 from app.services.video_data_manager_service import VideoDataManagerService, BatchedFrameProvider
 from app.utils.asset_downloader import AssetDownloader
 from app.core.config import VideoSetEnvironmentConfig
-from app.common_types import CameraID
+from app.shared.types import CameraID
 # mock_settings is available from conftest.py
 
 @pytest.fixture

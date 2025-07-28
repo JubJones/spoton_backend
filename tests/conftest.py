@@ -8,7 +8,7 @@ from typing import List, Dict, Tuple, Any, Set, Optional
 import math
 
 from app.core.config import Settings, VideoSetEnvironmentConfig, CameraHandoffDetailConfig
-from app.common_types import CameraID, ExitRuleModel, QuadrantName
+from app.shared.types import CameraID, ExitRuleModel, QuadrantName
 
 @pytest.fixture(scope="session")
 def mock_settings_base_values() -> Dict[str, Any]:

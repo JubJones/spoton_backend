@@ -4,8 +4,8 @@ import uuid
 import logging
 
 from app.api.v1 import schemas
-from app.services.pipeline_orchestrator import PipelineOrchestratorService, PROCESSING_TASKS_DB
-from app.dependencies import get_pipeline_orchestrator
+from app.orchestration.pipeline_orchestrator import orchestrator
+from app.core.dependencies import get_pipeline_orchestrator
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)

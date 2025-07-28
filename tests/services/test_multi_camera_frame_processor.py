@@ -14,7 +14,7 @@ from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.homography_service import HomographyService
 from app.services.notification_service import NotificationService
 from app.services.reid_components import ReIDStateManager
-from app.common_types import (
+from app.shared.types import (
     CameraID, TrackKey, GlobalID, FeatureVector, FrameBatch, FrameData, RawDetection,
     TrackedObjectData, BoundingBoxXYXY, TrackID, QuadrantName, # MODIFIED: Added QuadrantName
     HandoffTriggerInfo, ExitRuleModel, CameraHandoffDetailConfig

@@ -4,7 +4,7 @@ from typing import List, Optional, Dict, Tuple, Set
 from pathlib import Path
 import math
 
-from app.common_types import CameraID, ExitRuleModel, QuadrantName, CameraHandoffDetailConfig
+from app.shared.types import CameraID, ExitRuleModel, QuadrantName, CameraHandoffDetailConfig
 
 class VideoSetEnvironmentConfig(BaseModel):
     remote_base_key: str = Field(..., description="Base S3 key (e.g., 'video_s37/c01')")

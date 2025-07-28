@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, PropertyMock, call, AsyncMock
 
 from app.services.homography_service import HomographyService
 from app.core.config import Settings, CameraHandoffDetailConfig
-from app.common_types import CameraID, ExitRuleModel
+from app.shared.types import CameraID, ExitRuleModel
 
 
 @pytest.fixture

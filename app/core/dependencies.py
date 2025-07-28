@@ -17,7 +17,7 @@ from app.core.config import settings
 # )
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
-from app.services.pipeline_orchestrator import PipelineOrchestratorService
+from app.orchestration.pipeline_orchestrator import orchestrator
 from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
