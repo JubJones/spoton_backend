@@ -1,0 +1,234 @@
+# Development Configuration for SpotOn Backend
+# This file contains development environment configuration settings
+
+# Application Configuration
+app:
+  name: "SpotOn Development Backend"
+  version: "1.0.0-dev"
+  environment: "development"
+  debug: true
+  log_level: "DEBUG"
+  api_prefix: "/api/v1"
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 1
+  timeout: 120
+  keepalive: 2
+  max_requests: 100
+  max_requests_jitter: 10
+  reload: true
+
+# Database Configuration
+database:
+  postgres:
+    host: "${POSTGRES_HOST:localhost}"
+    port: "${POSTGRES_PORT:5432}"
+    user: "${POSTGRES_USER:spoton_dev}"
+    password: "${POSTGRES_PASSWORD:dev_password}"
+    database: "${POSTGRES_DB:spoton_dev}"
+    ssl_mode: "disable"
+    pool_size: 3
+    max_overflow: 5
+    pool_timeout: 30
+    pool_recycle: 3600
+    echo: true
+  
+  timescale:
+    host: "${TIMESCALE_HOST:localhost}"
+    port: "${TIMESCALE_PORT:5432}"
+    user: "${TIMESCALE_USER:spoton_dev}"
+    password: "${TIMESCALE_PASSWORD:dev_password}"
+    database: "${TIMESCALE_DB:spoton_timescale_dev}"
+    ssl_mode: "disable"
+    pool_size: 2
+    max_overflow: 3
+
+# Cache Configuration
+cache:
+  redis:
+    host: "${REDIS_HOST:localhost}"
+    port: "${REDIS_PORT:6379}"
+    db: "${REDIS_DB:0}"
+    password: "${REDIS_PASSWORD:}"
+    ssl: false
+    pool_size: 5
+    max_connections: 10
+    timeout: 5
+    retry_on_timeout: true
+
+# Security Configuration
+security:
+  jwt:
+    secret_key: "${JWT_SECRET_KEY:dev_secret_key_change_in_production}"
+    algorithm: "HS256"
+    access_token_expire_minutes: 480  # 8 hours for development
+    refresh_token_expire_days: 30
+    issuer: "spoton-backend-dev"
+    audience: "spoton-frontend-dev"
+  
+  encryption:
+    master_key: "${ENCRYPTION_MASTER_KEY:dev_encryption_key_change_in_production}"
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 1
+    pbkdf2_iterations: 10000
+    enable_field_encryption: true
+    enable_audit_logging: true
+  
+  cors:
+    allow_origins: ["*"]
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+    allow_credentials: true
+    max_age: 86400
+
+# AI/ML Configuration
+ai:
+  models:
+    detection:
+      type: "fasterrcnn"
+      weights_path: "./weights/fasterrcnn_resnet50_fpn.pth"
+      confidence_threshold: 0.3
+      nms_threshold: 0.5
+      device: "cuda"
+      half_precision: false
+      batch_size: 2
+    
+    reid:
+      type: "clip"
+      weights_path: "./weights/clip_model.pth"
+      feature_dim: 512
+      similarity_threshold: 0.4
+      device: "cuda"
+      half_precision: false
+      batch_size: 8
+    
+    tracking:
+      type: "botsort"
+      max_age: 30
+      min_hits: 3
+      iou_threshold: 0.3
+      association_threshold: 0.5
+  
+  gpu:
+    device: "cuda"
+    memory_fraction: 0.4
+    allow_growth: true
+    mixed_precision: false
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    include_labels: true
+  
+  logging:
+    level: "DEBUG"
+    format: "text"
+    file: "./logs/app.log"
+    max_size: "10MB"
+    backup_count: 2
+    rotation: "daily"
+  
+  health_check:
+    enabled: true
+    path: "/health"
+    interval: 120
+    timeout: 30
+  
+  alerts:
+    enabled: false
+    webhook_url: ""
+    cpu_threshold: 90
+    memory_threshold: 95
+    disk_threshold: 95
+    error_rate_threshold: 0.20
+
+# Performance Configuration
+performance:
+  async_workers: 2
+  max_concurrent_requests: 100
+  request_timeout: 120
+  websocket_timeout: 1200
+  cache_ttl: 300
+  compression: false
+  gzip_level: 1
+
+# Analytics Configuration
+analytics:
+  enabled: true
+  batch_size: 100
+  processing_interval: 300
+  retention_days: 7
+  aggregation_intervals: ["1h", "1d"]
+  real_time_window: 1200
+
+# Backup Configuration
+backup:
+  enabled: false
+  schedule: "0 4 * * *"  # Daily at 4 AM
+  retention_days: 3
+  storage:
+    type: "local"
+    path: "./backups"
+
+# Resource Limits
+resources:
+  cpu_limit: "unlimited"
+  memory_limit: "unlimited"
+  gpu_memory_limit: "unlimited"
+  disk_limit: "unlimited"
+  
+  requests:
+    cpu: "250m"
+    memory: "512Mi"
+    gpu_memory: "1Gi"
+
+# Feature Flags
+features:
+  real_time_streaming: true
+  batch_processing: true
+  analytics_dashboard: true
+  api_rate_limiting: false
+  audit_logging: true
+  data_encryption: true
+  gdpr_compliance: true
+  multi_tenancy: false
+  advanced_analytics: true
+  debug_mode: true
+  hot_reload: true
+
+# Development Tools
+development:
+  auto_reload: true
+  debug_toolbar: true
+  profiling: true
+  testing_mode: false
+  mock_services: false
+  
+  test_data:
+    generate_on_startup: true
+    sample_size: 100
+    include_media: false
+  
+  database:
+    auto_migrate: true
+    seed_data: true
+    reset_on_startup: false
+
+# Environment-specific Settings
+deployment:
+  strategy: "recreate"
+  max_unavailable: 1
+  max_surge: 0
+  revision_history_limit: 10
+  progress_deadline_seconds: 1800
+  
+  autoscaling:
+    enabled: false
+    min_replicas: 1
+    max_replicas: 1

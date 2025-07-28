@@ -1,0 +1,221 @@
+# Staging Configuration for SpotOn Backend
+# This file contains staging environment configuration settings
+
+# Application Configuration
+app:
+  name: "SpotOn Staging Backend"
+  version: "1.0.0"
+  environment: "staging"
+  debug: true
+  log_level: "DEBUG"
+  api_prefix: "/api/v1"
+
+# Server Configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  workers: 2
+  timeout: 60
+  keepalive: 2
+  max_requests: 500
+  max_requests_jitter: 25
+
+# Database Configuration
+database:
+  postgres:
+    host: "${POSTGRES_HOST}"
+    port: "${POSTGRES_PORT:5432}"
+    user: "${POSTGRES_USER}"
+    password: "${POSTGRES_PASSWORD}"
+    database: "${POSTGRES_DB}"
+    ssl_mode: "prefer"
+    pool_size: 5
+    max_overflow: 10
+    pool_timeout: 30
+    pool_recycle: 3600
+    echo: false
+  
+  timescale:
+    host: "${TIMESCALE_HOST}"
+    port: "${TIMESCALE_PORT:5432}"
+    user: "${TIMESCALE_USER}"
+    password: "${TIMESCALE_PASSWORD}"
+    database: "${TIMESCALE_DB}"
+    ssl_mode: "prefer"
+    pool_size: 3
+    max_overflow: 5
+
+# Cache Configuration
+cache:
+  redis:
+    host: "${REDIS_HOST}"
+    port: "${REDIS_PORT:6379}"
+    db: "${REDIS_DB:0}"
+    password: "${REDIS_PASSWORD}"
+    ssl: false
+    pool_size: 10
+    max_connections: 25
+    timeout: 5
+    retry_on_timeout: true
+
+# Security Configuration
+security:
+  jwt:
+    secret_key: "${JWT_SECRET_KEY}"
+    algorithm: "HS256"
+    access_token_expire_minutes: 60
+    refresh_token_expire_days: 14
+    issuer: "spoton-backend-staging"
+    audience: "spoton-frontend-staging"
+  
+  encryption:
+    master_key: "${ENCRYPTION_MASTER_KEY}"
+    algorithm: "AES-256-GCM"
+    key_rotation_days: 7
+    pbkdf2_iterations: 50000
+    enable_field_encryption: true
+    enable_audit_logging: true
+  
+  cors:
+    allow_origins: ["https://staging.spoton.example.com", "http://localhost:3000"]
+    allow_methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers: ["*"]
+    allow_credentials: true
+    max_age: 3600
+
+# AI/ML Configuration
+ai:
+  models:
+    detection:
+      type: "fasterrcnn"
+      weights_path: "/app/models/detection/fasterrcnn_resnet50_fpn.pth"
+      confidence_threshold: 0.4
+      nms_threshold: 0.5
+      device: "cuda"
+      half_precision: true
+      batch_size: 4
+    
+    reid:
+      type: "clip"
+      weights_path: "/app/models/reid/clip_model.pth"
+      feature_dim: 512
+      similarity_threshold: 0.5
+      device: "cuda"
+      half_precision: true
+      batch_size: 16
+    
+    tracking:
+      type: "botsort"
+      max_age: 30
+      min_hits: 3
+      iou_threshold: 0.3
+      association_threshold: 0.5
+  
+  gpu:
+    device: "cuda"
+    memory_fraction: 0.6
+    allow_growth: true
+    mixed_precision: true
+
+# Monitoring Configuration
+monitoring:
+  metrics:
+    enabled: true
+    port: 9090
+    path: "/metrics"
+    include_labels: true
+  
+  logging:
+    level: "DEBUG"
+    format: "json"
+    file: "/var/log/spoton/app.log"
+    max_size: "50MB"
+    backup_count: 3
+    rotation: "daily"
+  
+  health_check:
+    enabled: true
+    path: "/health"
+    interval: 60
+    timeout: 15
+  
+  alerts:
+    enabled: true
+    webhook_url: "${ALERT_WEBHOOK_URL}"
+    cpu_threshold: 85
+    memory_threshold: 90
+    disk_threshold: 95
+    error_rate_threshold: 0.10
+
+# Performance Configuration
+performance:
+  async_workers: 4
+  max_concurrent_requests: 500
+  request_timeout: 60
+  websocket_timeout: 600
+  cache_ttl: 1800
+  compression: true
+  gzip_level: 4
+
+# Analytics Configuration
+analytics:
+  enabled: true
+  batch_size: 500
+  processing_interval: 120
+  retention_days: 30
+  aggregation_intervals: ["1h", "1d", "7d"]
+  real_time_window: 600
+
+# Backup Configuration
+backup:
+  enabled: true
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  retention_days: 7
+  storage:
+    type: "s3"
+    bucket: "${BACKUP_S3_BUCKET}"
+    access_key: "${BACKUP_S3_ACCESS_KEY}"
+    secret_key: "${BACKUP_S3_SECRET_KEY}"
+    region: "${BACKUP_S3_REGION}"
+    encryption: true
+
+# Resource Limits
+resources:
+  cpu_limit: "1000m"
+  memory_limit: "2Gi"
+  gpu_memory_limit: "4Gi"
+  disk_limit: "50Gi"
+  
+  requests:
+    cpu: "500m"
+    memory: "1Gi"
+    gpu_memory: "2Gi"
+
+# Feature Flags
+features:
+  real_time_streaming: true
+  batch_processing: true
+  analytics_dashboard: true
+  api_rate_limiting: true
+  audit_logging: true
+  data_encryption: true
+  gdpr_compliance: true
+  multi_tenancy: false
+  advanced_analytics: true
+
+# Environment-specific Settings
+deployment:
+  strategy: "rolling"
+  max_unavailable: 1
+  max_surge: 1
+  revision_history_limit: 5
+  progress_deadline_seconds: 900
+  
+  autoscaling:
+    enabled: true
+    min_replicas: 2
+    max_replicas: 5
+    target_cpu_utilization: 75
+    target_memory_utilization: 85
+    scale_up_cooldown: 180
+    scale_down_cooldown: 300
