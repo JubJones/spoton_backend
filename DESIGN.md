@@ -2,39 +2,42 @@
 
 ## 1. Introduction
 
-This document outlines the high-level architecture for the SpotOn backend system. SpotOn is an intelligent multi-camera person tracking and analytics system designed for retrospective analysis of recorded video feeds. The backend is responsible for processing video data, performing AI-driven detection, tracking, re-identification, and pushing tracking metadata and frame images to a frontend client.
+This document outlines the high-level architecture for the SpotOn backend system. SpotOn is an intelligent multi-camera person tracking and analytics system designed for **real-time analysis** of recorded video feeds. The backend is responsible for processing video data, performing AI-driven detection, tracking, re-identification, and streaming tracking metadata and frame images to a frontend client.
 
 The primary goals of this backend design are:
-*   **Modularity:** Components should be loosely coupled and independently manageable.
-*   **Scalability:** The system should be able to handle increasing data loads and user requests.
-*   **Maintainability:** Code should be clean, well-documented, and easy to understand and modify.
-*   **Reusability:** Leverage established design patterns and libraries effectively.
-*   **Robustness:** Implement proper error handling, logging, and ensure graceful client interaction, especially during backend startup.
-*   **Efficient Startup:** Minimize "cold start" latency for core processing by performing intensive initializations during application startup.
+*   **Performance:** Optimized for real-time processing at <10 FPS across 4 cameras with GPU acceleration
+*   **Modularity:** Components should be loosely coupled and independently manageable
+*   **Scalability:** The system should be able to handle increasing data loads and user requests
+*   **Maintainability:** Code should be clean, well-documented, and easy to understand and modify
+*   **Reusability:** Leverage established design patterns and libraries effectively
+*   **Robustness:** Implement proper error handling, logging, and ensure graceful client interaction
+*   **Efficient Startup:** Minimize "cold start" latency with GPU model pre-loading and warm-up
 
 ## 2. High-Level Architecture
 
-The backend follows a service-oriented architecture, containerized using Docker and intended for cloud deployment (potentially orchestrated by Kubernetes).
+The backend follows a service-oriented architecture, containerized using Docker and optimized for local development with GPU acceleration.
 
 Key backend responsibilities:
-1.  **API Endpoints:** Expose RESTful APIs for control, configuration, and historical data retrieval.
-2.  **WebSocket Communication:** Provide real-time *tracking metadata and frame image updates* to the frontend and notify it about processing state.
-3.  **Data Processing Pipeline:**
-    *   Fetch video segments (sub-videos) from S3 and cache them locally, processed sequentially one batch of sub-videos (one per camera for a given time index) at a time.
-    *   Locally extract individual frames from the cached video segments for AI processing.
-    *   Perform object detection and intra-camera tracking on each frame (e.g., Faster R-CNN + BotSort via BoxMOT).
-    *   Extract appearance features for Re-ID from detected persons (e.g., CLIP via BoxMOT).
-    *   Execute cross-camera Re-Identification and global ID association.
-    *   Apply perspective transformation (Homography) to get map coordinates using pre-calculated matrices.
-    *   Compile tracking results (bounding boxes, global IDs, map coordinates) and encode frame images.
-4.  **Data Management:**
-    *   Interact with Redis for caching real-time state and recent Re-ID embeddings.
-    *   Interact with TimescaleDB for storing historical tracking events and older embeddings.
-5.  **Application Initialization (Startup Phase):**
-    *   **Eager loading of AI models:** The primary detection model (e.g., FasterRCNN) and the core Re-ID model (e.g., `clip_market1501.pt`, typically by initializing a prototype tracker instance within the `CameraTrackerFactory`) are loaded into memory/GPU.
-    *   **Model warm-up:** Dummy data is passed through loaded models to compile any JIT kernels and prepare them for inference.
-    *   **Homography pre-computation:** Homography matrices for all configured cameras are calculated from their respective point files and cached by the `HomographyService`.
-    This ensures that the system is immediately ready to process requests with minimal latency once the application is reported as "ready."
+1.  **API Endpoints:** Expose RESTful APIs for control, configuration, and historical data retrieval
+2.  **Real-Time WebSocket Communication:** Provide optimized binary streaming of frame data with JSON metadata
+3.  **GPU-Accelerated Processing Pipeline:**
+    *   Fetch video segments (sub-videos) from S3 and cache them locally
+    *   Extract individual frames from cached video segments for AI processing
+    *   **GPU-accelerated object detection** using Faster R-CNN with CUDA support
+    *   **GPU-accelerated tracking** with BotSort via BoxMOT on GPU
+    *   **GPU-accelerated Re-ID feature extraction** using CLIP model on GPU
+    *   Execute cross-camera Re-Identification with GPU-accelerated similarity search
+    *   Apply perspective transformation (Homography) to get map coordinates
+    *   **Binary frame encoding** and real-time streaming optimization
+4.  **Optimized Data Management:**
+    *   Redis for real-time state caching and frame buffering
+    *   TimescaleDB for historical tracking events and analytics
+    *   **GPU memory management** for efficient model switching and batch processing
+5.  **GPU-Optimized Application Initialization:**
+    *   **GPU model pre-loading:** All AI models loaded directly to GPU memory
+    *   **CUDA warm-up:** GPU kernels pre-compiled with dummy inference runs
+    *   **Memory optimization:** Efficient GPU memory allocation for 4-camera concurrent processing
+    *   **Performance monitoring:** GPU utilization and memory usage tracking
 6.  **Client Interaction During Startup and Processing:**
     *   The backend's startup phase (model loading, etc.) can take time. During this period, attempts to connect to WebSocket endpoints might be refused or fail.
     *   **Frontend Responsibility (Initial Connection):** The frontend should implement a robust connection strategy:
@@ -76,12 +79,17 @@ The backend codebase is organized as follows:
 
 *   **Programming Language:** Python 3.9+
 *   **Web Framework:** FastAPI (for REST APIs and WebSocket handling)
-*   **AI/CV Libraries:** PyTorch, OpenCV (for video processing, frame extraction, **image encoding**), BoxMOT
+*   **AI/CV Libraries:** 
+    *   PyTorch with CUDA support for GPU acceleration
+    *   OpenCV with GPU acceleration for video processing
+    *   BoxMOT with GPU-enabled tracking
+    *   FAISS-GPU for fast similarity search
+*   **GPU Acceleration:** CUDA, cuDNN, TensorRT (optional optimization)
 *   **Async HTTP Client:** `aiobotocore` (for S3), `httpx`
-*   **Cache:** Redis
+*   **Cache:** Redis with binary data optimization
 *   **Database:** TimescaleDB on PostgreSQL
-*   **Containerization:** Docker
-*   **Image Encoding:** OpenCV (`cv2.imencode`), `base64` module.
+*   **Containerization:** Docker with GPU runtime support
+*   **Binary Streaming:** WebSocket binary frames, optimized JPEG compression
 
 ## 5. Design Patterns Employed
 
@@ -97,25 +105,30 @@ The backend codebase is organized as follows:
 ## 6. Communication Protocols
 
 *   **RESTful APIs (HTTP/S):**
-    *   **Purpose:** Client-initiated request-response.
+    *   **Purpose:** Client-initiated request-response and configuration
     *   **Examples:**
-        *   Starting a processing session.
-        *   Fetching historical analytics.
-        *   **`/health` endpoint:** Polled by the frontend to check backend readiness.
-    *   **Technology:** FastAPI.
-*   **WebSockets:**
-    *   **Purpose:** Real-time, bidirectional communication for backend to push updates.
+        *   Starting a processing session
+        *   Fetching historical analytics
+        *   **`/health` endpoint:** Reports GPU status and backend readiness
+    *   **Technology:** FastAPI
+*   **Binary WebSocket Streaming:**
+    *   **Purpose:** High-performance real-time streaming optimized for <10 FPS
     *   **Key Message Types:**
-        *   `tracking_update`: Contains per-frame metadata (bounding boxes, global IDs, map coordinates, `global_frame_index`) AND **the base64 encoded frame image data for each camera**.
-            *   `cameras.{camera_id}.frame_image_base64: Optional[str]` field added to the payload.
-        *   `status_update`: Reports overall task progress and current operational step.
-        *   **REMOVED:** `media_available` (no longer needed as images are in `tracking_update`).
-        *   **REMOVED/INTERNAL:** `batch_processing_complete` (no longer directly relevant for frontend video synchronization).
-    *   **Technology:** FastAPI's WebSocket support.
+        *   `tracking_update`: **Binary frame data** + JSON metadata in separate messages
+            *   Binary message: Raw JPEG bytes for each camera
+            *   JSON message: Tracking metadata (bounding boxes, global IDs, map coordinates)
+        *   `status_update`: Reports GPU utilization and processing performance
+        *   `frame_sync`: Synchronization signals for multi-camera coordination
+    *   **Performance Optimizations:**
+        *   Binary frame transmission (no base64 encoding overhead)
+        *   Adaptive JPEG compression based on network conditions
+        *   Frame skipping for real-time performance
+        *   GPU-to-WebSocket direct pipeline
+    *   **Technology:** FastAPI WebSocket with binary message support
     *   **Client Connection Strategy:**
-        1.  Client initiates a task via REST, receives WebSocket URL.
-        2.  Client polls `/health` REST endpoint until backend is ready.
-        3.  Client connects to WebSocket with retry logic.
+        1.  Client initiates task via REST, receives WebSocket URL
+        2.  Client polls `/health` for GPU readiness
+        3.  Client connects with binary message handler and frame synchronization
 
 ## 7. Key API Endpoints (High-Level)
 
@@ -133,84 +146,98 @@ All endpoints `/api/v1/...` unless specified.
 *   **WebSocket Endpoint (`/ws/tracking/{task_id}`):**
     *   Refer to Section 6 for key message types. `tracking_update` is now the primary carrier of both metadata and visual frame data.
 
-## 8. Data Flow and Frontend Synchronization Strategy
+## 8. GPU-Optimized Data Flow and Real-Time Streaming
 
-This describes the flow once a processing task is initiated.
+This describes the optimized flow for <10 FPS real-time processing:
 
-1.  **S3 Data Preparation (One-Time):** Source videos pre-split into sub-videos and stored in S3.
-2.  **Initiation (REST API):** Frontend sends `POST /api/v1/processing_tasks/start`. Backend responds with `task_id`, `websocket_url`.
-3.  **Frontend WebSocket Connection Attempt & Health Check:** Frontend polls `/health`. Once healthy, establishes WebSocket connection.
-4.  **Task Creation & Sub-Video Batch Processing Loop (`PipelineOrchestratorService` - Backend):**
-    *   The backend creates a task.
-    *   Loop through sub-video batches (internal backend concept for fetching from S3):
-        *   **(a) Backend Downloads Current Sub-Video Batch:** `VideoDataManagerService` downloads sub-videos for all relevant cameras to local cache.
-        *   **(b) Backend Processes Frames and Streams Image+Metadata (Batch `idx`):**
-            *   `MultiCameraFrameProcessor` processes frames from the locally downloaded sub-videos.
-            *   For each processed multi-camera frame (or synchronized set of frames):
-                *   The backend **encodes the raw frame image (e.g., to JPEG, then base64)** for each camera.
-                *   `NotificationService` sends a `tracking_update` WebSocket message.
-            *   **Payload of `tracking_update`:**
-                ```json
-                {
-                  "type": "tracking_update",
-                  "payload": {
-                    "global_frame_index": 123,
-                    "scene_id": "campus",
-                    "timestamp_processed_utc": "...",
-                    "cameras": {
-                      "c01": {
-                        "image_source": "000123.jpg", // Frame identifier
-                        "frame_image_base64": "base64_encoded_jpeg_string_for_c01_frame_123", // << NEW
-                        "tracks": [ /* list of TrackedPersonData objects for c01 */ ]
-                      },
-                      "c02": {
-                        "image_source": "000123.jpg",
-                        "frame_image_base64": "base64_encoded_jpeg_string_for_c02_frame_123", // << NEW
-                        "tracks": [ /* list of TrackedPersonData objects for c02 */ ]
-                      }
-                      // ... other cameras
+1.  **S3 Data Preparation:** Source videos pre-split into sub-videos and stored in S3
+2.  **Initiation (REST API):** Frontend sends `POST /api/v1/processing_tasks/start`. Backend responds with `task_id`, `websocket_url`
+3.  **GPU Readiness Check:** Frontend polls `/health` for GPU model loading status and memory availability
+4.  **Real-Time Processing Pipeline (`PipelineOrchestratorService` - Backend):**
+    *   **GPU-Accelerated Frame Processing:**
+        *   `VideoDataManagerService` streams sub-videos to GPU memory
+        *   `MultiCameraFrameProcessor` processes 4 cameras concurrently on GPU
+        *   **GPU Pipeline:** Detection → Tracking → Re-ID → Coordinate Transform
+        *   **Binary Frame Encoding:** Direct GPU-to-JPEG encoding without CPU transfer
+    *   **Real-Time Streaming Strategy:**
+        *   **Frame Skipping:** Drop frames if processing falls behind target FPS
+        *   **Adaptive Quality:** Reduce JPEG quality under high load
+        *   **Binary WebSocket Messages:**
+            ```python
+            # Binary message for each camera
+            binary_frame_data = {
+                "camera_id": "c01",
+                "frame_index": 123,
+                "jpeg_data": raw_jpeg_bytes  # No base64 encoding
+            }
+            
+            # JSON metadata message
+            metadata = {
+                "type": "tracking_update",
+                "global_frame_index": 123,
+                "scene_id": "campus",
+                "timestamp_processed_utc": "...",
+                "cameras": {
+                    "c01": {
+                        "tracks": [/* TrackedPersonData objects */]
                     }
-                  }
                 }
-                ```
-        *   **(c) Frontend Receives Image+Metadata and Renders:**
-            *   Frontend receives the `tracking_update` message.
-            *   For each camera in the `cameras` dictionary:
-                *   It decodes the `frame_image_base64` string into an image.
-                *   Displays this image directly (this *is* the video frame).
-                *   Uses the `tracks` data (bounding boxes, IDs, map_coords) from the *same message* to draw overlays on this displayed image.
-            *   Synchronization is inherent because the image and its corresponding metadata arrive together.
-        *   The loop then proceeds to the next sub-video batch internally on the backend.
+            }
+            ```
+5.  **Frontend Real-Time Rendering:**
+    *   **Binary Message Handler:** Receives raw JPEG bytes, creates image blobs
+    *   **Immediate Display:** No buffering, displays frames as received
+    *   **Frame Synchronization:** Uses frame_index for multi-camera sync
+    *   **Performance Monitoring:** Tracks FPS and frame drop rates
+6.  **GPU Memory Management:** 
+    *   **Model Persistence:** Keep models loaded in GPU memory
+    *   **Batch Processing:** Process multiple cameras simultaneously
+    *   **Memory Monitoring:** Track GPU memory usage and optimize allocation
+7.  **Performance Optimization:**
+    *   **Target FPS:** <10 FPS with frame skipping if needed
+    *   **Latency:** <100ms from frame capture to WebSocket transmission
+    *   **Throughput:** Optimized for 4-camera concurrent processing
 
-5.  **Frontend Video Transition Management:** Not applicable in the same way. The frontend displays a continuous stream of images received via WebSockets. There are no separate "sub-video files" for the frontend to manage transitions between.
-6.  **Data Storage & Caching (Backend - Ongoing):** Re-ID embeddings to Redis, historical data to TimescaleDB.
-7.  **Task Completion:** Backend sends "COMPLETED" `status_update`. Backend cleans up cached sub-videos.
+## 9. Performance and Maintainability
 
-## 9. Scalability and Maintainability
-
-*   **Scalability:**
-    *   Stateless FastAPI application instances can be horizontally scaled.
-    *   **Increased WebSocket Load:** Sending base64 encoded images significantly increases WebSocket message size and network bandwidth. This is a primary scalability concern.
-        *   **Mitigation:**
-            *   Optimize image encoding (JPEG quality, consider WebP if client support is good).
-            *   Potentially offer scaled-down image resolutions for frontend display.
-            *   Ensure WebSocket server infrastructure can handle larger message throughput.
-    *   **Increased CPU Load:**
-        *   Backend: Image encoding (e.g., `cv2.imencode`, `base64.b64encode`) adds CPU load per frame per camera.
-        *   Frontend: Base64 decoding and image rendering add CPU load per frame per camera.
-    *   Redis and TimescaleDB are scalable.
+*   **Performance Optimizations:**
+    *   **GPU-First Architecture:** All AI processing on GPU for maximum throughput
+    *   **Binary Streaming:** Eliminates base64 encoding/decoding overhead
+    *   **Reduced Network Load:** 40-60% reduction in WebSocket message size
+    *   **Frame Skipping:** Maintains real-time performance under load
+    *   **Concurrent Processing:** 4 cameras processed simultaneously on GPU
+    *   **Memory Optimization:** Efficient GPU memory allocation and reuse
+*   **Scalability Considerations:**
+    *   **GPU Memory Limits:** Current design optimized for single GPU with 4 cameras
+    *   **Network Bandwidth:** Binary streaming reduces bandwidth by ~50%
+    *   **Real-Time Constraints:** <10 FPS target with adaptive quality control
+    *   **Database Scaling:** Redis for real-time, TimescaleDB for historical data
 *   **Maintainability:**
-    *   Modular design, clear service responsibilities.
-    *   **Simplified Frontend Sync:** The new approach greatly simplifies frontend synchronization logic.
-    *   Consistent coding style, type hinting, comprehensive testing.
-    *   Detailed logging.
-    *   Centralized initialization logic in `on_startup`.
+    *   **GPU Abstraction:** Clear separation between GPU and CPU operations
+    *   **Performance Monitoring:** Built-in GPU utilization and memory tracking
+    *   **Error Handling:** Graceful degradation when GPU memory is exhausted
+    *   **Hot Reload:** Docker development environment with GPU support
+    *   **Testing:** GPU-aware unit tests and performance benchmarks
 
-## 10. Next Steps / Considerations
+## 10. Development and Deployment
 
-*   **Authentication & Authorization.**
-*   **Detailed Error Handling & Retry Mechanisms.**
-*   **Resource Management:** Monitor CPU, memory, and network for backend (especially image encoding) and WebSockets.
-*   **Image Encoding Optimization:** Investigate optimal JPEG quality vs. size. Consider if frontend can request different resolutions/qualities.
-*   **WebSocket Message Size Limits:** Be mindful of default limits in WebSocket libraries/proxies. May need configuration for larger image payloads.
-*   **Client-Side Performance:** Ensure frontend can decode and render images at the target frame rate without lag.
+*   **Local Development Environment:**
+    *   **Docker GPU Support:** nvidia-docker for GPU acceleration in containers
+    *   **Hot Reload:** FastAPI auto-reload with GPU model persistence
+    *   **Performance Profiling:** Built-in GPU utilization monitoring
+    *   **Development Database:** Simplified Redis + PostgreSQL setup
+*   **GPU Requirements:**
+    *   **Minimum:** NVIDIA GPU with 6GB VRAM (GTX 1060 or better)
+    *   **Recommended:** NVIDIA RTX 30xx series with 8GB+ VRAM
+    *   **CUDA Version:** 11.8+ with cuDNN 8.6+
+*   **Performance Monitoring:**
+    *   **GPU Metrics:** Memory usage, utilization, temperature
+    *   **Inference Times:** Per-model performance tracking
+    *   **Network Metrics:** WebSocket throughput and latency
+    *   **Frame Metrics:** FPS, frame drops, processing delays
+*   **Next Steps:**
+    *   **GPU Memory Optimization:** Implement model quantization
+    *   **TensorRT Integration:** Optimize inference performance
+    *   **Multi-GPU Support:** Scale to multiple GPUs for higher throughput
+    *   **Cloud GPU Deployment:** AWS/GCP GPU instance optimization
+    *   **Performance Testing:** Load testing with multiple concurrent sessions
