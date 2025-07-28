@@ -2,13 +2,22 @@
 Global fixtures for the SpotOn backend test suite.
 """
 import pytest
+import asyncio
 from unittest.mock import MagicMock, PropertyMock
 from pathlib import Path
 from typing import List, Dict, Tuple, Any, Set, Optional
 import math
+import sys
+import os
+
+# Add project root to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.core.config import Settings, VideoSetEnvironmentConfig, CameraHandoffDetailConfig
 from app.shared.types import CameraID, ExitRuleModel, QuadrantName
+
+# Import test fixtures
+from tests.fixtures.test_fixtures import *
 
 @pytest.fixture(scope="session")
 def mock_settings_base_values() -> Dict[str, Any]:
