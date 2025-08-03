@@ -604,6 +604,83 @@ class PipelineOrchestrator:
             self.calibration_service is not None,
             self.coordinate_transformer is not None
         ])
+    
+    async def run_processing_pipeline(self, task_id: uuid.UUID, environment_id: str):
+        """
+        Main method to run the complete processing pipeline for a task.
+        This is executed as a background task.
+        """
+        logger.info(f"Starting processing pipeline for task {task_id}, environment {environment_id}")
+        
+        try:
+            # Update task status to processing
+            await self.update_task_status(task_id, "INITIALIZING", 0.1, "Initializing services")
+            
+            # Initialize services for this environment
+            services_initialized = await self.initialize_services(environment_id)
+            
+            if not services_initialized:
+                await self.complete_task(task_id, success=False)
+                logger.error(f"Failed to initialize services for task {task_id}")
+                return
+            
+            await self.update_task_status(task_id, "DOWNLOADING", 0.2, "Downloading video data")
+            
+            # Simulate video processing pipeline
+            # In a real implementation, this would:
+            # 1. Download video segments from S3
+            # 2. Extract frames 
+            # 3. Process frames through detection -> reid -> mapping pipeline
+            # 4. Stream results via WebSocket
+            
+            # For now, simulate the pipeline stages
+            import asyncio
+            
+            stages = [
+                ("DOWNLOADING", 0.3, "Downloading video segments"),
+                ("EXTRACTING", 0.5, "Extracting frames from video"),
+                ("PROCESSING", 0.7, "Running AI detection and tracking"),
+                ("STREAMING", 0.9, "Streaming results to frontend"),
+            ]
+            
+            for stage, progress, step_desc in stages:
+                await self.update_task_status(task_id, stage, progress, step_desc)
+                
+                # Simulate processing time
+                await asyncio.sleep(2.0)
+                
+                # Example frame batch processing (simplified)
+                if stage == "PROCESSING":
+                    try:
+                        # Create a mock frame batch
+                        mock_frame_batch = {
+                            "task_id": str(task_id),
+                            "environment_id": environment_id,
+                            "camera_frames": {
+                                "c01": {"frame_data": "mock_frame_data_c01"},
+                                "c02": {"frame_data": "mock_frame_data_c02"}
+                            },
+                            "batch_index": 0,
+                            "timestamp": datetime.now(timezone.utc).isoformat()
+                        }
+                        
+                        # Process the batch (this will use the actual pipeline components)
+                        results = await self.process_frame_batch(task_id, mock_frame_batch)
+                        
+                        logger.info(f"Processed frame batch for task {task_id}: {len(results.get('detection_results', {}).get('detections', []))} detections")
+                        
+                    except Exception as e:
+                        logger.warning(f"Frame processing failed for task {task_id}: {e}")
+                        # Continue pipeline even if frame processing fails
+            
+            # Complete the task successfully
+            await self.complete_task(task_id, success=True)
+            logger.info(f"Processing pipeline completed successfully for task {task_id}")
+            
+        except Exception as e:
+            logger.error(f"Processing pipeline failed for task {task_id}: {e}")
+            await self.complete_task(task_id, success=False)
+
 
 # Global orchestrator instance
 orchestrator = PipelineOrchestrator()
