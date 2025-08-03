@@ -1,7 +1,7 @@
 import logging
 from typing import Dict, Any, List
 
-from app.api.websockets import ConnectionManager
+from app.api.websockets import BinaryWebSocketManager
 # Removed MediaURLEntry as it's no longer part of WebSocketMediaAvailablePayload
 from app.api.v1.schemas import WebSocketBatchProcessingCompletePayload # WebSocketMediaAvailablePayload removed
 
@@ -10,12 +10,12 @@ logger = logging.getLogger(__name__)
 class NotificationService:
     """Service responsible for sending notifications via WebSockets."""
 
-    def __init__(self, manager: ConnectionManager):
+    def __init__(self, manager: BinaryWebSocketManager):
         """
         Initializes the NotificationService.
 
         Args:
-            manager: An instance of ConnectionManager to handle WebSocket connections.
+            manager: An instance of BinaryWebSocketManager to handle WebSocket connections.
         """
         self.manager = manager
         logger.info("NotificationService initialized.")

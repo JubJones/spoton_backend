@@ -1,0 +1,108 @@
+# CPU-Only Configuration for SpotOn Backend
+# This docker-compose file is optimized for CPU-only deployment
+# 
+# Quick Start:
+# 1. Ensure weights/clip_market1501.pt exists (~600MB file)
+# 2. Copy .env.example to .env (already configured for CPU)
+# 3. Run: docker-compose -f docker-compose.cpu.yml up --build -d
+# 4. Verify: curl http://localhost:8000/health
+# 5. Test: python scripts/websocket_client_test.py
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTORCH_VARIANT: cpu  # Force CPU-only PyTorch build
+    image: spoton_backend_image:cpu
+    container_name: spoton_backend_cpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app  # Mount local code for development
+      # Remove this volume mount for production deployment
+    env_file:
+      - .env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTORCH_VARIANT_BUILD=cpu
+      # CPU-optimized settings
+      - OMP_NUM_THREADS=4
+      - PYTORCH_NUM_THREADS=4
+      - TARGET_FPS=3                    # Reduced FPS for CPU processing
+      - FRAME_JPEG_QUALITY=70           # Lower quality for faster processing
+      - DETECTION_CONFIDENCE_THRESHOLD=0.7  # Higher threshold to reduce processing
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    # No GPU deployment section - CPU only
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Give more time for CPU model loading
+
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: spoton_redis_cpu
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # CPU resource limits to prevent overwhelming
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          memory: 256M
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: spoton_timescaledb_cpu
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spoton_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spoton_password}
+      POSTGRES_DB: ${POSTGRES_DB:-spotondb}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-spoton_user} -d $${POSTGRES_DB:-spotondb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    # CPU resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G
+        reservations:
+          memory: 512M
+
+volumes:
+  redis_data:
+    driver: local
+  timescaledb_data:
+    driver: local
+
+# CPU-optimized network configuration
+networks:
+  default:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1500

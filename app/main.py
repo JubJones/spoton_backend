@@ -9,7 +9,7 @@ from app.core.config import settings
 from app.core import event_handlers
 from app.api.v1.endpoints import processing_tasks
 from app.api.v1.endpoints import media as media_endpoints
-from app.api import websockets as ws_router
+from app.api.websockets import endpoints as ws_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)

@@ -1,0 +1,86 @@
+# GPU Configuration for SpotOn Backend
+# Optimized for NVIDIA GPU with CUDA support
+#
+# Prerequisites:
+# - NVIDIA GPU with CUDA support
+# - NVIDIA Container Toolkit installed
+# - Model weights in ./weights/clip_market1501.pt
+#
+# Usage:
+# docker-compose -f docker-compose.gpu.yml up --build -d
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTORCH_VARIANT: cu121  # Force GPU PyTorch build
+    image: spoton_backend_image:gpu
+    container_name: spoton_backend_gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./app:/app/app  # Mount for development
+    env_file:
+      - .env.gpu
+    environment:
+      - PYTHONUNBUFFERED=1
+      - PYTORCH_VARIANT_BUILD=cu121
+      - CUDA_VISIBLE_DEVICES=0
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: spoton_redis_gpu
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: spoton_timescaledb_gpu
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spoton_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spoton_password}
+      POSTGRES_DB: ${POSTGRES_DB:-spotondb}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-spoton_user} -d $${POSTGRES_DB:-spotondb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  redis_data:
+    driver: local
+  timescaledb_data:
+    driver: local

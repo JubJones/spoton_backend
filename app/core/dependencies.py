@@ -17,7 +17,7 @@ from app.core.config import settings
 # )
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
-from app.orchestration.pipeline_orchestrator import orchestrator
+from app.orchestration.pipeline_orchestrator import orchestrator, PipelineOrchestrator
 from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
@@ -25,7 +25,7 @@ from app.services.homography_service import HomographyService
 
 from app.models.base_models import AbstractDetector
 
-from app.api.websockets import manager as websocket_manager
+from app.api.websockets import binary_websocket_manager as websocket_manager
 
 logger = logging.getLogger(__name__)
 
@@ -116,10 +116,10 @@ def get_pipeline_orchestrator(
     multi_camera_processor: MultiCameraFrameProcessor = Depends(get_multi_camera_frame_processor),
     tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
     notification_service: NotificationService = Depends(get_notification_service)
-) -> PipelineOrchestratorService:
-    """Dependency provider for PipelineOrchestratorService."""
-    logger.debug("Initializing PipelineOrchestratorService instance (or returning cached).")
-    return PipelineOrchestratorService(
+) -> PipelineOrchestrator:
+    """Dependency provider for PipelineOrchestrator."""
+    logger.debug("Initializing PipelineOrchestrator instance (or returning cached).")
+    return PipelineOrchestrator(
         video_data_manager=video_data_manager,
         multi_camera_processor=multi_camera_processor,
         tracker_factory=tracker_factory,
