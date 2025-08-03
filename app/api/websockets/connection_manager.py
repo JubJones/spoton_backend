@@ -340,7 +340,7 @@ class BinaryWebSocketManager:
                 "timestamp": datetime.now(timezone.utc).isoformat()
             }
             
-            # Send batch
+            # Send batch - uses _send_immediate_message which now always sends text
             success = await self._send_immediate_message(task_id, batch_message)
             
             # Clear batch
@@ -367,14 +367,17 @@ class BinaryWebSocketManager:
             message_json = json.dumps(message)
             message_bytes = message_json.encode('utf-8')
             
-            # Apply compression if beneficial
+            # Determine if compression should be applied
+            use_compression = False
+            compressed_data = message_bytes
+            
             if self.enable_compression and len(message_bytes) > self.compression_threshold:
-                compressed_data = gzip.compress(message_bytes, compresslevel=self.compression_level)
-                compression_ratio = len(compressed_data) / len(message_bytes)
+                test_compressed = gzip.compress(message_bytes, compresslevel=self.compression_level)
+                compression_ratio = len(test_compressed) / len(message_bytes)
                 
                 if compression_ratio < 0.9:
-                    message_bytes = compressed_data
-                    message["compressed"] = True
+                    compressed_data = test_compressed
+                    use_compression = True
                     self._update_compression_stats(compression_ratio)
             
             # Send to all connections
@@ -383,10 +386,9 @@ class BinaryWebSocketManager:
             
             for websocket in self.active_connections[task_id]:
                 try:
-                    if message.get("compressed"):
-                        await websocket.send_bytes(message_bytes)
-                    else:
-                        await websocket.send_text(message_json)
+                    # Always send as text for JSON messages to maintain compatibility
+                    # Frontend clients expect text-based WebSocket messages
+                    await websocket.send_text(message_json)
                     
                     success_count += 1
                     self._update_connection_metrics(task_id, websocket, len(message_bytes))

@@ -1,12 +1,53 @@
 # SpotOn Backend Implementation Planning
 
 ## Project Overview
-This document outlines the complete implementation plan for the SpotOn backend system, organized by implementation phases for maximum tracking efficiency.
+This document outlines the complete implementation plan for the SpotOn backend system to support a comprehensive frontend with advanced visualization, user interaction, and analytics capabilities.
 
-### 🎯 **Three Core Features**
-1. **Multi-View Person Detection**: Identifies and locates individuals within each camera frame independently
-2. **Cross-Camera Re-Identification and Tracking**: Matches and tracks individuals across different camera views, maintaining persistent identity using visual features
-3. **Unified Spatial Mapping**: Transforms detected locations onto a common 2D map coordinate system for visualizing continuous trajectories
+### 🎯 **Core System Requirements**
+The backend must support a sophisticated frontend application with the following capabilities:
+
+**Real-Time Visualization**:
+- Multiple camera views with live video feeds
+- Person detection bounding boxes overlaid on camera images
+- Global person ID tracking across all camera views
+- Unified 2D map visualization with person locations and movement paths
+- Real-time person count displays and cropped person images
+
+**Advanced User Interaction**:
+- Environment and date/time selection interface
+- "Focus Track" functionality for person-centric viewing
+- Interactive playback controls for recorded video analysis
+- Camera selection and switching capabilities
+- Detailed person information panels with tracking statistics
+
+**Comprehensive Analytics**:
+- Historical movement path analysis and visualization
+- Person behavior analysis with movement metrics
+- Zone-based analytics and occupancy trends
+- Real-time and historical statistics dashboards
+- Export capabilities for analysis and reporting
+
+### 🏗️ **Enhanced System Architecture**
+The backend architecture has been expanded to support comprehensive frontend requirements:
+
+```
+app/
+├── domains/                    # Enhanced Business Logic
+│   ├── detection/             # Multi-View Person Detection
+│   ├── reid/                  # Cross-Camera Re-Identification  
+│   ├── mapping/               # Unified Spatial Mapping
+│   ├── visualization/         # NEW: Image Processing & Overlays
+│   ├── interaction/           # NEW: User Control & Focus Tracking
+│   └── analytics/             # NEW: Advanced Analytics & Reporting
+├── infrastructure/            # Data & External Services
+├── orchestration/             # System Coordination
+├── api/                       # REST & WebSocket Endpoints
+└── services/                  # Enhanced Service Layer
+    ├── image_processing/      # NEW: Camera Feed & Overlay Generation
+    ├── user_interface/        # NEW: Frontend Integration Services
+    ├── historical_data/       # NEW: Time-based Data Management
+    └── export/                # NEW: Data Export & Reporting
+```
 
 ### 🏗️ **Target Architecture**
 ```
@@ -107,14 +148,43 @@ app/
 
 ## Success Criteria & Dependencies
 
-### Phase Completion Criteria
+### Enhanced Phase Completion Criteria
 **Phase 0**: Domain architecture established, core feature foundations ready
 **Phase 1**: All three core features operational with GPU acceleration
 **Phase 2**: Real-time streaming with <100ms latency
 **Phase 3**: Data persistence and caching operational
 **Phase 4**: Advanced analytics and optimization features
 **Phase 5**: Production-ready with security and comprehensive testing
-**Phase 6**: Deployed and optimized for target performance
+**Phase 6**: Frontend integration features - image processing, focus track, user interaction
+**Phase 7**: Historical data management and advanced analytics capabilities
+**Phase 8**: Environment management and temporal data access systems
+**Phase 9**: Advanced visualization, map integration, and data export capabilities
+**Phase 10**: Final production deployment and optimization
+
+### Frontend Integration Success Metrics
+**Image Processing & Visualization**:
+- Real-time camera frame serving with overlays (<100ms latency)
+- Cropped person image generation and caching (>95% accuracy)
+- Multi-camera synchronized view composition
+- Adaptive quality control based on network conditions
+
+**Focus Track & User Interaction**:
+- Person selection and highlighting across all camera views
+- Real-time focus state synchronization (<50ms response time)
+- Interactive playback controls with seeking capabilities
+- Comprehensive person detail information display
+
+**Analytics & Historical Data**:
+- Historical movement path reconstruction and visualization
+- Real-time analytics dashboard with live metrics
+- Zone-based occupancy analysis and reporting
+- Behavioral pattern analysis and anomaly detection
+
+**Environment & Data Management**:
+- Multi-environment support (Campus, Factory) with isolation
+- Date/time range selection and data availability validation
+- Historical session management with temporal navigation
+- Comprehensive data export capabilities (CSV, JSON, video)
 
 ### Critical Dependencies
 - CUDA drivers and GPU runtime environment
@@ -137,62 +207,272 @@ app/
 ### HTTP REST API Specification
 
 **Environment & Configuration Endpoints**:
-- Environment management for monitoring environments
-- Camera configuration and calibration data
-- Zone and layout endpoints for spatial mapping
-- Purpose: Landing page environment selection and settings configuration
+```
+GET    /api/v1/environments                           # List all available environments
+GET    /api/v1/environments/{env_id}                  # Get environment details
+GET    /api/v1/environments/{env_id}/cameras          # List cameras in environment  
+GET    /api/v1/environments/{env_id}/zones            # Get zone definitions
+GET    /api/v1/environments/{env_id}/date-ranges      # Available data date ranges
+POST   /api/v1/environments/{env_id}/sessions         # Create analysis session
+```
+*Purpose*: Landing page environment selection, camera configuration, and session management.
+
+**Image Processing & Visualization Endpoints**:
+```
+GET    /api/v1/media/frames/{task_id}/{camera_id}             # Get current camera frame with overlays
+GET    /api/v1/media/persons/{global_person_id}/image        # Get cropped person image
+GET    /api/v1/media/frames/{task_id}/{camera_id}/raw        # Get raw camera frame without overlays
+POST   /api/v1/media/frames/overlay-config                   # Configure overlay settings
+GET    /api/v1/media/frames/{task_id}/multi-camera           # Get synchronized multi-camera view
+```
+*Purpose*: Real-time image serving with overlays, cropped person images, and multi-camera visualization.
+
+**Focus Track & User Interaction Endpoints**:
+```
+POST   /api/v1/tracking/focus/{task_id}                      # Set focus on specific person
+GET    /api/v1/tracking/focus/{task_id}                      # Get current focus state
+DELETE /api/v1/tracking/focus/{task_id}                      # Clear focus
+POST   /api/v1/tracking/controls/{task_id}/play             # Playback control
+POST   /api/v1/tracking/controls/{task_id}/pause            # Pause playback
+POST   /api/v1/tracking/controls/{task_id}/seek             # Seek to timestamp
+GET    /api/v1/tracking/persons/{global_person_id}/details  # Get detailed person information
+```
+*Purpose*: Interactive person tracking, playback controls, and detailed person information display.
 
 **Real-Time Processing Endpoints**:
-- Session management for tracking sessions
-- Detection and tracking endpoints for person data
-- Active tracking data and person following capabilities
-- Purpose: Group view and detail view page functionality
+```
+POST   /api/v1/processing-tasks/start                        # Start processing task
+GET    /api/v1/processing-tasks/{task_id}/status             # Get task status
+GET    /api/v1/processing-tasks/{task_id}/active-persons     # Get active persons in task
+POST   /api/v1/processing-tasks/{task_id}/stop               # Stop processing task
+GET    /api/v1/processing-tasks/active                       # List all active tasks
+```
+*Purpose*: Task management for real-time processing and monitoring.
 
-**Analytics & Historical Data Endpoints**:
-- Analytics endpoints for detection statistics and tracking history
-- Person journey endpoints for complete trajectory analysis
-- Heat map data and occupancy trends
-- Purpose: Analytics page functionality and individual person analysis
+**Historical Data & Analytics Endpoints**:
+```
+GET    /api/v1/analytics/historical/{env_id}/summary         # Historical analytics summary
+GET    /api/v1/analytics/persons/{person_id}/journey         # Person journey analysis
+GET    /api/v1/analytics/zones/{zone_id}/occupancy           # Zone occupancy trends
+GET    /api/v1/analytics/heatmap/{env_id}                    # Generate heatmap data
+GET    /api/v1/analytics/paths/{env_id}                      # Movement path analysis
+POST   /api/v1/analytics/reports/generate                    # Generate custom reports
+GET    /api/v1/analytics/real-time/metrics                   # Real-time analytics metrics
+GET    /api/v1/analytics/behavior/{person_id}/analysis       # Behavioral analysis
+```
+*Purpose*: Comprehensive analytics, historical data access, and advanced behavior analysis.
+
+**Data Export & Reporting Endpoints**:
+```
+POST   /api/v1/export/tracking-data                          # Export tracking data
+POST   /api/v1/export/analytics-report                       # Export analytics report
+POST   /api/v1/export/video-with-overlays                    # Export video with overlays
+GET    /api/v1/export/jobs/{job_id}/status                   # Get export job status
+GET    /api/v1/export/jobs/{job_id}/download                 # Download export file
+```
+*Purpose*: Data export capabilities and batch processing for reports.
 
 **System Management Endpoints**:
-- Health and status endpoints for system monitoring
-- Export and reporting capabilities for data analysis
-- Performance metrics and system readiness checks
-- Purpose: System health monitoring and data export functionality
+```
+GET    /health                                               # System health check
+GET    /api/v1/system/status                                 # Detailed system status
+GET    /api/v1/system/performance                            # Performance metrics
+GET    /api/v1/system/cameras/status                         # Camera system status
+POST   /api/v1/system/maintenance                            # System maintenance operations
+```
+*Purpose*: System health monitoring, performance tracking, and maintenance operations.
 
 ### WebSocket Protocol Specification
 
 **Connection Management**:
-- Real-time tracking data and system status connections
-- JWT token authentication on WebSocket connections
-- Binary frame transmission with JSON metadata
-- Purpose: Real-time data streaming for all frontend pages
+```
+/ws/tracking/{task_id}                    # Real-time tracking updates for specific task
+/ws/frames/{task_id}                      # Binary frame streaming for task
+/ws/system                                # System-wide status updates
+/ws/focus/{task_id}                       # Focus track updates for task
+/ws/analytics/{env_id}                    # Real-time analytics for environment
+```
 
-**Message Protocol Design**:
-- Frame data messages with binary JPEG and JSON metadata
-- Tracking update messages for person movement and transitions
-- System status messages for health indicators
-- Purpose: Live camera feeds, person tracking updates, and system monitoring
+**Enhanced Message Protocol Design**:
+
+1. **Enhanced Tracking Update Messages**:
+   ```json
+   {
+     "type": "tracking_update",
+     "payload": {
+       "global_frame_index": 123,
+       "scene_id": "campus", 
+       "timestamp_processed_utc": "2023-10-27T10:30:05.456Z",
+       "cameras": {
+         "c01": {
+           "image_source": "000123.jpg",
+           "frame_image_base64": "iVBORw0KGgoAAAANSUhEUgAA...",
+           "cropped_persons": {
+             "person-uuid-abc-123": "data:image/jpeg;base64,/9j/4AAQ..."
+           },
+           "tracks": [{
+             "track_id": 5,
+             "global_id": "person-uuid-abc-123", 
+             "bbox_xyxy": [110.2, 220.5, 160.0, 330.8],
+             "confidence": 0.92,
+             "map_coords": [12.3, 45.6],
+             "is_focused": false,
+             "detection_time": "2023-10-27T10:29:45.123Z",
+             "tracking_duration": 20.5
+           }]
+         }
+       },
+       "person_count_per_camera": {"c01": 3, "c02": 1},
+       "focus_person_id": null
+     }
+   }
+   ```
+
+2. **Focus Track Update Messages**:
+   ```json
+   {
+     "type": "focus_update", 
+     "payload": {
+       "focused_person_id": "person-uuid-abc-123",
+       "person_details": {
+         "global_id": "person-uuid-abc-123",
+         "first_detected": "2023-10-27T10:29:45.123Z",
+         "tracking_duration": 45.2,
+         "current_camera": "c01",
+         "position_history": [
+           {"timestamp": "2023-10-27T10:30:00Z", "camera": "c01", "bbox": [110, 220, 160, 330], "map_coords": [12.3, 45.6]},
+           {"timestamp": "2023-10-27T10:30:05Z", "camera": "c01", "bbox": [115, 225, 165, 335], "map_coords": [12.5, 45.8]}
+         ],
+         "movement_metrics": {
+           "average_speed": 0.8,
+           "total_distance": 15.2,
+           "dwell_time": 12.5
+         }
+       }
+     }
+   }
+   ```
+
+3. **Real-Time Analytics Messages**:
+   ```json
+   {
+     "type": "analytics_update",
+     "payload": {
+       "environment_id": "campus",
+       "timestamp": "2023-10-27T10:30:05.456Z",
+       "live_metrics": {
+         "total_persons": 12,
+         "persons_per_camera": {"c01": 3, "c02": 4, "c03": 5},
+         "zone_occupancy": {"zone_1": 5, "zone_2": 3, "zone_3": 4},
+         "avg_dwell_time": 25.4,
+         "crowd_density": 0.6
+       },
+       "alerts": [
+         {"type": "high_occupancy", "zone": "zone_1", "count": 8, "threshold": 6}
+       ]
+     }
+   }
+   ```
+
+4. **Historical Playback Messages**:
+   ```json
+   {
+     "type": "playback_frame",
+     "payload": {
+       "timestamp": "2023-10-27T10:30:05.456Z",
+       "playback_speed": 1.0,
+       "frame_data": "/* same as tracking_update */",
+       "playback_controls": {
+         "position": 0.45,
+         "duration": 3600,
+         "can_seek": true
+       }
+     }
+   }
+   ```
 
 **Performance Optimization**:
 - Message compression and batching for efficient delivery
-- Binary frame data compression and selective updates
-- GPU-to-JPEG encoding optimization
-- Purpose: Efficient real-time data transmission
+- Binary frame data compression with selective quality adjustment
+- Delta updates for reduced bandwidth on tracking changes
+- Client-side caching for cropped person images
+- Adaptive frame rate based on network conditions
 
 ### Data Schemas & Models
 
-**Core Data Models**:
-- Detection schema with bounding box and confidence data
-- Tracking schema for person identity and cross-camera tracks
-- Mapping schema for coordinates and trajectory data
-- Standardized API response format with pagination support
+**Enhanced Core Data Models**:
+
+1. **Person Entity**:
+   ```python
+   PersonEntity:
+     - global_person_id: str (UUID)
+     - first_detected_time: datetime
+     - last_seen_time: datetime
+     - tracking_duration: float
+     - detection_confidence: float
+     - current_camera: str
+     - position_history: List[PositionRecord]
+     - movement_metrics: MovementMetrics
+     - appearance_features: np.ndarray
+     - cropped_images: Dict[str, bytes]
+   ```
+
+2. **Enhanced Detection Schema**:
+   ```python
+   DetectionSchema:
+     - frame_id: str
+     - camera_id: str
+     - timestamp: datetime
+     - bbox_xyxy: List[float]
+     - confidence: float
+     - class_id: int
+     - global_person_id: str
+     - map_coordinates: List[float]
+     - is_focused: bool
+     - detection_metadata: Dict
+   ```
+
+3. **Focus Track Schema**:
+   ```python
+   FocusTrackSchema:
+     - task_id: str
+     - focused_person_id: str
+     - focus_start_time: datetime
+     - highlight_settings: Dict
+     - cross_camera_sync: bool
+     - person_details: PersonDetails
+   ```
+
+4. **Environment Configuration Schema**:
+   ```python
+   EnvironmentSchema:
+     - environment_id: str
+     - name: str
+     - description: str
+     - cameras: List[CameraConfig]
+     - zones: List[ZoneDefinition]
+     - available_date_ranges: List[DateRange]
+     - calibration_data: Dict
+   ```
+
+5. **Analytics Data Schema**:
+   ```python
+   AnalyticsSchema:
+     - environment_id: str
+     - timestamp: datetime
+     - person_counts: Dict[str, int]
+     - zone_occupancy: Dict[str, int]
+     - movement_patterns: List[MovementPattern]
+     - behavioral_metrics: BehaviorMetrics
+     - heatmap_data: HeatmapData
+   ```
 
 **API Response Models**:
 - Standardized response format with success/error handling
-- Paginated response support for large datasets
-- Consistent timestamp and metadata inclusion
-- Type-safe response structures
+- Paginated response support for large datasets with cursor-based pagination
+- Consistent timestamp and metadata inclusion across all endpoints
+- Type-safe response structures with comprehensive validation
+- Error response format with actionable error codes and messages
 
 ### Authentication & Security
 
@@ -305,18 +585,202 @@ app/
 
 ---
 
-## Phase 6: Deployment & Optimization (Weeks 6-8)
-*Priority: Medium | Parallel with: Frontend Phase 6*
+## Phase 6: Frontend Integration & Visualization (Weeks 6-8)
+*Priority: CRITICAL | Essential for Frontend Support*
+
+**Objective**: Implement missing frontend-facing features for comprehensive visualization and user interaction.
+
+### 6.1 Image Processing & Overlay System
+- [ ] **Camera Feed Processing Pipeline**
+  - Real-time frame capture and processing from multiple cameras
+  - Dynamic overlay generation with bounding boxes and person IDs
+  - Cropped person image generation and caching
+  - Adaptive quality control and frame rate optimization
+
+- [ ] **Visual Enhancement Service**
+  - Person bounding box rendering on camera frames
+  - Global person ID label overlay with customizable styling
+  - Camera view composition and multi-camera layout support
+  - Real-time visual effects and highlighting for selected persons
+
+- [ ] **Image Serving Infrastructure**
+  - RESTful endpoints for serving processed camera frames
+  - S3 URL generation for camera images with overlays
+  - Cropped person image serving with caching
+  - Base64 image encoding for WebSocket transmission
+
+**Implementation Focus**: OpenCV-based image processing, GPU-accelerated overlay rendering, efficient image encoding/decoding, and scalable image serving infrastructure.
+
+### 6.2 Focus Track & User Interaction System
+- [ ] **Focus Track Implementation**
+  - Person selection by global_person_id from cropped images or bounding boxes
+  - Cross-camera person highlighting and tracking
+  - Real-time focus updates across all camera views
+  - Focus state management and synchronization
+
+- [ ] **Interactive Control System**
+  - Playback control API for recorded video analysis
+  - Camera selection and switching functionality
+  - Real-time control commands via WebSocket
+  - User preference management and session state
+
+- [ ] **Detailed Person Information Service**
+  - Comprehensive person tracking statistics
+  - Position history and movement analysis
+  - First detection time and tracking duration
+  - Movement metrics and behavioral analysis
+
+**Implementation Focus**: Real-time person state management, WebSocket command handling, comprehensive person data aggregation, and interactive session management.
+
+---
+
+## Phase 7: Historical Data & Analytics (Weeks 7-9)
+*Priority: HIGH | Required for Analytics Features*
+
+**Objective**: Implement comprehensive historical data management and advanced analytics capabilities.
+
+### 7.1 Historical Data Management System
+- [ ] **Time-Based Data Storage**
+  - Historical person movement path storage and retrieval
+  - Time-range based data queries and filtering
+  - Efficient data indexing for temporal analysis
+  - Data retention policies and archival systems
+
+- [ ] **Playback Infrastructure**
+  - Historical video frame serving with timestamps
+  - Synchronized playback of tracking data and video frames
+  - Temporal navigation and seeking capabilities
+  - Batch processing of historical data for analysis
+
+- [ ] **Movement Path Visualization**
+  - Person trajectory reconstruction from historical data
+  - Path smoothing and interpolation for continuous visualization
+  - Multi-person path analysis and comparison
+  - Heatmap generation for occupancy analysis
+
+**Implementation Focus**: TimescaleDB optimization for time-series data, efficient querying strategies, temporal data synchronization, and path reconstruction algorithms.
+
+### 7.2 Advanced Analytics Engine
+- [ ] **Real-Time Analytics**
+  - Live person counting and occupancy metrics
+  - Zone-based analytics with configurable boundaries
+  - Camera load balancing and performance metrics
+  - Real-time anomaly detection and alerting
+
+- [ ] **Behavioral Analysis System**
+  - Person movement pattern analysis
+  - Dwell time calculation and zone interaction metrics
+  - Crowd flow analysis and congestion detection
+  - Behavioral anomaly identification
+
+- [ ] **Historical Analytics & Reporting**
+  - Comprehensive statistical analysis of tracking data
+  - Trend analysis and pattern recognition
+  - Peak occupancy analysis and capacity planning
+  - Custom report generation with configurable metrics
+
+**Implementation Focus**: Statistical analysis algorithms, pattern recognition systems, configurable analytics pipelines, and automated reporting infrastructure.
+
+---
+
+## Phase 8: Environment & Date Management (Weeks 8-10)
+*Priority: HIGH | Essential for Landing Page*
+
+**Objective**: Implement comprehensive environment management and temporal data access for frontend landing page functionality.
+
+### 8.1 Environment Management System
+- [ ] **Environment Configuration**
+  - Campus and Factory environment definitions
+  - Camera configuration per environment
+  - Zone and layout management for each environment
+  - Environment-specific calibration data
+
+- [ ] **Landing Page API**
+  - Environment listing and selection endpoints
+  - Available date ranges for each environment
+  - Environment metadata and configuration serving
+  - User preference storage for environment settings
+
+- [ ] **Multi-Environment Data Management**
+  - Environment-specific data isolation
+  - Cross-environment analytics and comparison
+  - Environment switching with state management
+  - Environment-specific user permissions
+
+**Implementation Focus**: Environment data modeling, configuration management systems, multi-tenant data architecture, and comprehensive environment APIs.
+
+### 8.2 Temporal Data Access System
+- [ ] **Date/Time Range Management**
+  - Available data range queries per environment
+  - Efficient temporal data indexing and retrieval
+  - Time zone handling and conversion
+  - Data availability validation and error handling
+
+- [ ] **Historical Session Management**
+  - Time-based session creation and management
+  - Historical data preprocessing for efficient access
+  - Temporal data caching and optimization
+  - Session state persistence across user interactions
+
+**Implementation Focus**: Temporal database optimization, efficient time-range queries, session management systems, and robust time zone handling.
+
+---
+
+## Phase 9: Advanced Features & Export (Weeks 9-11)
+*Priority: MEDIUM | Enhanced Functionality*
+
+**Objective**: Implement advanced features, data export capabilities, and comprehensive system optimization.
+
+### 9.1 Advanced Visualization Features
+- [ ] **Map Integration System**
+  - 2D map canvas coordinate system implementation
+  - Real-time person position plotting on unified map
+  - Historical movement path visualization on map
+  - Interactive map features with zoom and pan capabilities
+
+- [ ] **Multi-Camera Synchronization**
+  - Frame synchronization across multiple cameras
+  - Temporal alignment for accurate cross-camera tracking
+  - Latency compensation and frame interpolation
+  - Quality balancing across camera feeds
+
+- [ ] **Visual Enhancement Features**
+  - Adaptive quality control based on network conditions
+  - Dynamic overlay styling and customization
+  - Person appearance similarity visualization
+  - Camera transition visualization and effects
+
+**Implementation Focus**: 2D graphics rendering, coordinate system mathematics, real-time synchronization algorithms, and advanced visualization techniques.
+
+### 9.2 Data Export & Reporting System
+- [ ] **Export Infrastructure**
+  - CSV/JSON export for tracking data and analytics
+  - Video export with overlays and annotations
+  - Report generation with customizable templates
+  - Batch export processing for large datasets
+
+- [ ] **Reporting & Documentation**
+  - Automated report generation with schedules
+  - Custom analytics dashboards and visualizations
+  - Data format conversion and standardization
+  - API documentation with interactive examples
+
+**Implementation Focus**: Data serialization systems, report templating engines, batch processing infrastructure, and comprehensive API documentation.
+
+---
+
+## Phase 10: Production Deployment & Optimization (Weeks 10-12)
+*Priority: MEDIUM | Final Production Readiness*
 
 **Objective**: Deploy to production environment and optimize for performance and scalability.
 
-### 6.1 Local Production Setup
+### 10.1 Local Production Setup
 - [ ] **Local Deployment**
 - [ ] **Performance Optimization**
 
 **Implementation Focus**: Production environment setup, SSL/TLS configuration, GPU memory optimization, TensorRT integration, and database query optimization.
 
-### 6.2 Cloud Deployment Preparation
+### 10.2 Cloud Deployment Preparation
 - [ ] **AWS Integration Preparation**
 - [ ] **Containerization & Orchestration**
 - [ ] **Monitoring & Maintenance**
@@ -354,7 +818,7 @@ app/
 - **Pipeline**: <100ms total end-to-end latency
 - **Streaming**: Real-time frame transmission with adaptive quality
 
-### File Structure Reference
+### Enhanced File Structure Reference
 ```
 app/
 ├── domains/
@@ -366,19 +830,46 @@ app/
 │   │   ├── entities/          # PersonIdentity, Track, FeatureVector
 │   │   ├── models/            # CLIP ReID, Base ReID Model
 │   │   └── services/          # ReID Service, Track Manager
-│   └── mapping/
-│       ├── entities/          # Coordinate, Trajectory, CameraView
-│       ├── models/            # Homography, Coordinate Transformer
-│       └── services/          # Mapping Service, Trajectory Builder
+│   ├── mapping/
+│   │   ├── entities/          # Coordinate, Trajectory, CameraView
+│   │   ├── models/            # Homography, Coordinate Transformer
+│   │   └── services/          # Mapping Service, Trajectory Builder
+│   ├── visualization/         # NEW: Image Processing & Overlays
+│   │   ├── entities/          # OverlayConfig, CroppedImage, VisualFrame
+│   │   ├── models/            # ImageProcessor, OverlayRenderer
+│   │   └── services/          # FrameCompositionService, ImageCachingService
+│   ├── interaction/           # NEW: User Control & Focus Tracking
+│   │   ├── entities/          # FocusState, PlaybackControl, UserSession
+│   │   ├── models/            # FocusManager, PlaybackController
+│   │   └── services/          # InteractionService, SessionManager
+│   └── analytics/             # NEW: Advanced Analytics & Reporting
+│       ├── entities/          # AnalyticsMetrics, BehaviorPattern, Report
+│       ├── models/            # AnalyticsEngine, PatternRecognizer
+│       └── services/          # AnalyticsService, ReportGenerator
 ├── infrastructure/
 │   ├── database/              # SQLAlchemy, TimescaleDB integration
 │   ├── cache/                 # Redis client and caching
-│   └── gpu/                   # GPU resource management
+│   ├── gpu/                   # GPU resource management
+│   └── storage/               # NEW: File and image storage management
+├── services/                  # NEW: Enhanced Service Layer
+│   ├── image_processing/      # Camera feed processing and overlay generation
+│   ├── user_interface/        # Frontend integration and session management
+│   ├── historical_data/       # Time-based data management and retrieval
+│   └── export/                # Data export and reporting services
 ├── orchestration/
 │   ├── pipeline_orchestrator.py    # Main system coordinator
 │   ├── camera_manager.py           # Multi-camera coordination
-│   └── real_time_processor.py      # Real-time data flow
+│   ├── real_time_processor.py      # Real-time data flow
+│   ├── focus_coordinator.py        # NEW: Focus track coordination
+│   └── analytics_coordinator.py    # NEW: Real-time analytics coordination
 └── api/
-    ├── v1/endpoints/          # REST API endpoints
-    └── websockets/            # WebSocket handlers
+    ├── v1/endpoints/          # Enhanced REST API endpoints
+    │   ├── environments.py   # NEW: Environment management
+    │   ├── media.py          # NEW: Enhanced media serving
+    │   ├── focus_tracking.py # NEW: Focus track endpoints
+    │   ├── analytics.py      # Enhanced analytics endpoints
+    │   └── export.py         # NEW: Data export endpoints
+    └── websockets/            # Enhanced WebSocket handlers
+        ├── focus_handler.py   # NEW: Focus track WebSocket handler
+        └── analytics_handler.py # NEW: Analytics WebSocket handler
 ```
