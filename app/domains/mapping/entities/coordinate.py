@@ -5,7 +5,7 @@ Contains coordinate system objects and spatial transformations.
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any, Tuple, Union
 from datetime import datetime
 from enum import Enum
 import math
@@ -147,7 +147,7 @@ class Coordinate:
             frame_index=self.frame_index
         )
     
-    def to_tuple(self) -> Tuple[float, float] | Tuple[float, float, float]:
+    def to_tuple(self) -> Union[Tuple[float, float], Tuple[float, float, float]]:
         """Convert to tuple representation."""
         if self.is_3d:
             return (self.x, self.y, self.z or 0)
@@ -186,7 +186,7 @@ class Coordinate:
     @classmethod
     def from_tuple(
         cls,
-        coords: Tuple[float, float] | Tuple[float, float, float],
+        coords: Union[Tuple[float, float], Tuple[float, float, float]],
         coordinate_system: CoordinateSystem,
         timestamp: datetime,
         **kwargs

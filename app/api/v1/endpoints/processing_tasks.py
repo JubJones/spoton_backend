@@ -4,7 +4,7 @@ import uuid
 import logging
 
 from app.api.v1 import schemas
-from app.orchestration.pipeline_orchestrator import orchestrator
+from app.orchestration.pipeline_orchestrator import orchestrator, PipelineOrchestrator
 from app.core.dependencies import get_pipeline_orchestrator
 from app.core.config import settings
 
@@ -21,7 +21,7 @@ router = APIRouter()
 async def start_processing_task_endpoint(
     params: schemas.ProcessingTaskStartRequest,
     background_tasks: BackgroundTasks,
-    orchestrator: PipelineOrchestratorService = Depends(get_pipeline_orchestrator)
+    orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator)
 ):
     """
     Initiates a background task to process video data for a specified environment.
@@ -74,7 +74,7 @@ async def start_processing_task_endpoint(
 )
 async def get_processing_task_status_endpoint(
     task_id: uuid.UUID,
-    orchestrator: PipelineOrchestratorService = Depends(get_pipeline_orchestrator) # Use orchestrator method
+    orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator) # Use orchestrator method
 ):
     """
     Retrieves the current status, progress, and details of a specific processing task.

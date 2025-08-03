@@ -67,10 +67,6 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 RUN uv venv /opt/venv --python $(which python)
 ENV PATH="/opt/venv/bin:$PATH"
 
-# Copy and run GPU dependencies installation script
-COPY scripts/install_gpu_deps.sh /tmp/install_gpu_deps.sh
-RUN chmod +x /tmp/install_gpu_deps.sh
-
 RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT} using /root/.local/bin/uv" && \
     if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
     /root/.local/bin/uv pip install --no-cache-dir \
@@ -78,21 +74,21 @@ RUN echo "Installing PyTorch variant: ${PYTORCH_VARIANT} using /root/.local/bin/
     torchvision==${TORCHVISION_VERSION}+cu121 \
     torchaudio==${TORCHAUDIO_VERSION}+cu121 \
     --index-url https://download.pytorch.org/whl/cu121 && \
-    /root/.local/bin/uv pip install --no-cache-dir faiss-gpu>=1.7.4,<1.8.0; \
+    /root/.local/bin/uv pip install --no-cache-dir "faiss-gpu>=1.7.4,<1.8.0"; \
     elif [ "${PYTORCH_VARIANT}" = "cu118" ]; then \
     /root/.local/bin/uv pip install --no-cache-dir \
     torch==${TORCH_VERSION}+cu118 \
     torchvision==${TORCHVISION_VERSION}+cu118 \
     torchaudio==${TORCHAUDIO_VERSION}+cu118 \
     --index-url https://download.pytorch.org/whl/cu118 && \
-    /root/.local/bin/uv pip install --no-cache-dir faiss-gpu>=1.7.4,<1.8.0; \
+    /root/.local/bin/uv pip install --no-cache-dir "faiss-gpu>=1.7.4,<1.8.0"; \
     elif [ "${PYTORCH_VARIANT}" = "cpu" ]; then \
     /root/.local/bin/uv pip install --no-cache-dir \
     torch==${TORCH_VERSION} \
     torchvision==${TORCHVISION_VERSION} \
     torchaudio==${TORCHAUDIO_VERSION} \
     --index-url https://download.pytorch.org/whl/cpu && \
-    /root/.local/bin/uv pip install --no-cache-dir faiss-cpu>=1.7.4,<1.8.0; \
+    /root/.local/bin/uv pip install --no-cache-dir "faiss-cpu>=1.7.4,<1.8.0"; \
     else \
     echo "Error: Invalid PYTORCH_VARIANT. Must be 'cpu', 'cu118', or 'cu121'." && exit 1; \
     fi

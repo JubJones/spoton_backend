@@ -1,1 +1,2 @@
 "clip_market1501.pt": "https://drive.google.com/uc?id=1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7",
+named as clip_market1501.pt

@@ -27,6 +27,8 @@ dependencies = [
     "pydantic-settings>=2.2.0,<2.3.0",
     "redis[hiredis]>=5.0.5,<5.1.0",
     "psycopg2-binary>=2.9.9,<2.10.0",
+    "sqlalchemy>=2.0.0,<2.1.0",
+    "alembic>=1.13.0,<1.14.0",
     "dagshub>=0.3.0,<0.4.0",
     "boto3>=1.34.0,<1.35.0",
     "numpy>=1.26.4,<1.27.0",
@@ -41,8 +43,7 @@ dependencies = [
     "cython>=0.29.0,<0.30.0", # Often a build dep for others like faiss
     "pip>=23.0,<25.0",
     "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS (default)
-    "transformers>=4.36.0,<4.37.0", # For CLIP model support
-    "clip-by-openai>=1.0", # OpenAI CLIP implementation
+    "transformers>=4.36.0,<4.37.0", # For CLIP model support (includes CLIP models)
     "accelerate>=0.24.0,<0.25.0", # For GPU acceleration
     "scipy>=1.11.0,<1.12.0", # Required for advanced similarity calculations
     "ultralytics>=8.0.0,<8.1.0", # YOLOv8 implementation
@@ -59,9 +60,9 @@ dev = [
 ]
 gpu = [
     "faiss-gpu>=1.7.4,<1.8.0", # GPU version of FAISS (requires CUDA)
-    "torch>=2.2.0+cu121", # PyTorch with CUDA 12.1 support
-    "torchvision>=0.17.0+cu121", # TorchVision with CUDA 12.1 support
-    "torchaudio>=2.2.0+cu121", # TorchAudio with CUDA 12.1 support
+    "torch==2.2.1+cu121", # PyTorch with CUDA 12.1 support
+    "torchvision==0.17.1+cu121", # TorchVision with CUDA 12.1 support
+    "torchaudio==2.2.1+cu121", # TorchAudio with CUDA 12.1 support
 ]
 cpu = [
     "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS
