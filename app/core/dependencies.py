@@ -111,17 +111,7 @@ def get_multi_camera_frame_processor(
     )
 
 @lru_cache()
-def get_pipeline_orchestrator(
-    video_data_manager: VideoDataManagerService = Depends(get_video_data_manager_service),
-    multi_camera_processor: MultiCameraFrameProcessor = Depends(get_multi_camera_frame_processor),
-    tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
-    notification_service: NotificationService = Depends(get_notification_service)
-) -> PipelineOrchestrator:
+def get_pipeline_orchestrator() -> PipelineOrchestrator:
     """Dependency provider for PipelineOrchestrator."""
     logger.debug("Initializing PipelineOrchestrator instance (or returning cached).")
-    return PipelineOrchestrator(
-        video_data_manager=video_data_manager,
-        multi_camera_processor=multi_camera_processor,
-        tracker_factory=tracker_factory,
-        notification_service=notification_service
-    )
+    return PipelineOrchestrator()

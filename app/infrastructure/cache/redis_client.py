@@ -5,9 +5,21 @@ from redis.asyncio import Redis as AsyncRedis
 from typing import Optional, Any
 import json
 import logging
+import uuid
+from datetime import datetime
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+class UUIDJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder to handle UUID and datetime objects."""
+    
+    def default(self, obj):
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        elif isinstance(obj, datetime):
+            return obj.isoformat()
+        return super().default(obj)
 
 class RedisClient:
     """Redis client wrapper for caching operations."""
@@ -66,7 +78,7 @@ class RedisClient:
         """Set JSON value in Redis."""
         try:
             client = self.connect()
-            return client.set(key, json.dumps(value), ex=ex)
+            return client.set(key, json.dumps(value, cls=UUIDJSONEncoder), ex=ex)
         except Exception as e:
             logger.error(f"Failed to set JSON in Redis: {e}")
             return False
@@ -85,7 +97,7 @@ class RedisClient:
         """Set JSON value in Redis asynchronously."""
         try:
             client = await self.connect_async()
-            return await client.set(key, json.dumps(value), ex=ex)
+            return await client.set(key, json.dumps(value, cls=UUIDJSONEncoder), ex=ex)
         except Exception as e:
             logger.error(f"Failed to set JSON in async Redis: {e}")
             return False
