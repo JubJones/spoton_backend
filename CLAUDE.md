@@ -140,6 +140,40 @@ The system sends two main message types:
 - Test client script: `scripts/websocket_client_test.py`
 - Health check endpoint: `/health` for system readiness
 
+### Frontend Simulation Testing
+
+The project includes a comprehensive frontend simulation client for end-to-end testing:
+
+#### Quick Start
+```bash
+# 1. Start backend services
+docker-compose -f docker-compose.cpu.yml up -d
+
+# 2. Install dependencies (if needed)
+python setup_frontend_simulation.py
+
+# 3. Run comprehensive test
+python frontend_simulation_client.py
+```
+
+#### Features Tested
+- ✅ Health endpoints (system, auth, analytics)
+- ✅ Authentication flow (login, user info, permissions)  
+- ✅ Processing task lifecycle (start, monitor, status)
+- ✅ WebSocket connections (tracking, frames, system status)
+- ✅ Media endpoints (video file serving)
+- ✅ Analytics endpoints (real-time metrics, reports)
+
+#### Dependencies
+- `aiohttp>=3.8.0` - HTTP client for REST API testing
+- `websockets>=10.0` - WebSocket client for real-time testing
+
+If you encounter `ModuleNotFoundError: No module named 'aiohttp'`, run:
+```bash
+pip install aiohttp>=3.8.0 websockets>=10.0
+```
+Or use the automated setup: `python setup_frontend_simulation.py`
+
 ### Key Dependencies
 
 - **FastAPI**: Web framework and WebSocket support

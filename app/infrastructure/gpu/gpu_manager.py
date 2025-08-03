@@ -348,6 +348,72 @@ class GPUManager:
         """Get allocation information for a task."""
         return self.device_allocations.get(task_id)
     
+    def is_available(self) -> bool:
+        """Check if GPU is available."""
+        if not TORCH_AVAILABLE:
+            return False
+        return torch.cuda.is_available() or (hasattr(torch.backends, 'mps') and torch.backends.mps.is_available())
+    
+    def get_device_count(self) -> int:
+        """Get number of available devices."""
+        if not TORCH_AVAILABLE:
+            return 0
+        if torch.cuda.is_available():
+            return torch.cuda.device_count()
+        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+            return 1
+        return 0
+    
+    def get_utilization(self) -> float:
+        """Get average GPU utilization across all devices."""
+        if not TORCH_AVAILABLE or not self.is_available():
+            return 0.0
+        
+        total_utilization = 0.0
+        device_count = 0
+        
+        if torch.cuda.is_available():
+            for device_id in self.available_devices:
+                if device_id.startswith("cuda"):
+                    gpu_id = int(device_id.split(":")[1])
+                    try:
+                        allocated = torch.cuda.memory_allocated(gpu_id)
+                        total = torch.cuda.get_device_properties(gpu_id).total_memory
+                        utilization = allocated / total if total > 0 else 0.0
+                        total_utilization += utilization
+                        device_count += 1
+                    except Exception as e:
+                        logger.warning(f"Error getting utilization for {device_id}: {e}")
+        
+        return total_utilization / device_count if device_count > 0 else 0.0
+    
+    def get_memory_usage(self) -> float:
+        """Get average memory usage across all devices in GB."""
+        if not TORCH_AVAILABLE or not self.is_available():
+            return 0.0
+        
+        total_memory_used = 0.0
+        device_count = 0
+        
+        if torch.cuda.is_available():
+            for device_id in self.available_devices:
+                if device_id.startswith("cuda"):
+                    gpu_id = int(device_id.split(":")[1])
+                    try:
+                        allocated = torch.cuda.memory_allocated(gpu_id)
+                        total_memory_used += allocated / (1024**3)  # Convert to GB
+                        device_count += 1
+                    except Exception as e:
+                        logger.warning(f"Error getting memory usage for {device_id}: {e}")
+        
+        return total_memory_used / device_count if device_count > 0 else 0.0
+    
+    def get_temperature(self) -> float:
+        """Get average GPU temperature (not available via PyTorch, returns 0)."""
+        # PyTorch doesn't provide temperature monitoring
+        # This would require nvidia-ml-py or similar for NVIDIA GPUs
+        return 0.0
+    
     def cleanup(self):
         """Cleanup resources."""
         self.stop_monitoring()
