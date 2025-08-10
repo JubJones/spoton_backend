@@ -1,0 +1,1 @@
+# Domain shared value objects
