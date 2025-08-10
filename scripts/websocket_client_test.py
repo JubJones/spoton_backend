@@ -21,8 +21,8 @@ logging.basicConfig(
 logger = logging.getLogger("websocket_client")
 
 # --- Configuration ---
-BACKEND_BASE_URL = "http://localhost:8000"
-WEBSOCKET_BASE_URL = "ws://localhost:8000"
+BACKEND_BASE_URL = "http://localhost:3847"
+WEBSOCKET_BASE_URL = "ws://localhost:3847"
 API_V1_PREFIX = "/api/v1"
 HEALTH_CHECK_URL = f"{BACKEND_BASE_URL}/health"
 SAVE_DECODED_IMAGES = True # << MODIFIED: Default to True for easier testing

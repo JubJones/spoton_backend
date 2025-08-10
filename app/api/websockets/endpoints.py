@@ -22,6 +22,8 @@ from app.api.websockets import (
     status_handler,
     MessageType
 )
+from app.api.websockets.focus_handler import focus_tracking_handler
+from app.api.websockets.analytics_handler import analytics_handler
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -253,6 +255,130 @@ async def websocket_system_endpoint(websocket: WebSocket):
         logger.info("WebSocket system connection closed")
 
 
+@router.websocket("/focus/{task_id}")
+async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket endpoint for focus tracking functionality.
+    
+    Provides:
+    - Real-time focus updates
+    - Person highlight controls
+    - Focus state management
+    - Interactive person selection
+    """
+    logger.info(f"WebSocket focus tracking connection request for task_id: {task_id}")
+    
+    connected = False
+    
+    try:
+        # Connect to binary WebSocket manager
+        connected = await binary_websocket_manager.connect(websocket, task_id)
+        
+        if not connected:
+            logger.error(f"Failed to connect focus WebSocket for task_id: {task_id}")
+            await websocket.close(code=1011, reason="Connection failed")
+            return
+        
+        logger.info(f"WebSocket focus tracking connection established for task_id: {task_id}")
+        
+        # Initialize focus tracking for this task
+        await focus_tracking_handler.handle_focus_connection(task_id)
+        
+        # Main message loop
+        while True:
+            try:
+                # Receive message from client
+                data = await websocket.receive_text()
+                
+                # Parse client message
+                try:
+                    message = json.loads(data)
+                    await focus_tracking_handler.handle_client_message(task_id, message)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON received from focus client: {data}")
+                    continue
+                
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket focus client disconnected gracefully for task_id: {task_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket focus loop for task_id {task_id}: {e}")
+                break
+                
+    except Exception as e:
+        logger.error(f"Error in WebSocket focus endpoint for task_id {task_id}: {e}")
+        
+    finally:
+        # Cleanup connection
+        if connected:
+            await binary_websocket_manager.disconnect(websocket, task_id)
+            await focus_tracking_handler.handle_focus_disconnection(task_id)
+        
+        logger.info(f"WebSocket focus tracking connection closed for task_id: {task_id}")
+
+
+@router.websocket("/analytics/{task_id}")
+async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket endpoint for real-time analytics data.
+    
+    Provides:
+    - Live performance metrics
+    - System health monitoring
+    - Processing statistics
+    - Camera analytics
+    """
+    logger.info(f"WebSocket analytics connection request for task_id: {task_id}")
+    
+    connected = False
+    
+    try:
+        # Connect to binary WebSocket manager
+        connected = await binary_websocket_manager.connect(websocket, task_id)
+        
+        if not connected:
+            logger.error(f"Failed to connect analytics WebSocket for task_id: {task_id}")
+            await websocket.close(code=1011, reason="Connection failed")
+            return
+        
+        logger.info(f"WebSocket analytics connection established for task_id: {task_id}")
+        
+        # Initialize analytics for this task
+        await analytics_handler.handle_analytics_connection(task_id)
+        
+        # Main message loop
+        while True:
+            try:
+                # Receive message from client
+                data = await websocket.receive_text()
+                
+                # Parse client message
+                try:
+                    message = json.loads(data)
+                    await analytics_handler.handle_client_message(task_id, message)
+                except json.JSONDecodeError:
+                    logger.warning(f"Invalid JSON received from analytics client: {data}")
+                    continue
+                
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket analytics client disconnected gracefully for task_id: {task_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket analytics loop for task_id {task_id}: {e}")
+                break
+                
+    except Exception as e:
+        logger.error(f"Error in WebSocket analytics endpoint for task_id {task_id}: {e}")
+        
+    finally:
+        # Cleanup connection
+        if connected:
+            await binary_websocket_manager.disconnect(websocket, task_id)
+            await analytics_handler.handle_analytics_disconnection(task_id)
+        
+        logger.info(f"WebSocket analytics connection closed for task_id: {task_id}")
+
+
 async def handle_client_message(task_id: str, message: Dict[str, Any]):
     """Handle messages from tracking WebSocket clients."""
     try:
@@ -384,7 +510,9 @@ async def websocket_health():
             "system_health": system_status.get("health_status", "unknown"),
             "monitoring_active": status_handler.monitoring_active,
             "frame_handler_stats": frame_handler.get_encoding_stats(),
-            "tracking_handler_stats": tracking_handler.get_tracking_stats()
+            "tracking_handler_stats": tracking_handler.get_tracking_stats(),
+            "focus_handler_stats": focus_tracking_handler.get_focus_statistics(),
+            "analytics_handler_stats": analytics_handler.get_analytics_statistics()
         }
         
     except Exception as e:
@@ -401,6 +529,8 @@ async def websocket_stats():
             "websocket_manager": binary_websocket_manager.get_performance_stats(),
             "frame_handler": frame_handler.get_encoding_stats(),
             "tracking_handler": tracking_handler.get_tracking_stats(),
+            "focus_handler": focus_tracking_handler.get_focus_statistics(),
+            "analytics_handler": analytics_handler.get_analytics_statistics(),
             "system_status": await status_handler.get_system_status()
         }
         

@@ -6,8 +6,9 @@ from functools import lru_cache
 from typing import Optional
 import logging
 import uuid
+from dataclasses import dataclass
 
-from fastapi import Depends, Request, HTTPException, status
+from fastapi import Depends, Request, HTTPException, status, Header
 import torch
 
 from app.core.config import settings
@@ -24,10 +25,38 @@ from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
 from app.services.homography_service import HomographyService
 
 from app.models.base_models import AbstractDetector
+from app.domains.export.services import ExportService, DataSerializationService, ReportGeneratorService
+from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
+from app.infrastructure.cache.redis_client import RedisClient
+from app.services.analytics_engine import AnalyticsEngine
 
 from app.api.websockets import binary_websocket_manager as websocket_manager
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class User:
+    """Simple user model for export endpoints."""
+    username: str
+    user_id: str = None
+    
+    def __post_init__(self):
+        if self.user_id is None:
+            self.user_id = str(uuid.uuid4())
+
+
+def get_current_user(authorization: Optional[str] = Header(None)) -> User:
+    """Simple authentication dependency. In production, this would validate JWT tokens."""
+    # For development/demo purposes, create a default user
+    # In production, this would validate the authorization header and extract user info
+    if authorization:
+        # Extract user info from token (simplified)
+        username = "admin"  # Would extract from JWT
+    else:
+        username = "anonymous"
+    
+    return User(username=username)
 
 
 # --- Accessing Preloaded Components from app.state ---
@@ -115,3 +144,47 @@ def get_pipeline_orchestrator() -> PipelineOrchestrator:
     """Dependency provider for PipelineOrchestrator."""
     logger.debug("Initializing PipelineOrchestrator instance (or returning cached).")
     return PipelineOrchestrator()
+
+# --- Export Services ---
+
+@lru_cache()
+def get_tracking_repository() -> TrackingRepository:
+    """Dependency provider for TrackingRepository."""
+    return TrackingRepository()
+
+@lru_cache()
+def get_redis_client() -> RedisClient:
+    """Dependency provider for RedisClient."""
+    return RedisClient()
+
+@lru_cache()
+def get_analytics_service() -> AnalyticsEngine:
+    """Dependency provider for AnalyticsEngine."""
+    return AnalyticsEngine()
+
+@lru_cache()
+def get_data_serialization_service() -> DataSerializationService:
+    """Dependency provider for DataSerializationService."""
+    return DataSerializationService()
+
+@lru_cache()
+def get_report_generator_service() -> ReportGeneratorService:
+    """Dependency provider for ReportGeneratorService."""
+    return ReportGeneratorService()
+
+@lru_cache()
+def get_export_service(
+    tracking_repository: TrackingRepository = Depends(get_tracking_repository),
+    redis_client: RedisClient = Depends(get_redis_client),
+    analytics_service: AnalyticsEngine = Depends(get_analytics_service),
+    data_serialization_service: DataSerializationService = Depends(get_data_serialization_service),
+    report_generator_service: ReportGeneratorService = Depends(get_report_generator_service)
+) -> ExportService:
+    """Dependency provider for ExportService."""
+    return ExportService(
+        tracking_repository=tracking_repository,
+        redis_client=redis_client,
+        analytics_service=analytics_service,
+        data_serialization_service=data_serialization_service,
+        report_generator_service=report_generator_service
+    )

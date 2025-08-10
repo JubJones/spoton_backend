@@ -224,7 +224,7 @@ class HorizontalScalingService:
         """Register current instance."""
         try:
             host = getattr(settings, 'HOST', 'localhost')
-            port = getattr(settings, 'PORT', 8000)
+            port = getattr(settings, 'PORT', 3847)
             
             capabilities = {
                 'detection': True,

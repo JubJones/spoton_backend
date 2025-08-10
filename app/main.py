@@ -9,6 +9,10 @@ from app.core.config import settings
 from app.core import event_handlers
 from app.api.v1.endpoints import processing_tasks
 from app.api.v1.endpoints import media as media_endpoints
+from app.api.v1.endpoints import focus_tracking
+from app.api.v1.endpoints import playback_controls
+from app.api.v1.endpoints import environments
+# from app.api.v1.endpoints import export as export_endpoints  # Temporarily disabled
 # from app.api.v1.endpoints import analytics as analytics_endpoints
 # from app.api.v1.endpoints import auth as auth_endpoints
 from app.api.websockets import endpoints as ws_router
@@ -84,6 +88,26 @@ app.include_router(
     prefix=f"{api_v1_router_prefix}/media",
     tags=["V1 - Media Content"]
 )
+app.include_router(
+    focus_tracking.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - Focus Tracking"]
+)
+app.include_router(
+    playback_controls.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - Playback Controls"]
+)
+app.include_router(
+    environments.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - Environment Management"]
+)
+# app.include_router(
+#     export_endpoints.router,
+#     prefix=f"{api_v1_router_prefix}",
+#     tags=["V1 - Data Export"]
+# )  # Temporarily disabled
 
 # Add simple mock endpoints for testing
 from fastapi import APIRouter

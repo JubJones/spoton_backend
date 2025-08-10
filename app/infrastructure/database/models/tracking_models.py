@@ -60,7 +60,7 @@ class TrackingEvent(Base):
     session_id = Column(String(100), nullable=True, index=True)
     
     # Additional data
-    metadata = Column(JSONB, nullable=True)
+    event_metadata = Column(JSONB, nullable=True)
     
     # Indexes for time-series queries
     __table_args__ = (
@@ -108,7 +108,7 @@ class DetectionEvent(Base):
     session_id = Column(String(100), nullable=True, index=True)
     
     # Additional metadata
-    metadata = Column(JSONB, nullable=True)
+    detection_metadata = Column(JSONB, nullable=True)
     
     # Relationship
     tracking_event = relationship("TrackingEvent", back_populates="detection_events")
@@ -162,7 +162,7 @@ class PersonTrajectory(Base):
     session_id = Column(String(100), nullable=True, index=True)
     
     # Additional data
-    metadata = Column(JSONB, nullable=True)
+    trajectory_metadata = Column(JSONB, nullable=True)
     
     # Indexes
     __table_args__ = (
@@ -216,7 +216,7 @@ class PersonIdentity(Base):
     total_tracking_time = Column(Float, default=0.0)  # Total time tracked (seconds)
     
     # Additional metadata
-    metadata = Column(JSONB, nullable=True)
+    identity_metadata = Column(JSONB, nullable=True)
     
     # Relationships
     tracking_events = relationship("TrackingEvent", back_populates="person_identity")
@@ -330,7 +330,7 @@ class SessionRecord(Base):
     settings = Column(JSONB, nullable=True)
     
     # Additional metadata
-    metadata = Column(JSONB, nullable=True)
+    session_metadata = Column(JSONB, nullable=True)
     
     # Timestamps
     created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
