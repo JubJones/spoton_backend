@@ -12,6 +12,7 @@ from app.api.v1.endpoints import media as media_endpoints
 from app.api.v1.endpoints import focus_tracking
 from app.api.v1.endpoints import playback_controls
 from app.api.v1.endpoints import environments
+from app.api.v1.endpoints import data_ingestion
 # from app.api.v1.endpoints import export as export_endpoints  # Temporarily disabled
 # from app.api.v1.endpoints import analytics as analytics_endpoints
 # from app.api.v1.endpoints import auth as auth_endpoints
@@ -102,6 +103,11 @@ app.include_router(
     environments.router,
     prefix=f"{api_v1_router_prefix}",
     tags=["V1 - Environment Management"]
+)
+app.include_router(
+    data_ingestion.router,
+    prefix=f"{api_v1_router_prefix}/data-ingestion",
+    tags=["V1 - Data Ingestion"]
 )
 # app.include_router(
 #     export_endpoints.router,

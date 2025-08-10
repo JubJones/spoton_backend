@@ -44,15 +44,15 @@ class S3Settings(BaseModel):
     
     # Connection settings
     endpoint_url: Optional[str] = Field(
-        default="https://s3.dagshub.com",
+        default="https://dagshub.com/api/v1/repo-buckets/s3/Jwizzed",
         description="S3 endpoint URL"
     )
     access_key_id: Optional[str] = Field(
-        default=None,
+        default="0023115884d84bc9b52fce4451572ccb08d9f85f",
         description="S3 access key ID"
     )
     secret_access_key: Optional[str] = Field(
-        default=None,
+        default="0023115884d84bc9b52fce4451572ccb08d9f85f",
         description="S3 secret access key"
     )
     region: str = Field(
