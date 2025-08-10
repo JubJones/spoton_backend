@@ -191,3 +191,4 @@ Or use the automated setup: `python setup_frontend_simulation.py`
 - The system requires S3-compatible storage for video data
 - GPU support available via CUDA-enabled Docker builds
 - Health check endpoint should be polled before WebSocket connections
+- Remember "Always check the checkbox in the planning file if it existed when you implemented the task"

@@ -38,7 +38,7 @@ logger = logging.getLogger("frontend_simulator")
 class SpotOnFrontendSimulator:
     """Comprehensive frontend simulation client for SpotOn backend."""
     
-    def __init__(self, base_url: str = "http://localhost:8000", max_retries: int = 3):
+    def __init__(self, base_url: str = "http://localhost:3847", max_retries: int = 3):
         self.base_url = base_url.rstrip('/')
         self.ws_base_url = base_url.replace('http://', 'ws://').replace('https://', 'wss://').rstrip('/')
         self.max_retries = max_retries

@@ -131,3 +131,7 @@ def get_redis() -> redis.Redis:
 async def get_redis_async() -> AsyncRedis:
     """Dependency to get async Redis client."""
     return await redis_client.connect_async()
+
+def get_redis_client() -> RedisClient:
+    """Dependency to get RedisClient instance."""
+    return redis_client

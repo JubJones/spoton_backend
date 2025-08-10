@@ -89,6 +89,10 @@ class Settings(BaseSettings):
     TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 90
 
+    # Export settings
+    EXPORT_BASE_DIR: str = "./exports"
+    EXPORT_EXPIRY_HOURS: int = 24
+
     # --- Computed property for L2 threshold if not explicit ---
     @property
     def derived_l2_distance_threshold(self) -> float:

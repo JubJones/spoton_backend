@@ -682,3 +682,7 @@ class TrackingCache:
 
 # Global tracking cache instance
 tracking_cache = TrackingCache()
+
+def get_tracking_cache() -> TrackingCache:
+    """Get the global tracking cache instance."""
+    return tracking_cache
