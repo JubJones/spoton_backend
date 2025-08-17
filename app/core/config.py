@@ -18,6 +18,21 @@ class Settings(BaseSettings):
     APP_NAME: str = "SpotOn Backend"
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = False
+    
+    # Production Endpoint Control
+    ENABLE_ANALYTICS_ENDPOINTS: bool = Field(default=True, description="Enable analytics API endpoints")
+    ENABLE_EXPORT_ENDPOINTS: bool = Field(default=True, description="Enable data export API endpoints")
+    ENABLE_AUTH_ENDPOINTS: bool = Field(default=True, description="Enable authentication API endpoints")
+    ENABLE_ADMIN_ENDPOINTS: bool = Field(default=False, description="Enable admin-only API endpoints")
+    PRODUCTION_MODE: bool = Field(default=False, description="Production deployment mode with enhanced security")
+    
+    # Security Configuration
+    ALLOWED_ORIGINS: List[str] = Field(default_factory=lambda: ["http://localhost:3000", "http://localhost:5173"], description="Allowed CORS origins")
+    ALLOWED_HOSTS: List[str] = Field(default_factory=lambda: ["localhost", "127.0.0.1"], description="Allowed host headers")
+    RATE_LIMIT_PER_MINUTE: int = Field(default=60, description="Rate limit requests per minute per IP")
+    ENABLE_SECURITY_HEADERS: bool = Field(default=True, description="Enable security headers middleware")
+    ENABLE_REQUEST_LOGGING: bool = Field(default=True, description="Enable security request logging")
+    MAX_REQUEST_SIZE_MB: int = Field(default=10, description="Maximum request size in MB")
 
     S3_ENDPOINT_URL: Optional[str] = "https://s3.dagshub.com"
     AWS_ACCESS_KEY_ID: Optional[str] = None

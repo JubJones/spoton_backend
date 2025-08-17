@@ -7,15 +7,17 @@ from typing import Callable # For ASGIApp type hint
 
 from app.core.config import settings
 from app.core import event_handlers
+from app.core.security_config import configure_security_middleware, get_cors_config
 from app.api.v1.endpoints import processing_tasks
 from app.api.v1.endpoints import media as media_endpoints
 from app.api.v1.endpoints import focus_tracking
 from app.api.v1.endpoints import playback_controls
 from app.api.v1.endpoints import environments
 from app.api.v1.endpoints import data_ingestion
-# from app.api.v1.endpoints import export as export_endpoints  # Temporarily disabled
-# from app.api.v1.endpoints import analytics as analytics_endpoints
-# from app.api.v1.endpoints import auth as auth_endpoints
+from app.api.v1.endpoints import export as export_endpoints
+from app.api.v1.endpoints import analytics as analytics_endpoints
+from app.api.v1.endpoints import auth as auth_endpoints
+from app.api.v1.endpoints import system_monitoring
 from app.api.websockets import endpoints as ws_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -68,15 +70,15 @@ app = FastAPI(
     redoc_url=f"/redoc"
 )
 
+# Configure security middleware (includes rate limiting, security headers, etc.)
+configure_security_middleware(app)
+
+# Add header logging middleware after security middleware
 app.add_middleware(HeaderLoggingMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configure secure CORS based on environment
+cors_config = get_cors_config()
+app.add_middleware(CORSMiddleware, **cors_config)
 
 api_v1_router_prefix = settings.API_V1_PREFIX
 app.include_router(
@@ -109,66 +111,35 @@ app.include_router(
     prefix=f"{api_v1_router_prefix}/data-ingestion",
     tags=["V1 - Data Ingestion"]
 )
-# app.include_router(
-#     export_endpoints.router,
-#     prefix=f"{api_v1_router_prefix}",
-#     tags=["V1 - Data Export"]
-# )  # Temporarily disabled
+# Conditionally include routers based on configuration
+if settings.ENABLE_EXPORT_ENDPOINTS:
+    app.include_router(
+        export_endpoints.router,
+        prefix=f"{api_v1_router_prefix}",
+        tags=["V1 - Data Export"]
+    )
 
-# Add simple mock endpoints for testing
-from fastapi import APIRouter
-mock_router = APIRouter()
+if settings.ENABLE_ANALYTICS_ENDPOINTS:
+    app.include_router(
+        analytics_endpoints.router,
+        prefix=f"{api_v1_router_prefix}/analytics",
+        tags=["V1 - Analytics"]
+    )
 
-@mock_router.get("/health")
-async def analytics_health():
-    return {"status": "healthy", "service": "analytics"}
+if settings.ENABLE_AUTH_ENDPOINTS:
+    app.include_router(
+        auth_endpoints.router,
+        prefix=f"{api_v1_router_prefix}/auth",
+        tags=["V1 - Authentication"]
+    )
 
-@mock_router.get("/health") 
-async def auth_health():
-    return {"status": "healthy", "service": "auth"}
+# System monitoring is always enabled for operational visibility
+app.include_router(
+    system_monitoring.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - System Monitoring"]
+)
 
-@mock_router.post("/login")
-async def mock_login(request: dict):
-    return {"access_token": "mock_token", "token_type": "bearer"}
-
-@mock_router.get("/me")
-async def mock_me():
-    return {"username": "admin", "role": "admin"}
-
-@mock_router.get("/real-time/metrics")
-async def mock_metrics():
-    return {"active_persons": 0, "total_cameras": 8}
-
-@mock_router.get("/real-time/active-persons")
-async def mock_active_persons():
-    return {"active_persons": []}
-
-@mock_router.get("/real-time/camera-loads") 
-async def mock_camera_loads():
-    return {"cameras": {"c01": 0, "c02": 0}}
-
-@mock_router.get("/system/statistics")
-async def mock_system_stats():
-    return {"total_processed": 0, "uptime": 3600}
-
-@mock_router.get("/reports/types")
-async def mock_report_types():
-    return {"types": ["daily", "weekly", "monthly"]}
-
-@mock_router.post("/behavior/analyze")
-async def mock_behavior_analyze():
-    return {"analysis": "mock_result"}
-
-@mock_router.post("/historical/summary")
-async def mock_historical_summary():
-    return {"summary": "mock_data"}
-
-@mock_router.get("/permissions/test")
-async def mock_permissions_test():
-    return {"permissions": ["read", "write"]}
-
-app.include_router(mock_router, prefix=f"{api_v1_router_prefix}/analytics", tags=["V1 - Analytics"])
-app.include_router(mock_router, prefix=f"{api_v1_router_prefix}/auth", tags=["V1 - Authentication"])
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
 
 @app.get("/", tags=["Root"])
