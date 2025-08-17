@@ -15,8 +15,9 @@ from fastapi import APIRouter, HTTPException, Depends, status, Security
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, EmailStr
 
-from app.infrastructure.security.jwt_service import jwt_service, UserRole, TokenData
+from app.infrastructure.security.jwt_service import jwt_service
 from app.infrastructure.security.encryption_service import encryption_service
+from app.infrastructure.auth.models import User, UserRole, TokenData
 
 router = APIRouter()
 security = HTTPBearer()
@@ -283,7 +284,6 @@ async def create_user(
             )
         
         # Create user
-        from app.infrastructure.security.jwt_service import User
         
         new_user = User(
             user_id=f"user_{int(datetime.now(timezone.utc).timestamp())}",
