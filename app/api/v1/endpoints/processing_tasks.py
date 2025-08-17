@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from typing import Dict, Any
 import uuid
 import logging
+from datetime import datetime
 
 from app.api.v1 import schemas
 from app.orchestration.pipeline_orchestrator import orchestrator, PipelineOrchestrator
@@ -10,6 +11,84 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+@router.get(
+    "/environments",
+    response_model=Dict[str, Any],
+    summary="Get available environments for task processing"
+)
+async def get_available_environments():
+    """
+    Get list of available environments that can be processed.
+    Returns environment configurations from the system settings.
+    """
+    try:
+        # Get available environments from config (VideoSetEnvironmentConfig objects)
+        video_sets = getattr(settings, 'VIDEO_SETS', [])
+        
+        # Group cameras by environment
+        env_groups = {}
+        for video_config in video_sets:
+            env_id = video_config.env_id
+            if env_id not in env_groups:
+                env_groups[env_id] = {
+                    "cameras": [],
+                    "total_sub_videos": 0
+                }
+            env_groups[env_id]["cameras"].append(video_config.cam_id)
+            env_groups[env_id]["total_sub_videos"] += video_config.num_sub_videos
+        
+        # Create environment list
+        environments = []
+        for env_id, env_data in env_groups.items():
+            environment = {
+                "environment_id": env_id,
+                "name": f"{env_id.title()} Environment",
+                "description": f"Environment with {len(env_data['cameras'])} cameras and {env_data['total_sub_videos']} video segments",
+                "camera_count": len(env_data["cameras"]),
+                "cameras": env_data["cameras"],
+                "available": True,
+                "total_sub_videos": env_data["total_sub_videos"]
+            }
+            environments.append(environment)
+        
+        # If no environments in config, return default ones
+        if not environments:
+            environments = [
+                {
+                    "environment_id": "factory",
+                    "name": "Factory Environment",
+                    "description": "Factory monitoring environment with 4 cameras",
+                    "camera_count": 4,
+                    "cameras": ["c09", "c12", "c13", "c16"],
+                    "available": True
+                },
+                {
+                    "environment_id": "campus",
+                    "name": "Campus Environment", 
+                    "description": "Campus monitoring environment with 4 cameras",
+                    "camera_count": 4,
+                    "cameras": ["c01", "c02", "c03", "c05"],
+                    "available": True
+                }
+            ]
+        
+        return {
+            "status": "success",
+            "data": {
+                "environments": environments,
+                "total_count": len(environments)
+            },
+            "timestamp": str(datetime.utcnow().isoformat())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting available environments: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving available environments"
+        )
 
 
 @router.post(

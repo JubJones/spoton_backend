@@ -219,7 +219,12 @@ class PersonIdentity(Base):
     identity_metadata = Column(JSONB, nullable=True)
     
     # Relationships
-    tracking_events = relationship("TrackingEvent", back_populates="person_identity")
+    tracking_events = relationship(
+        "TrackingEvent", 
+        back_populates="person_identity",
+        foreign_keys="TrackingEvent.global_person_id",
+        primaryjoin="PersonIdentity.global_person_id == TrackingEvent.global_person_id"
+    )
     
     # Indexes
     __table_args__ = (
@@ -348,4 +353,9 @@ class SessionRecord(Base):
 
 # Add relationships
 TrackingEvent.detection_events = relationship("DetectionEvent", back_populates="tracking_event")
-TrackingEvent.person_identity = relationship("PersonIdentity", back_populates="tracking_events")
+TrackingEvent.person_identity = relationship(
+    "PersonIdentity", 
+    back_populates="tracking_events",
+    foreign_keys=[TrackingEvent.global_person_id],
+    primaryjoin="TrackingEvent.global_person_id == PersonIdentity.global_person_id"
+)
