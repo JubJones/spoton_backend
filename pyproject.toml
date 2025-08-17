@@ -49,6 +49,13 @@ dependencies = [
     "ultralytics>=8.0.0,<8.1.0", # YOLOv8 implementation
     "PyJWT>=2.8.0,<3.0.0", # JWT token handling for authentication
     "aioredis>=2.0.0,<3.0.0", # Async Redis client for JWT blacklisting
+    "cryptography>=41.0.0,<42.0.0", # Cryptographic operations for encryption service
+    "scikit-learn>=1.3.0,<1.4.0", # Machine learning for analytics clustering (DBSCAN)
+    "psutil>=5.9.0,<6.0.0", # System monitoring for performance endpoints
+    "pillow>=10.0.0,<11.0.0", # Image processing via PIL
+    "aiohttp>=3.8.0,<4.0.0", # HTTP client for external API calls
+    "matplotlib>=3.7.0,<4.0.0", # Plotting and visualization
+    "pandas>=2.0.0,<3.0.0", # Data manipulation and analysis
 ]
 [project.urls]
 Homepage = "https://github.com/JubJones/spoton_backend"
