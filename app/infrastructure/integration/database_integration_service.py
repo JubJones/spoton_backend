@@ -15,8 +15,7 @@ from contextlib import asynccontextmanager
 
 from app.infrastructure.database.integrated_database_service import integrated_db_service
 from app.infrastructure.cache.tracking_cache import tracking_cache
-from app.domains.detection.entities.detection import Detection
-from app.domains.detection.entities.bounding_box import BoundingBox
+from app.domains.detection.entities.detection import Detection, BoundingBox
 from app.domains.reid.entities.person_identity import PersonIdentity
 from app.domains.reid.entities.feature_vector import FeatureVector
 from app.domains.mapping.entities.coordinate import Coordinate
@@ -77,10 +76,10 @@ class DatabaseIntegrationService:
             
             # Convert detection to database format
             bbox_data = {
-                'x1': detection.bounding_box.x1,
-                'y1': detection.bounding_box.y1,
-                'x2': detection.bounding_box.x2,
-                'y2': detection.bounding_box.y2
+                'x1': detection.bbox.x,
+                'y1': detection.bbox.y,
+                'x2': detection.bbox.x2,
+                'y2': detection.bbox.y2
             }
             
             # Store detection event
@@ -92,8 +91,8 @@ class DatabaseIntegrationService:
                 frame_number=frame_number,
                 session_id=session_id,
                 metadata={
-                    'detection_id': detection.detection_id,
-                    'object_class': detection.object_class,
+                    'detection_id': detection.id,
+                    'object_class': detection.class_id.name if detection.class_id else 'UNKNOWN',
                     'timestamp': detection.timestamp.isoformat() if detection.timestamp else None
                 }
             )
