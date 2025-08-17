@@ -95,7 +95,7 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
         )
 
 
-async def require_role(required_role: UserRole):
+def require_role(required_role: UserRole):
     """Dependency to require specific role."""
     def role_dependency(current_user: TokenData = Depends(get_current_user)):
         if not jwt_service.check_role(current_user, required_role):
@@ -107,7 +107,7 @@ async def require_role(required_role: UserRole):
     return role_dependency
 
 
-async def require_permission(required_permission: str):
+def require_permission(required_permission: str):
     """Dependency to require specific permission."""
     def permission_dependency(current_user: TokenData = Depends(get_current_user)):
         if not jwt_service.check_permission(current_user, required_permission):
