@@ -17,7 +17,8 @@ import jwt as python_jwt
 import secrets
 import hashlib
 
-from app.infrastructure.security.jwt_service import jwt_service, User, UserRole, TokenData
+from app.infrastructure.security.jwt_service import jwt_service
+from app.infrastructure.auth.models import User, UserRole, TokenData
 from app.infrastructure.security.encryption_service import encryption_service, EncryptionAlgorithm, HashAlgorithm
 
 

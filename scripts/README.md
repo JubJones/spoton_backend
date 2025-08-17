@@ -4,19 +4,65 @@ This directory contains scripts for setting up and running SpotOn Backend locall
 
 ## 🚀 Quick Start
 
-```bash
-# 1. Setup environment (run once)
-./setup_local_environment.sh    # Linux/macOS
-scripts\setup_local_environment.bat  # Windows
+### Automated Setup (Recommended)
 
-# 2. Validate setup
+```bash
+# Linux/macOS
+./setup_local_environment.sh
+
+# Windows (choose one)
+PowerShell -ExecutionPolicy Bypass -File scripts\setup_windows_cuda.ps1  # NVIDIA GPU
+scripts\setup_local_environment_simple.bat                               # CPU or simple setup
+
+# Validate setup
 python validate_local_setup.py
 
-# 3. Start backend
+# Start backend
 ./start_backend_local.sh        # Linux/macOS  
-scripts\start_backend_local.bat # Windows
+.\start_backend_cuda.bat        # Windows with GPU
+scripts\start_backend_local.bat # Windows generic
+```
 
-# 4. Stop services when done
+### Manual Setup (Windows CUDA - Alternative)
+
+**For Windows users with NVIDIA GPU who want manual control:**
+
+```powershell
+# 1. Create and activate virtual environment
+uv venv
+.venv\Scripts\activate
+
+# 2. Install PyTorch with CUDA FIRST (critical order!)
+uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# 3. Verify CUDA works
+python -c "import torch; print(f'CUDA: {torch.cuda.is_available()}, GPU: {torch.cuda.get_device_name(0) if torch.cuda.is_available() else \"None\"}')"
+
+# 4. Install main dependencies (one by one to avoid conflicts)
+uv pip install fastapi uvicorn[standard] pydantic pydantic-settings
+uv pip install sqlalchemy psycopg2-binary redis 
+uv pip install opencv-python numpy pandas matplotlib
+uv pip install transformers huggingface-hub faiss-cpu boxmot
+uv pip install dagshub boto3 python-dotenv loguru
+uv pip install pytest pytest-asyncio ruff
+
+# 5. Verify CUDA still works after dependencies
+python -c "import torch; print(f'Final check - CUDA: {torch.cuda.is_available()}')"
+
+# 6. Setup configuration
+copy .env.local.example .env.local  # Edit with your S3 credentials
+
+# 7. Test imports
+python -c "import torch, fastapi, uvicorn, redis, cv2; print('All imports successful')"
+
+# 8. Start backend
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --env-file .env.local
+```
+
+### Service Management
+
+```bash
+# Stop services when done
 ./stop_local_services.sh        # Linux/macOS
 scripts\stop_local_services.bat # Windows
 ```
@@ -25,7 +71,9 @@ scripts\stop_local_services.bat # Windows
 
 ### Setup Scripts
 - **`setup_local_environment.sh`** (Linux/macOS) - Complete automated setup
-- **`setup_local_environment.bat`** (Windows) - Complete automated setup
+- **`setup_local_environment.bat`** (Windows) - Legacy batch setup (color issues)
+- **`setup_local_environment_simple.bat`** (Windows) - Simple batch setup without colors
+- **`setup_windows_cuda.ps1`** (Windows) - **RECOMMENDED** CUDA-aware PowerShell setup
 - **`setup_database_local.sql`** - PostgreSQL database schema and user setup
 - **`setup_redis_local.conf`** - Redis configuration optimized for local development
 
