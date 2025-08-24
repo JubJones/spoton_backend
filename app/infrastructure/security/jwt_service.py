@@ -103,7 +103,18 @@ class JWTService:
     async def _initialize_redis(self):
         """Initialize Redis connection."""
         try:
-            redis_url = getattr(settings, 'REDIS_URL', 'redis://localhost:6379')
+            # Construct Redis URL from settings
+            redis_host = getattr(settings, 'REDIS_HOST', 'redis')
+            redis_port = getattr(settings, 'REDIS_PORT', 6379)
+            redis_db = getattr(settings, 'REDIS_DB', 0)
+            redis_password = getattr(settings, 'REDIS_PASSWORD', None)
+            
+            if redis_password:
+                redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+            else:
+                redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
+            
+            logger.info(f"Connecting to Redis at: {redis_host}:{redis_port}/{redis_db}")
             self.redis_client = await aioredis.from_url(redis_url)
             
             # Test connection
@@ -262,7 +273,7 @@ class JWTService:
     
     def _hash_password(self, password: str, salt: str) -> str:
         """Hash password with salt."""
-        return hashlib.pbkdf2_hex(password.encode('utf-8'), salt.encode('utf-8'), 100000)
+        return hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
     
     def _get_role_permissions(self, role: UserRole) -> List[str]:
         """Get permissions for user role."""

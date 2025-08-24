@@ -7,6 +7,7 @@ from app.models.detectors import FasterRCNNDetector
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.homography_service import HomographyService
 from app.utils.device_utils import get_selected_device
+from app.infrastructure.security.jwt_service import jwt_service
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,15 @@ async def on_startup(app: FastAPI):
     - Perform model warm-ups.
     """
     logger.info("--- SpotOn Backend: Executing Application Startup Tasks ---")
+
+    # 0. Initialize Authentication Service
+    logger.info("Initializing JWT authentication service...")
+    try:
+        await jwt_service.initialize()
+        logger.info("JWT authentication service initialized with default users")
+    except Exception as e:
+        logger.error(f"CRITICAL: Failed to initialize JWT service: {e}", exc_info=True)
+        # JWT service failure should not prevent app startup, but log the issue
 
     # 1. Determine Compute Device (once for the app)
     try:

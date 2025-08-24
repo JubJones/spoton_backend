@@ -163,7 +163,7 @@ class SpotOnFrontendSimulator:
             # Test login
             login_data = {
                 "username": "admin",
-                "password": "admin123"
+                "password": "SpotOn2024!"
             }
             
             response = await self.make_request(
