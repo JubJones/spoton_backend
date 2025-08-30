@@ -60,6 +60,9 @@ class ReIDService:
         self.enable_gpu = enable_gpu
         self.batch_size = batch_size
         
+        # GPU manager for resource allocation (must be initialized before model creation)
+        self.gpu_manager = get_gpu_manager()
+        
         # Initialize model
         if model is None:
             self.model = self._create_model(model_type)
@@ -82,9 +85,6 @@ class ReIDService:
             "gpu_enabled": enable_gpu,
             "batch_size": batch_size
         }
-        
-        # GPU manager for resource allocation
-        self.gpu_manager = get_gpu_manager()
         
         logger.info(f"ReIDService initialized with model: {model_type}, GPU: {enable_gpu}")
     

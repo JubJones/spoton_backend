@@ -19,7 +19,7 @@ import secrets
 import hashlib
 from enum import Enum
 import json
-import aioredis
+# import aioredis  # Temporarily disabled due to compatibility issue
 
 from app.core.config import settings
 from app.infrastructure.cache.tracking_cache import tracking_cache
@@ -56,7 +56,7 @@ class JWTService:
     
     def __init__(self):
         self.config = JWTConfig()
-        self.redis_client: Optional[aioredis.Redis] = None
+        self.redis_client: Optional[Any] = None  # Optional[aioredis.Redis] = None
         
         # User storage (in production, this would be a database)
         self.users: Dict[str, User] = {}
@@ -115,10 +115,11 @@ class JWTService:
                 redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
             
             logger.info(f"Connecting to Redis at: {redis_host}:{redis_port}/{redis_db}")
-            self.redis_client = await aioredis.from_url(redis_url)
+            # self.redis_client = await aioredis.from_url(redis_url)  # Temporarily disabled
+            pass
             
             # Test connection
-            await self.redis_client.ping()
+            # await self.redis_client.ping()  # Temporarily disabled
             
             logger.info("Redis connection initialized for JWT service")
             

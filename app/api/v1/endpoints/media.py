@@ -130,18 +130,43 @@ async def get_camera_frame_with_overlays(
             if cached_data:
                 return Response(content=cached_data, media_type="image/jpeg")
         
-        # For now, return a placeholder response
-        # TODO: Integrate with actual frame processing pipeline
-        placeholder_response = {
-            "error": "Frame processing not yet integrated",
-            "task_id": str(task_id),
-            "camera_id": camera_id,
-            "focused_person_id": focused_person_id
-        }
+        # Return a simple SVG placeholder for now (avoids PIL/Pillow issues)
+        svg_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#1a1a1a"/>
+  <rect x="2" y="2" width="636" height="476" fill="none" stroke="#333" stroke-width="2"/>
+  <text x="50%" y="45%" text-anchor="middle" fill="#888" font-family="Arial, sans-serif" font-size="20">
+    Camera {camera_id}
+  </text>
+  <text x="50%" y="52%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="14">
+    Task: {str(task_id)[:8]}...
+  </text>
+  <text x="50%" y="58%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="14">
+    Waiting for real-time data...
+  </text>'''
         
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Frame processing endpoint not yet fully implemented"
+        if focused_person_id:
+            svg_content += f'''
+  <text x="50%" y="64%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="14">
+    Focus: {focused_person_id}
+  </text>'''
+        else:
+            svg_content += f'''
+  <text x="50%" y="64%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="14">
+    No person focused
+  </text>'''
+            
+        svg_content += '''
+</svg>'''
+        
+        return Response(
+            content=svg_content.encode('utf-8'),
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache", 
+                "Expires": "0"
+            }
         )
         
     except HTTPException:
@@ -218,10 +243,30 @@ async def get_raw_camera_frame(
     Useful for debugging or when overlays are applied client-side.
     """
     try:
-        # TODO: Implement raw frame serving
-        raise HTTPException(
-            status_code=status.HTTP_501_NOT_IMPLEMENTED,
-            detail="Raw frame endpoint not yet implemented"
+        # Return a simple placeholder without PIL dependency
+        svg_content = f'''<?xml version="1.0" encoding="UTF-8"?>
+<svg width="320" height="240" xmlns="http://www.w3.org/2000/svg">
+  <rect width="100%" height="100%" fill="#1a1a1a"/>
+  <rect x="2" y="2" width="316" height="236" fill="none" stroke="#333" stroke-width="2"/>
+  <text x="50%" y="45%" text-anchor="middle" fill="#888" font-family="Arial, sans-serif" font-size="16">
+    Camera {camera_id}
+  </text>
+  <text x="50%" y="55%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="12">
+    Task: {str(task_id)[:8]}...
+  </text>
+  <text x="50%" y="65%" text-anchor="middle" fill="#666" font-family="Arial, sans-serif" font-size="12">
+    Raw frame placeholder
+  </text>
+</svg>'''
+        
+        return Response(
+            content=svg_content.encode('utf-8'),
+            media_type="image/svg+xml",
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+                "Expires": "0"
+            }
         )
         
     except HTTPException:

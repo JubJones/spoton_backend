@@ -6,6 +6,11 @@ from app.core.config import settings # For passing to services
 from app.models.detectors import FasterRCNNDetector
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.homography_service import HomographyService
+from app.services.environment_configuration_service import initialize_environment_configuration_service
+from app.services.historical_data_service import initialize_historical_data_service
+from app.infrastructure.cache.tracking_cache import get_tracking_cache
+from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
+from app.infrastructure.database.base import get_db
 from app.utils.device_utils import get_selected_device
 from app.infrastructure.security.jwt_service import jwt_service
 
@@ -90,6 +95,38 @@ async def on_startup(app: FastAPI):
     except Exception as e:
         logger.error(f"CRITICAL: Failed to precompute homography matrices: {e}", exc_info=True)
         app.state.homography_service = None
+
+    # 5. Initialize Environment Configuration Service
+    logger.info("Initializing Environment Configuration Service...")
+    try:
+        tracking_cache = get_tracking_cache()
+        # Get database session for tracking repository
+        db_session = next(get_db())
+        tracking_repository = TrackingRepository(db_session)
+        environment_service = initialize_environment_configuration_service(
+            tracking_cache=tracking_cache,
+            tracking_repository=tracking_repository
+        )
+        logger.info("Environment Configuration Service initialized successfully.")
+    except Exception as e:
+        logger.error(f"WARNING: Failed to initialize Environment Configuration Service: {e}", exc_info=True)
+        # This is not critical for basic operations, so don't stop startup
+
+    # 6. Initialize Historical Data Service
+    logger.info("Initializing Historical Data Service...")
+    try:
+        tracking_cache = get_tracking_cache()
+        # Get database session for tracking repository
+        db_session = next(get_db())
+        tracking_repository = TrackingRepository(db_session)
+        historical_service = initialize_historical_data_service(
+            tracking_cache=tracking_cache,
+            tracking_repository=tracking_repository
+        )
+        logger.info("Historical Data Service initialized successfully.")
+    except Exception as e:
+        logger.error(f"WARNING: Failed to initialize Historical Data Service: {e}", exc_info=True)
+        # This is not critical for basic operations, so don't stop startup
 
     logger.info("--- SpotOn Backend: Application Startup Tasks Completed ---")
 

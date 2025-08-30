@@ -5,6 +5,7 @@ Advanced person re-identification using CLIP features and similarity matching.
 import logging
 import asyncio
 import time
+from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple, Union
 import numpy as np
 
@@ -188,11 +189,19 @@ class CLIPReIDModel(AbstractReIDModel):
             if len(self.inference_times) > 100:
                 self.inference_times = self.inference_times[-100:]
             
-            return FeatureVector(features)
+            return FeatureVector(
+                vector=features.tolist(),
+                extraction_timestamp=datetime.now(),
+                model_version=f"clip_{self.model_name.split('/')[-1]}"
+            )
             
         except Exception as e:
             logger.error(f"Error extracting features: {e}")
-            return FeatureVector(np.zeros(self.feature_dim, dtype=np.float32))
+            return FeatureVector(
+                vector=np.zeros(self.feature_dim, dtype=np.float32).tolist(),
+                extraction_timestamp=datetime.now(),
+                model_version=f"clip_{self.model_name.split('/')[-1]}"
+            )
     
     async def extract_features_batch(self, images: List[np.ndarray]) -> List[FeatureVector]:
         """
@@ -246,7 +255,11 @@ class CLIPReIDModel(AbstractReIDModel):
                 if self.normalize_features:
                     features = self._normalize_features(features)
                 
-                features_list.append(FeatureVector(features))
+                features_list.append(FeatureVector(
+                    vector=features.tolist(),
+                    extraction_timestamp=datetime.now(),
+                    model_version=f"clip_{self.model_name.split('/')[-1]}"
+                ))
             
             # Update performance metrics
             inference_time = time.time() - start_time
@@ -257,9 +270,13 @@ class CLIPReIDModel(AbstractReIDModel):
             
         except Exception as e:
             logger.error(f"Error in batch feature extraction: {e}")
-            return [FeatureVector(np.zeros(self.feature_dim, dtype=np.float32)) for _ in batch_images]
+            return [FeatureVector(
+                vector=np.zeros(self.feature_dim, dtype=np.float32).tolist(),
+                extraction_timestamp=datetime.now(),
+                model_version=f"clip_{self.model_name.split('/')[-1]}"
+            ) for _ in batch_images]
     
-    async def preprocess_image(self, image: np.ndarray) -> torch.Tensor:
+    async def preprocess_image(self, image: np.ndarray) -> Union[Any, 'torch.Tensor']:
         """
         Preprocess image for CLIP.
         

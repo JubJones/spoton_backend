@@ -67,20 +67,40 @@ class PerformanceDashboard(BaseModel):
 async def get_performance_dashboard():
     """Get comprehensive performance dashboard data."""
     try:
-        # Get current system metrics
-        current_metrics = await _get_current_system_metrics()
+        # Get current system metrics with fallback
+        try:
+            current_metrics = await _get_current_system_metrics()
+        except Exception as e:
+            logger.warning(f"Error getting current metrics, using defaults: {e}")
+            current_metrics = _get_default_system_metrics()
         
-        # Get health status
-        health_status = await _get_system_health_status()
+        # Get health status with fallback
+        try:
+            health_status = await _get_system_health_status()
+        except Exception as e:
+            logger.warning(f"Error getting health status, using defaults: {e}")
+            health_status = _get_default_health_status()
         
-        # Get trending data (last hour)
-        trending_data = await _get_trending_performance_data()
+        # Get trending data with fallback
+        try:
+            trending_data = await _get_trending_performance_data()
+        except Exception as e:
+            logger.warning(f"Error getting trending data, using defaults: {e}")
+            trending_data = _get_default_trending_data()
         
-        # Get active alerts
-        alerts = await _get_system_alerts()
+        # Get active alerts with fallback
+        try:
+            alerts = await _get_system_alerts()
+        except Exception as e:
+            logger.warning(f"Error getting alerts, using defaults: {e}")
+            alerts = []
         
-        # Get system info
-        system_info = await _get_system_info()
+        # Get system info with fallback
+        try:
+            system_info = await _get_system_info()
+        except Exception as e:
+            logger.warning(f"Error getting system info, using defaults: {e}")
+            system_info = _get_default_system_info()
         
         return PerformanceDashboard(
             current_metrics=current_metrics,
@@ -491,4 +511,65 @@ async def _get_system_info() -> Dict[str, Any]:
         "platform": psutil.os.name,
         "python_version": f"{psutil.sys.version_info.major}.{psutil.sys.version_info.minor}.{psutil.sys.version_info.micro}",
         "uptime_hours": round((time.time() - psutil.boot_time()) / 3600, 1)
+    }
+
+# Fallback functions for error handling
+
+def _get_default_system_metrics() -> SystemPerformanceMetrics:
+    """Get default system metrics when real metrics fail."""
+    return SystemPerformanceMetrics(
+        timestamp=datetime.now(timezone.utc),
+        cpu_usage_percent=0.0,
+        memory_usage_percent=0.0,
+        memory_available_gb=0.0,
+        disk_usage_percent=0.0,
+        network_bytes_sent=0,
+        network_bytes_recv=0,
+        gpu_usage_percent=None,
+        gpu_memory_used_mb=None,
+        gpu_memory_total_mb=None,
+        active_tasks=0,
+        cache_hit_rate=0.0,
+        database_connections=0,
+        uptime_seconds=0.0
+    )
+
+def _get_default_health_status() -> SystemHealthStatus:
+    """Get default health status when real status fails."""
+    return SystemHealthStatus(
+        overall_status="unknown",
+        components={
+            "cpu": {"status": "unknown", "usage": 0},
+            "memory": {"status": "unknown", "usage": 0},
+            "gpu": {"status": "unavailable", "usage": 0},
+            "services": {
+                "cache": "unknown",
+                "database": "unknown", 
+                "memory_manager": "unknown"
+            }
+        },
+        alerts=[],
+        recommendations=[],
+        last_check=datetime.now(timezone.utc)
+    )
+
+def _get_default_trending_data() -> Dict[str, List[float]]:
+    """Get default trending data when real data fails."""
+    return {
+        "cpu_usage": [0.0] * 60,
+        "memory_usage": [0.0] * 60,
+        "gpu_usage": [],
+        "active_tasks": [0] * 60,
+        "timestamps": [(datetime.now(timezone.utc) - timedelta(minutes=i)).isoformat() for i in range(59, -1, -1)]
+    }
+
+def _get_default_system_info() -> Dict[str, Any]:
+    """Get default system info when real info fails."""
+    return {
+        "cpu": {"logical_cores": 0, "physical_cores": 0, "max_frequency_mhz": None},
+        "memory": {"total_gb": 0.0, "available_gb": 0.0},
+        "gpu": {"available": False},
+        "platform": "unknown",
+        "python_version": "unknown",
+        "uptime_hours": 0.0
     }

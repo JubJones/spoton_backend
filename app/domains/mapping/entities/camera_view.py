@@ -390,6 +390,10 @@ class CameraViewManager:
         
         return overlapping
     
+    def clear_camera_views(self):
+        """Clear all camera views."""
+        self.camera_views.clear()
+    
     def get_total_coverage_area(self) -> float:
         """Get total coverage area of all cameras."""
         total_area = 0.0

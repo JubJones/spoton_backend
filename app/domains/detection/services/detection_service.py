@@ -54,6 +54,9 @@ class DetectionService:
         self.batch_size = batch_size
         self.enable_gpu = enable_gpu
         
+        # GPU manager for resource allocation (must be initialized before detector creation)
+        self.gpu_manager = get_gpu_manager()
+        
         # Initialize detector
         if detector is None:
             self.detector = self._create_detector(detector_type)
@@ -70,9 +73,6 @@ class DetectionService:
             "gpu_enabled": enable_gpu,
             "batch_size": batch_size
         }
-        
-        # GPU manager for resource allocation
-        self.gpu_manager = get_gpu_manager()
         
         logger.info(f"DetectionService initialized with detector: {detector_type}, GPU: {enable_gpu}")
     

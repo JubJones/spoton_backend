@@ -386,6 +386,13 @@ class BinaryWebSocketManager:
             
             for websocket in self.active_connections[task_id]:
                 try:
+                    # Check WebSocket state before sending
+                    from fastapi.websockets import WebSocketState
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        logger.debug(f"WebSocket not connected (state: {websocket.client_state}), marking for removal")
+                        connections_to_remove.append(websocket)
+                        continue
+                    
                     # Always send as text for JSON messages to maintain compatibility
                     # Frontend clients expect text-based WebSocket messages
                     await websocket.send_text(message_json)

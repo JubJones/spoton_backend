@@ -115,8 +115,11 @@ async def start_processing_task_endpoint(
     status and receive real-time updates.
     """
     try:
+        logger.info(f"🎬 API REQUEST: Start processing task endpoint called for environment: {params.environment_id}")
+        
         # Initialize task state in the orchestrator
         task_id = await orchestrator.initialize_task(params.environment_id)
+        logger.info(f"🆔 API REQUEST: Task ID {task_id} created for environment {params.environment_id}")
 
         # Add the main pipeline execution method to background tasks
         background_tasks.add_task(
@@ -125,7 +128,7 @@ async def start_processing_task_endpoint(
             environment_id=params.environment_id
         )
 
-        logger.info(f"Background task added for processing task ID: {task_id} for environment {params.environment_id}")
+        logger.info(f"🚀 API REQUEST: Background task added for processing task ID: {task_id} for environment {params.environment_id}")
 
         # Construct response URLs relative to the API prefix
         # Ensure leading slashes are handled correctly depending on how frontend constructs URLs
@@ -172,3 +175,78 @@ async def get_processing_task_status_endpoint(
         current_step=status_info.get("current_step"),
         details=status_info.get("details")
     )
+
+@router.get(
+    "",
+    response_model=Dict[str, Any],
+    summary="List all processing tasks"
+)
+async def list_processing_tasks(
+    orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator)
+):
+    """
+    Get list of all processing tasks with their current status.
+    """
+    try:
+        # Get all task statuses from orchestrator
+        all_tasks = await orchestrator.get_all_task_statuses()
+        
+        return {
+            "status": "success",
+            "data": {
+                "tasks": all_tasks,
+                "total_count": len(all_tasks)
+            },
+            "timestamp": str(datetime.utcnow().isoformat())
+        }
+    except Exception as e:
+        logger.error(f"Error listing processing tasks: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving processing tasks"
+        )
+
+@router.get(
+    "/{task_id}",
+    response_model=Dict[str, Any],
+    summary="Get specific processing task details"
+)
+async def get_processing_task_details(
+    task_id: uuid.UUID,
+    orchestrator: PipelineOrchestrator = Depends(get_pipeline_orchestrator)
+):
+    """
+    Get detailed information about a specific processing task.
+    """
+    try:
+        # Get task status and details
+        task_info = await orchestrator.get_task_status(task_id)
+        
+        if task_info is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Processing task not found"
+            )
+            
+        return {
+            "status": "success",
+            "data": {
+                "task_id": str(task_id),
+                "status": task_info.get("status", "UNKNOWN"),
+                "progress": task_info.get("progress", 0.0),
+                "current_step": task_info.get("current_step"),
+                "details": task_info.get("details"),
+                "environment_id": task_info.get("environment_id"),
+                "created_at": task_info.get("created_at"),
+                "updated_at": task_info.get("updated_at")
+            },
+            "timestamp": str(datetime.utcnow().isoformat())
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting processing task {task_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error retrieving processing task details"
+        )

@@ -12,7 +12,7 @@ import hashlib
 
 from app.domains.visualization.entities.visual_frame import VisualFrame
 from app.domains.visualization.entities.cropped_image import CroppedImage
-from app.infrastructure.cache.redis_client import RedisClient
+from app.infrastructure.cache.redis_client import RedisClient, get_redis_client
 
 logger = logging.getLogger(__name__)
 

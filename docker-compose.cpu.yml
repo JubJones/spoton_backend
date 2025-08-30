@@ -21,7 +21,8 @@ services:
       - "3847:3847"
     volumes:
       - ./app:/app/app  # Mount local code for development
-      # Remove this volume mount for production deployment
+      - ./data:/app/data  # Mount calibration and data files
+      # Remove these volume mounts for production deployment
     env_file:
       - .env
     environment:
@@ -33,6 +34,9 @@ services:
       - TARGET_FPS=3                    # Reduced FPS for CPU processing
       - FRAME_JPEG_QUALITY=70           # Lower quality for faster processing
       - DETECTION_CONFIDENCE_THRESHOLD=0.7  # Higher threshold to reduce processing
+      # Docker networking
+      - REDIS_HOST=redis
+      - POSTGRES_SERVER=timescaledb
     depends_on:
       redis:
         condition: service_healthy

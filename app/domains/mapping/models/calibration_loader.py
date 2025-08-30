@@ -487,8 +487,7 @@ class CalibrationLoader:
                 camera_id=camera_id,
                 resolution=calibration_data.image_size,
                 homography_transformation=transformation,
-                calibration_date=calibration_data.calibration_date,
-                is_active=True
+                calibration_date=calibration_data.calibration_date
             )
             
             self.camera_views[camera_id] = camera_view

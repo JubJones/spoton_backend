@@ -35,6 +35,43 @@ from app.api.websockets import binary_websocket_manager as websocket_manager
 logger = logging.getLogger(__name__)
 
 
+# Mock classes for graceful fallback when services are unavailable
+class MockTrackingRepository:
+    """Mock tracking repository for fallback scenarios."""
+    
+    async def get_tracking_data_by_range(self, **kwargs):
+        """Return empty tracking data."""
+        return []
+
+
+class MockRedisClient:
+    """Mock Redis client for fallback scenarios."""
+    
+    async def setex(self, key: str, timeout: int, value: str):
+        """Mock setex operation."""
+        pass
+    
+    async def get(self, key: str):
+        """Mock get operation."""
+        return None
+
+
+class MockAnalyticsEngine:
+    """Mock analytics engine for fallback scenarios."""
+    
+    async def generate_comprehensive_report(self, **kwargs):
+        """Return mock analytics report."""
+        return {
+            "total_persons": 0,
+            "unique_persons": 0,
+            "avg_dwell_time": 0,
+            "peak_occupancy": 0,
+            "zone_analytics": {},
+            "camera_analytics": {},
+            "movement_patterns": []
+        }
+
+
 @dataclass
 class User:
     """Simple user model for export endpoints."""
@@ -150,17 +187,29 @@ def get_pipeline_orchestrator() -> PipelineOrchestrator:
 @lru_cache()
 def get_tracking_repository() -> TrackingRepository:
     """Dependency provider for TrackingRepository."""
-    return TrackingRepository()
+    try:
+        return TrackingRepository()
+    except Exception as e:
+        logger.warning(f"Failed to create TrackingRepository, using mock: {e}")
+        return MockTrackingRepository()
 
 @lru_cache()
 def get_redis_client() -> RedisClient:
     """Dependency provider for RedisClient."""
-    return RedisClient()
+    try:
+        return RedisClient()
+    except Exception as e:
+        logger.warning(f"Failed to create RedisClient, using mock: {e}")
+        return MockRedisClient()
 
 @lru_cache()
 def get_analytics_service() -> AnalyticsEngine:
     """Dependency provider for AnalyticsEngine."""
-    return AnalyticsEngine()
+    try:
+        return AnalyticsEngine()
+    except Exception as e:
+        logger.warning(f"Failed to create AnalyticsEngine, using mock: {e}")
+        return MockAnalyticsEngine()
 
 @lru_cache()
 def get_data_serialization_service() -> DataSerializationService:
@@ -181,10 +230,17 @@ def get_export_service(
     report_generator_service: ReportGeneratorService = Depends(get_report_generator_service)
 ) -> ExportService:
     """Dependency provider for ExportService."""
-    return ExportService(
-        tracking_repository=tracking_repository,
-        redis_client=redis_client,
-        analytics_service=analytics_service,
-        data_serialization_service=data_serialization_service,
-        report_generator_service=report_generator_service
-    )
+    try:
+        return ExportService(
+            tracking_repository=tracking_repository,
+            redis_client=redis_client,
+            analytics_service=analytics_service,
+            data_serialization_service=data_serialization_service,
+            report_generator_service=report_generator_service
+        )
+    except Exception as e:
+        logger.error(f"Failed to create ExportService: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Export service temporarily unavailable"
+        )

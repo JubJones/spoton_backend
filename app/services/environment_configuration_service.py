@@ -24,7 +24,7 @@ from pathlib import Path
 
 from app.infrastructure.cache.tracking_cache import TrackingCache
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
-from app.domains.mapping.entities.coordinate import Coordinate
+from app.domains.mapping.entities.coordinate import Coordinate, CoordinateSystem
 
 logger = logging.getLogger(__name__)
 
@@ -380,6 +380,15 @@ class EnvironmentConfigurationService:
         
         logger.info("EnvironmentConfigurationService initialized")
     
+    def _create_coordinate(self, x: float, y: float, coordinate_system: CoordinateSystem = CoordinateSystem.MAP) -> Coordinate:
+        """Helper method to create Coordinate objects with required arguments."""
+        return Coordinate(
+            x=x,
+            y=y,
+            coordinate_system=coordinate_system,
+            timestamp=datetime.utcnow()
+        )
+    
     # --- Environment Management ---
     
     async def create_environment(
@@ -661,7 +670,7 @@ class EnvironmentConfigurationService:
                     if key == 'boundary_points' and isinstance(value, list):
                         # Convert dict coordinates to Coordinate objects
                         zone.boundary_points = [
-                            Coordinate(x=p['x'], y=p['y']) if isinstance(p, dict) else p
+                            self._create_coordinate(x=p['x'], y=p['y']) if isinstance(p, dict) else p
                             for p in value
                         ]
                     else:
@@ -947,7 +956,7 @@ class EnvironmentConfigurationService:
     
     def _dict_to_camera(self, camera_data: Dict[str, Any]) -> CameraConfiguration:
         """Convert dictionary to CameraConfiguration object."""
-        position = Coordinate(
+        position = self._create_coordinate(
             x=camera_data['position']['x'],
             y=camera_data['position']['y']
         )
@@ -979,7 +988,7 @@ class EnvironmentConfigurationService:
     def _dict_to_zone(self, zone_data: Dict[str, Any]) -> ZoneDefinition:
         """Convert dictionary to ZoneDefinition object."""
         boundary_points = [
-            Coordinate(x=point['x'], y=point['y'])
+            self._create_coordinate(x=point['x'], y=point['y'])
             for point in zone_data['boundary_points']
         ]
         
@@ -1003,28 +1012,28 @@ class EnvironmentConfigurationService:
     def _dict_to_layout(self, layout_data: Dict[str, Any]) -> EnvironmentLayout:
         """Convert dictionary to EnvironmentLayout object."""
         bounds = (
-            Coordinate(x=layout_data['bounds']['min']['x'], y=layout_data['bounds']['min']['y']),
-            Coordinate(x=layout_data['bounds']['max']['x'], y=layout_data['bounds']['max']['y'])
+            self._create_coordinate(x=layout_data['bounds']['min']['x'], y=layout_data['bounds']['min']['y']),
+            self._create_coordinate(x=layout_data['bounds']['max']['x'], y=layout_data['bounds']['max']['y'])
         )
         
         reference_points = [
-            (Coordinate(x=rp['coordinate']['x'], y=rp['coordinate']['y']), rp['description'])
+            (self._create_coordinate(x=rp['coordinate']['x'], y=rp['coordinate']['y']), rp['description'])
             for rp in layout_data.get('reference_points', [])
         ]
         
         walls = [
-            (Coordinate(x=wall['start']['x'], y=wall['start']['y']),
-             Coordinate(x=wall['end']['x'], y=wall['end']['y']))
+            (self._create_coordinate(x=wall['start']['x'], y=wall['start']['y']),
+             self._create_coordinate(x=wall['end']['x'], y=wall['end']['y']))
             for wall in layout_data.get('walls', [])
         ]
         
         doors = [
-            (Coordinate(x=door['position']['x'], y=door['position']['y']), door['name'])
+            (self._create_coordinate(x=door['position']['x'], y=door['position']['y']), door['name'])
             for door in layout_data.get('doors', [])
         ]
         
         landmarks = [
-            (Coordinate(x=lm['position']['x'], y=lm['position']['y']), lm['description'])
+            (self._create_coordinate(x=lm['position']['x'], y=lm['position']['y']), lm['description'])
             for lm in layout_data.get('landmarks', [])
         ]
         
@@ -1075,7 +1084,7 @@ class EnvironmentConfigurationService:
                     camera_id=cam_id,
                     name=cam_name,
                     camera_type=CameraType.FIXED,
-                    position=Coordinate(x=x, y=y),
+                    position=self._create_coordinate(x=x, y=y),
                     resolution=(1920, 1080),
                     field_of_view=70.0,
                     orientation=0.0,
@@ -1098,7 +1107,7 @@ class EnvironmentConfigurationService:
                     zone_id=zone_id,
                     name=zone_name,
                     zone_type=zone_type,
-                    boundary_points=[Coordinate(x=x, y=y) for x, y in boundary],
+                    boundary_points=[self._create_coordinate(x=x, y=y) for x, y in boundary],
                     capacity_limit=capacity,
                     monitoring_enabled=True,
                     occupancy_threshold=int(capacity * 0.8),
@@ -1109,11 +1118,11 @@ class EnvironmentConfigurationService:
             layout = EnvironmentLayout(
                 layout_id="campus_layout",
                 name="Campus Layout",
-                bounds=(Coordinate(x=0, y=0), Coordinate(x=70, y=30)),
+                bounds=(self._create_coordinate(x=0, y=0), self._create_coordinate(x=70, y=30)),
                 scale_meters_per_pixel=0.1,
                 reference_points=[
-                    (Coordinate(x=0, y=0), "Origin point"),
-                    (Coordinate(x=35, y=15), "Center point")
+                    (self._create_coordinate(x=0, y=0), "Origin point"),
+                    (self._create_coordinate(x=35, y=15), "Center point")
                 ]
             )
             
@@ -1167,7 +1176,7 @@ class EnvironmentConfigurationService:
                     camera_id=cam_id,
                     name=cam_name,
                     camera_type=CameraType.FIXED,
-                    position=Coordinate(x=x, y=y),
+                    position=self._create_coordinate(x=x, y=y),
                     resolution=(1920, 1080),
                     field_of_view=60.0,
                     orientation=0.0,
@@ -1190,7 +1199,7 @@ class EnvironmentConfigurationService:
                     zone_id=zone_id,
                     name=zone_name,
                     zone_type=zone_type,
-                    boundary_points=[Coordinate(x=x, y=y) for x, y in boundary],
+                    boundary_points=[self._create_coordinate(x=x, y=y) for x, y in boundary],
                     capacity_limit=capacity,
                     monitoring_enabled=True,
                     occupancy_threshold=int(capacity * 0.9),  # Tighter control in factory
@@ -1201,11 +1210,11 @@ class EnvironmentConfigurationService:
             layout = EnvironmentLayout(
                 layout_id="factory_layout",
                 name="Factory Floor Layout",
-                bounds=(Coordinate(x=0, y=0), Coordinate(x=75, y=10)),
+                bounds=(self._create_coordinate(x=0, y=0), self._create_coordinate(x=75, y=10)),
                 scale_meters_per_pixel=0.1,
                 reference_points=[
-                    (Coordinate(x=0, y=0), "Factory entrance"),
-                    (Coordinate(x=37.5, y=5), "Factory center")
+                    (self._create_coordinate(x=0, y=0), "Factory entrance"),
+                    (self._create_coordinate(x=37.5, y=5), "Factory center")
                 ]
             )
             

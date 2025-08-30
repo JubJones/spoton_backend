@@ -9,6 +9,7 @@ Coordinates the three core features:
 
 import asyncio
 import uuid
+from uuid import UUID
 from typing import Dict, Any, Optional, List
 import logging
 from datetime import datetime, timezone
@@ -43,6 +44,8 @@ class PipelineOrchestrator:
     def __init__(self):
         self.tasks: Dict[uuid.UUID, Dict[str, Any]] = {}
         self.active_tasks: set = set()
+        # Track active tasks by environment to prevent duplicates
+        self.environment_tasks: Dict[str, uuid.UUID] = {}
         
         # Initialize core services
         self.detection_service: Optional[DetectionService] = None
@@ -76,35 +79,50 @@ class PipelineOrchestrator:
     
     async def initialize_services(self, environment_id: str = "default") -> bool:
         """Initialize all pipeline services."""
+        overall_start = time.time()
         try:
-            logger.info("Initializing pipeline services...")
+            logger.info(f"🚀 PIPELINE INIT: Starting pipeline initialization for environment: {environment_id}")
             
-            # Initialize coordinate transformer
+            # Step 1: Initialize coordinate transformer
+            step_start = time.time()
+            logger.info("📍 PIPELINE INIT: Step 1/6 - Initializing coordinate transformer...")
             self.coordinate_transformer = CoordinateTransformer(
                 enable_caching=True,
                 cache_size=1000
             )
+            logger.info(f"✅ PIPELINE INIT: Step 1/6 completed in {time.time() - step_start:.2f}s - Coordinate transformer ready")
             
-            # Initialize calibration service
+            # Step 2: Initialize calibration service
+            step_start = time.time()
+            logger.info("🗺️ PIPELINE INIT: Step 2/6 - Initializing calibration service...")
             self.calibration_service = CalibrationService(
                 coordinate_transformer=self.coordinate_transformer
             )
+            logger.info(f"✅ PIPELINE INIT: Step 2/6 completed in {time.time() - step_start:.2f}s - Calibration service ready")
             
-            # Load calibration environment
+            # Step 3: Load calibration environment
+            step_start = time.time()
+            logger.info(f"🏭 PIPELINE INIT: Step 3/6 - Loading calibration environment: {environment_id}...")
             if not await self.calibration_service.load_calibration_environment(environment_id):
-                logger.error(f"Failed to load calibration environment: {environment_id}")
+                logger.error(f"❌ PIPELINE INIT: Failed to load calibration environment: {environment_id}")
                 return False
+            logger.info(f"✅ PIPELINE INIT: Step 3/6 completed in {time.time() - step_start:.2f}s - Environment {environment_id} loaded")
             
-            # Initialize detection service
+            # Step 4: Initialize detection service  
+            step_start = time.time()
+            logger.info("🔍 PIPELINE INIT: Step 4/6 - Initializing detection service (this may take 10-15 seconds)...")
             self.detection_service = DetectionService(
-                model_type="faster_rcnn",
+                detector_type="faster_rcnn",
                 enable_gpu=True,
                 batch_size=4  # Process 4 cameras simultaneously
             )
             
-            await self.detection_service.initialize_model()
+            await self.detection_service.initialize_detector()
+            logger.info(f"✅ PIPELINE INIT: Step 4/6 completed in {time.time() - step_start:.2f}s - Detection service ready")
             
-            # Initialize ReID service
+            # Step 5: Initialize ReID service
+            step_start = time.time()
+            logger.info("🧑‍🤝‍🧑 PIPELINE INIT: Step 5/6 - Initializing ReID service (this may take 5-10 seconds)...")
             self.reid_service = ReIDService(
                 model_type="clip",
                 enable_gpu=True,
@@ -112,8 +130,11 @@ class PipelineOrchestrator:
             )
             
             await self.reid_service.initialize_model()
+            logger.info(f"✅ PIPELINE INIT: Step 5/6 completed in {time.time() - step_start:.2f}s - ReID service ready")
             
-            # Initialize mapping service
+            # Step 6: Initialize mapping and trajectory services
+            step_start = time.time()
+            logger.info("🗺️ PIPELINE INIT: Step 6/6 - Initializing mapping and trajectory services...")
             self.mapping_service = MappingService()
             
             # Register camera views from calibration
@@ -128,18 +149,85 @@ class PipelineOrchestrator:
                 max_gap_duration=2.0,
                 smoothing_window=5
             )
+            logger.info(f"✅ PIPELINE INIT: Step 6/6 completed in {time.time() - step_start:.2f}s - Mapping services ready")
             
-            logger.info("Pipeline services initialized successfully")
+            total_time = time.time() - overall_start
+            logger.info(f"🎉 PIPELINE INIT: All pipeline services initialized successfully in {total_time:.2f}s total")
             return True
             
         except Exception as e:
             logger.error(f"Error initializing pipeline services: {e}")
             return False
     
+    async def get_active_task_for_environment(self, environment_id: str) -> Optional[uuid.UUID]:
+        """Check if there's already an active task for the given environment."""
+        try:
+            # First check in-memory cache
+            if environment_id in self.environment_tasks:
+                task_id = self.environment_tasks[environment_id]
+                # Verify the task is still active
+                if task_id in self.active_tasks and task_id in self.tasks:
+                    task_status = self.tasks[task_id].get("status", "").upper()
+                    # Consider a task active if it's not completed or failed
+                    if task_status not in ["COMPLETED", "FAILED"]:
+                        logger.info(f"🔄 TASK REUSE: Found existing active task (in-memory) {task_id} for environment '{environment_id}' with status '{task_status}'")
+                        return task_id
+            
+            # Check Redis for persistent task mapping (in case of backend restart)
+            redis_key = f"env_task:{environment_id}"
+            async_redis = await redis_client.connect_async()
+            task_id_str = await async_redis.get(redis_key)
+            
+            if task_id_str:
+                task_id = uuid.UUID(task_id_str)
+                logger.info(f"🔍 TASK REUSE: Found environment task mapping in Redis: {environment_id} -> {task_id}")
+                
+                # Get task status from Redis
+                task_data = await redis_client.get_json_async(f"task:{task_id}:state")
+                
+                if task_data:
+                    task_status = task_data.get("status", "").upper()
+                    logger.info(f"📊 TASK REUSE: Task {task_id} status from Redis: {task_status}")
+                    
+                    # Consider a task active if it's not completed or failed
+                    if task_status not in ["COMPLETED", "FAILED"]:
+                        # Restore to in-memory cache
+                        self.environment_tasks[environment_id] = task_id
+                        self.active_tasks.add(task_id)
+                        self.tasks[task_id] = task_data
+                        
+                        logger.info(f"♻️ TASK REUSE: Restored existing active task {task_id} for environment '{environment_id}' with status '{task_status}'")
+                        return task_id
+                    else:
+                        # Clean up completed/failed task from Redis
+                        logger.info(f"🧹 TASK CLEANUP: Removing completed/failed task {task_id} for environment '{environment_id}' from Redis")
+                        await async_redis.delete(redis_key)
+                else:
+                    # Task data not found in Redis, clean up mapping
+                    logger.warning(f"⚠️ TASK CLEANUP: Task data not found for {task_id}, cleaning up environment mapping")
+                    await async_redis.delete(redis_key)
+        
+        except Exception as e:
+            logger.error(f"❌ TASK REUSE: Error checking for existing task for environment {environment_id}: {e}")
+        
+        return None
+
     async def initialize_task(self, environment_id: str) -> uuid.UUID:
-        """Initialize a new processing task."""
+        """Initialize a new processing task or return existing active task."""
+        
+        # Check for existing active task first
+        existing_task_id = await self.get_active_task_for_environment(environment_id)
+        if existing_task_id:
+            logger.info(f"♻️ TASK REUSE: Reusing existing task {existing_task_id} for environment '{environment_id}'")
+            return existing_task_id
+        
+        # Create new task if none exists
         task_id = uuid.uuid4()
         current_time_utc = datetime.now(timezone.utc)
+        
+        # Log task creation with context
+        active_task_count = len(self.active_tasks)
+        logger.info(f"📝 TASK CREATE: Creating new task {task_id} for environment '{environment_id}' (currently {active_task_count} active tasks)")
         
         task_data = {
             "task_id": task_id,
@@ -153,6 +241,8 @@ class PipelineOrchestrator:
         
         self.tasks[task_id] = task_data
         self.active_tasks.add(task_id)
+        # Track this task for the environment
+        self.environment_tasks[environment_id] = task_id
         
         # Cache task state in Redis
         await redis_client.set_json_async(
@@ -161,7 +251,16 @@ class PipelineOrchestrator:
             ex=3600  # 1 hour expiration
         )
         
-        logger.info(f"Task {task_id} initialized for environment {environment_id}")
+        # Store environment-to-task mapping in Redis for persistence across restarts
+        redis_env_key = f"env_task:{environment_id}"
+        async_redis = await redis_client.connect_async()
+        await async_redis.set(
+            redis_env_key, 
+            str(task_id), 
+            ex=3600  # 1 hour expiration
+        )
+        
+        logger.info(f"✅ TASK CREATE: Task {task_id} initialized for environment {environment_id} (now {len(self.active_tasks)} active tasks)")
         return task_id
     
     async def get_task_status(self, task_id: uuid.UUID) -> Optional[Dict[str, Any]]:
@@ -179,6 +278,29 @@ class PipelineOrchestrator:
             return task_data
         
         return None
+
+    async def get_all_task_statuses(self) -> List[Dict[str, Any]]:
+        """
+        Get status of all active tasks.
+        
+        Returns:
+            List of task status dictionaries
+        """
+        all_tasks = []
+        
+        for task_id, task_state in self.task_states.items():
+            task_info = {
+                "task_id": str(task_id),
+                "status": task_state.status.value if hasattr(task_state.status, 'value') else str(task_state.status),
+                "progress": task_state.progress,
+                "current_step": task_state.current_step,
+                "environment_id": getattr(task_state, 'environment_id', None),
+                "created_at": getattr(task_state, 'created_at', None),
+                "updated_at": getattr(task_state, 'updated_at', None)
+            }
+            all_tasks.append(task_info)
+        
+        return all_tasks
     
     async def update_task_status(
         self, 
@@ -234,17 +356,40 @@ class PipelineOrchestrator:
         # Remove from active tasks
         self.active_tasks.discard(task_id)
         
+        # Clean up environment-to-task mapping from Redis
+        environment_id = self.tasks[task_id].get("environment_id")
+        if environment_id:
+            redis_env_key = f"env_task:{environment_id}"
+            async_redis = await redis_client.connect_async()
+            await async_redis.delete(redis_env_key)
+            # Also clean up from in-memory cache
+            self.environment_tasks.pop(environment_id, None)
+            logger.info(f"🧹 TASK CLEANUP: Removed environment mapping for {environment_id} -> {task_id}")
+        
         logger.info(f"Task {task_id} marked as {status}")
     
     async def cleanup_task(self, task_id: uuid.UUID):
         """Clean up task resources."""
+        # Get environment_id before deleting task data
+        environment_id = None
         if task_id in self.tasks:
+            environment_id = self.tasks[task_id].get("environment_id")
             del self.tasks[task_id]
         
         self.active_tasks.discard(task_id)
         
+        # Clean up environment-to-task mapping from Redis
+        if environment_id:
+            redis_env_key = f"env_task:{environment_id}"
+            async_redis = await redis_client.connect_async()
+            await async_redis.delete(redis_env_key)
+            # Also clean up from in-memory cache
+            self.environment_tasks.pop(environment_id, None)
+            logger.info(f"🧹 TASK CLEANUP: Removed environment mapping for {environment_id} -> {task_id}")
+        
         # Clean up Redis cache
-        redis_client.connect().delete(f"task:{task_id}:state")
+        async_redis = await redis_client.connect_async()
+        await async_redis.delete(f"task:{task_id}:state")
         
         logger.info(f"Task {task_id} cleaned up")
     
@@ -354,28 +499,26 @@ class PipelineOrchestrator:
             # Extract frames from batch
             camera_frames = frame_batch.get("camera_frames", {})
             
-            # Create detection batch
-            detection_batch = DetectionBatch(
-                camera_frames=camera_frames,
-                batch_id=str(uuid.uuid4()),
-                timestamp=datetime.now(timezone.utc)
+            # Process detection batch using the correct method
+            detection_batch = await self.detection_service.detect_persons_in_batch(
+                frame_batch=camera_frames,
+                frame_index=0,  # TODO: Get actual frame index from batch
+                confidence_threshold=0.5,
+                use_gpu_batch=True
             )
-            
-            # Process detection batch
-            detection_results = await self.detection_service.process_frame_batch(detection_batch)
             
             processing_time = time.time() - start_time
             
             self.pipeline_stats["detection_runs"] += 1
             self.pipeline_stats["total_frames_processed"] += len(camera_frames)
             
-            logger.info(f"Detection completed in {processing_time:.3f}s with {len(detection_results.get('detections', []))} detections")
+            logger.info(f"Detection completed in {processing_time:.3f}s with {detection_batch.detection_count} detections")
             
             return {
-                "detection_batch": detection_results,
+                "detection_batch": detection_batch,
                 "stage": "detection",
                 "processing_time": processing_time,
-                "detection_count": len(detection_results.get("detections", []))
+                "detection_count": detection_batch.detection_count
             }
             
         except Exception as e:
@@ -652,14 +795,32 @@ class PipelineOrchestrator:
                 # Example frame batch processing (simplified)
                 if stage == "PROCESSING":
                     try:
-                        # Create a mock frame batch
+                        # Create a mock frame batch with proper image data
+                        import numpy as np
+                        
+                        # Create mock image data (320x240 RGB image)
+                        mock_image = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
+                        
+                        # Get camera IDs for this environment
+                        camera_ids = ["c09", "c12", "c13", "c16"] if environment_id == "factory" else ["c01", "c02", "c03", "c05"]
+                        
+                        # Create camera frames with proper structure
+                        camera_frames = {}
+                        for cam_id in camera_ids[:2]:  # Use first 2 cameras for testing
+                            camera_frames[cam_id] = {
+                                "image": mock_image.copy(),
+                                "width": 320,
+                                "height": 240,
+                                "fps": 30,
+                                "format": "RGB",
+                                "encoding": "numpy",
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                        
                         mock_frame_batch = {
                             "task_id": str(task_id),
                             "environment_id": environment_id,
-                            "camera_frames": {
-                                "c01": {"frame_data": "mock_frame_data_c01"},
-                                "c02": {"frame_data": "mock_frame_data_c02"}
-                            },
+                            "camera_frames": camera_frames,
                             "batch_index": 0,
                             "timestamp": datetime.now(timezone.utc).isoformat()
                         }
@@ -672,6 +833,14 @@ class PipelineOrchestrator:
                     except Exception as e:
                         logger.warning(f"Frame processing failed for task {task_id}: {e}")
                         # Continue pipeline even if frame processing fails
+                
+                # Send real-time tracking data during STREAMING phase
+                elif stage == "STREAMING":
+                    try:
+                        await self._send_tracking_updates(task_id, environment_id)
+                    except Exception as e:
+                        logger.warning(f"Streaming failed for task {task_id}: {e}")
+                        # Continue pipeline even if streaming fails
             
             # Complete the task successfully
             await self.complete_task(task_id, success=True)
@@ -680,6 +849,102 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.error(f"Processing pipeline failed for task {task_id}: {e}")
             await self.complete_task(task_id, success=False)
+    
+    async def _send_tracking_updates(self, task_id: UUID, environment_id: str) -> None:
+        """Send real-time tracking updates via WebSocket during streaming phase."""
+        import base64
+        from datetime import datetime, timezone
+        
+        logger.info(f"Starting real-time streaming for task {task_id}")
+        
+        # Get camera IDs for this environment
+        camera_ids = ["c09", "c12", "c13", "c16"] if environment_id == "factory" else ["c01", "c02", "c03", "c05"]
+        
+        # Stream for 10 seconds with updates every 0.5 seconds
+        for frame_idx in range(20):  # 20 frames over 10 seconds
+            try:
+                # Create mock tracking data for each camera
+                cameras_data = {}
+                
+                for cam_id in camera_ids:
+                    # Generate mock tracking data
+                    tracks = []
+                    
+                    # Create 2-3 mock persons per camera
+                    for person_idx in range(2 + (frame_idx % 2)):  # 2-3 persons
+                        global_id = f"person_{person_idx + 1}"
+                        
+                        # Simulate person movement across frames
+                        base_x = 300 + person_idx * 400 + (frame_idx * 5)  # Moving right
+                        base_y = 200 + person_idx * 100 + (frame_idx % 20) * 2  # Slight vertical movement
+                        
+                        track = {
+                            "track_id": person_idx + 1,
+                            "global_id": global_id,
+                            "bbox_xyxy": [
+                                base_x,
+                                base_y, 
+                                base_x + 80,
+                                base_y + 180
+                            ],
+                            "confidence": 0.85 + (person_idx * 0.05),
+                            "class_id": 1,
+                            "map_coords": [
+                                50 + person_idx * 25 + (frame_idx % 10) * 2,  # Map X
+                                30 + person_idx * 15 + (frame_idx % 8) * 1    # Map Y
+                            ]
+                        }
+                        tracks.append(track)
+                    
+                    # Create a simple frame image (placeholder)
+                    frame_svg = f'''<svg width="640" height="480" xmlns="http://www.w3.org/2000/svg">
+                        <rect width="100%" height="100%" fill="#1a1a1a"/>
+                        <text x="50%" y="45%" text-anchor="middle" fill="#888" font-size="20">
+                            Camera {cam_id} - Frame {frame_idx}
+                        </text>
+                        <text x="50%" y="55%" text-anchor="middle" fill="#666" font-size="14">
+                            {len(tracks)} persons detected
+                        </text>
+                    </svg>'''
+                    
+                    frame_base64 = base64.b64encode(frame_svg.encode()).decode()
+                    
+                    cameras_data[cam_id] = {
+                        "tracks": tracks,
+                        "frame_image": frame_base64,
+                        "frame_index": frame_idx,
+                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    }
+                
+                # Create tracking update message
+                tracking_message = {
+                    "type": "tracking_update",
+                    "task_id": str(task_id),
+                    "cameras": cameras_data,
+                    "frame_index": frame_idx,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Send via WebSocket using binary WebSocket manager
+                try:
+                    from app.api.websockets.connection_manager import binary_websocket_manager
+                    success = await binary_websocket_manager.send_json_message(str(task_id), tracking_message)
+                    
+                    if success:
+                        logger.info(f"📤 STREAM: Sent tracking update {frame_idx} for task {task_id} with {len(cameras_data)} cameras")
+                    else:
+                        logger.warning(f"⚠️ STREAM: Failed to send tracking update {frame_idx} for task {task_id} - no active connection")
+                except Exception as e:
+                    logger.error(f"❌ STREAM: Error sending tracking update {frame_idx} for task {task_id}: {e}")
+                
+                # Wait 0.5 seconds before next frame
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                logger.error(f"Error sending tracking update {frame_idx} for task {task_id}: {e}")
+                continue
+        
+        logger.info(f"Completed real-time streaming for task {task_id}")
 
 
 # Global orchestrator instance

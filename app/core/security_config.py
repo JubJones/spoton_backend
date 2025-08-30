@@ -99,7 +99,23 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         self.config = config
     
     async def dispatch(self, request: Request, call_next):
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+            
+            if response is None:
+                logger.error("SecurityHeadersMiddleware: No response returned from next middleware")
+                from fastapi.responses import JSONResponse
+                response = JSONResponse(
+                    status_code=500,
+                    content={"detail": "Internal server error"}
+                )
+        except Exception as e:
+            logger.error(f"SecurityHeadersMiddleware: Exception in middleware chain: {e}")
+            from fastapi.responses import JSONResponse
+            response = JSONResponse(
+                status_code=500,
+                content={"detail": "Internal server error"}
+            )
         
         if self.config.enable_security_headers:
             # Prevent clickjacking
@@ -184,7 +200,21 @@ class RateLimitingMiddleware(BaseHTTPMiddleware):
         # Add current request
         requests.append(current_time.isoformat())
         
-        response = await call_next(request)
+        try:
+            response = await call_next(request)
+            
+            if response is None:
+                logger.error("RateLimitingMiddleware: No response returned from next middleware")
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content={"detail": "Internal server error"}
+                )
+        except Exception as e:
+            logger.error(f"RateLimitingMiddleware: Exception in middleware chain: {e}")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal server error"}
+            )
         
         # Add rate limit headers
         response.headers["X-RateLimit-Limit"] = str(self.config.rate_limit_requests_per_minute)
@@ -218,7 +248,21 @@ class IPFilteringMiddleware(BaseHTTPMiddleware):
     
     async def dispatch(self, request: Request, call_next):
         if not self.config.enable_ip_filtering:
-            return await call_next(request)
+            try:
+                response = await call_next(request)
+                if response is None:
+                    logger.error("IPFilteringMiddleware: No response returned from next middleware")
+                    return JSONResponse(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        content={"detail": "Internal server error"}
+                    )
+                return response
+            except Exception as e:
+                logger.error(f"IPFilteringMiddleware: Exception in middleware chain: {e}")
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content={"detail": "Internal server error"}
+                )
         
         client_ip = self._get_client_ip(request)
         
@@ -238,7 +282,21 @@ class IPFilteringMiddleware(BaseHTTPMiddleware):
                 content={"detail": "Access denied"}
             )
         
-        return await call_next(request)
+        try:
+            response = await call_next(request)
+            if response is None:
+                logger.error("IPFilteringMiddleware: No response returned from next middleware")
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content={"detail": "Internal server error"}
+                )
+            return response
+        except Exception as e:
+            logger.error(f"IPFilteringMiddleware: Exception in middleware chain: {e}")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal server error"}
+            )
     
     def _get_client_ip(self, request: Request) -> str:
         """Extract client IP from request."""
@@ -269,9 +327,12 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         ]
     
     async def dispatch(self, request: Request, call_next):
+        logger.debug(f"RequestValidationMiddleware: Processing request {request.method} {request.url.path}")
+        
         # Check request size
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > self.config.max_request_size:
+            logger.debug(f"RequestValidationMiddleware: Request too large {content_length}")
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={"detail": "Request too large"}
@@ -295,7 +356,25 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Invalid request"}
                 )
         
-        return await call_next(request)
+        logger.debug(f"RequestValidationMiddleware: Calling next middleware for {request.method} {request.url.path}")
+        try:
+            response = await call_next(request)
+            
+            if response is None:
+                logger.error(f"RequestValidationMiddleware: No response returned from next middleware for {request.method} {request.url.path}")
+                return JSONResponse(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    content={"detail": "Internal server error"}
+                )
+            
+            logger.debug(f"RequestValidationMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
+            return response
+        except Exception as e:
+            logger.error(f"RequestValidationMiddleware: Exception in {request.method} {request.url.path}: {str(e)}")
+            return JSONResponse(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                content={"detail": "Internal server error"}
+            )
     
     def _contains_suspicious_content(self, content: str) -> bool:
         """Check if content contains suspicious patterns."""
@@ -317,7 +396,11 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
         start_time = time.time()
         client_ip = self._get_client_ip(request)
         
-        # Log security-relevant events
+        # Log entry to debug middleware chain
+        logger.debug(f"SecurityMonitoringMiddleware: Processing request {request.method} {request.url.path}")
+        
+        # Initialize security event data regardless of logging setting
+        security_event = None
         if self.config.enable_request_logging:
             security_event = {
                 "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -329,10 +412,12 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
             }
         
         try:
+            logger.debug(f"SecurityMonitoringMiddleware: Calling next middleware for {request.method} {request.url.path}")
             response = await call_next(request)
+            logger.debug(f"SecurityMonitoringMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
             
             # Log completed request
-            if self.config.enable_request_logging:
+            if self.config.enable_request_logging and security_event is not None:
                 security_event.update({
                     "status_code": response.status_code,
                     "response_time_ms": round((time.time() - start_time) * 1000, 2)
@@ -344,11 +429,13 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
                 
                 self.security_events.append(security_event)
             
+            logger.debug(f"SecurityMonitoringMiddleware: Returning response for {request.method} {request.url.path}")
             return response
             
         except Exception as e:
+            logger.error(f"SecurityMonitoringMiddleware: Exception in {request.method} {request.url.path}: {str(e)}")
             # Log errors
-            if self.config.enable_request_logging:
+            if self.config.enable_request_logging and security_event is not None:
                 security_event.update({
                     "error": str(e),
                     "response_time_ms": round((time.time() - start_time) * 1000, 2)

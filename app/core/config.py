@@ -17,7 +17,7 @@ class VideoSetEnvironmentConfig(BaseModel):
 class Settings(BaseSettings):
     APP_NAME: str = "SpotOn Backend"
     API_V1_PREFIX: str = "/api/v1"
-    DEBUG: bool = False
+    DEBUG: bool = True
     
     # Production Endpoint Control
     ENABLE_ANALYTICS_ENDPOINTS: bool = Field(default=True, description="Enable analytics API endpoints")
