@@ -1127,7 +1127,7 @@ class HistoricalSessionManager:
                     } if data_point.coordinates else None,
                     'detection': {
                         'confidence': data_point.detection.confidence,
-                        'bbox': data_point.detection.bbox_xyxy
+                        'bbox': list(data_point.detection.bbox.to_xyxy())
                     }
                 })
             

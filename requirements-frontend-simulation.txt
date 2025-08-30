@@ -1,5 +1,0 @@
-# Frontend Simulation Client Dependencies
-# These are required to run frontend_simulation_client.py
-
-aiohttp>=3.8.0
-websockets>=10.0

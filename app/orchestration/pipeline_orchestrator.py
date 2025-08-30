@@ -28,6 +28,10 @@ from app.domains.mapping.services.mapping_service import MappingService
 from app.domains.mapping.services.trajectory_builder import TrajectoryBuilder
 from app.domains.mapping.services.calibration_service import CalibrationService
 
+# Import video processing services
+from app.services.video_data_manager_service import VideoDataManagerService
+from app.utils.asset_downloader import AssetDownloader
+
 # Import entities
 from app.domains.detection.entities.detection import DetectionBatch
 from app.domains.reid.entities.person_identity import PersonIdentity
@@ -60,6 +64,10 @@ class PipelineOrchestrator:
         # GPU manager for resource allocation
         self.gpu_manager = get_gpu_manager()
         
+        # Video processing services
+        self.video_data_manager: Optional[VideoDataManagerService] = None
+        self.asset_downloader: Optional[AssetDownloader] = None
+        
         # Pipeline statistics
         self.pipeline_stats = {
             "total_frames_processed": 0,
@@ -83,34 +91,46 @@ class PipelineOrchestrator:
         try:
             logger.info(f"🚀 PIPELINE INIT: Starting pipeline initialization for environment: {environment_id}")
             
-            # Step 1: Initialize coordinate transformer
+            # Step 1: Initialize video processing services
             step_start = time.time()
-            logger.info("📍 PIPELINE INIT: Step 1/6 - Initializing coordinate transformer...")
+            logger.info("📹 PIPELINE INIT: Step 1/7 - Initializing video processing services...")
+            self.asset_downloader = AssetDownloader(
+                s3_endpoint_url=settings.S3_ENDPOINT_URL,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                s3_bucket_name=settings.S3_BUCKET_NAME
+            )
+            self.video_data_manager = VideoDataManagerService(asset_downloader=self.asset_downloader)
+            logger.info(f"✅ PIPELINE INIT: Step 1/7 completed in {time.time() - step_start:.2f}s - Video services ready")
+            
+            # Step 2: Initialize coordinate transformer
+            step_start = time.time()
+            logger.info("📍 PIPELINE INIT: Step 2/7 - Initializing coordinate transformer...")
             self.coordinate_transformer = CoordinateTransformer(
                 enable_caching=True,
                 cache_size=1000
             )
-            logger.info(f"✅ PIPELINE INIT: Step 1/6 completed in {time.time() - step_start:.2f}s - Coordinate transformer ready")
+            logger.info(f"✅ PIPELINE INIT: Step 2/7 completed in {time.time() - step_start:.2f}s - Coordinate transformer ready")
             
-            # Step 2: Initialize calibration service
+            # Step 3: Initialize calibration service
             step_start = time.time()
-            logger.info("🗺️ PIPELINE INIT: Step 2/6 - Initializing calibration service...")
+            logger.info("🗺️ PIPELINE INIT: Step 3/7 - Initializing calibration service...")
             self.calibration_service = CalibrationService(
                 coordinate_transformer=self.coordinate_transformer
             )
-            logger.info(f"✅ PIPELINE INIT: Step 2/6 completed in {time.time() - step_start:.2f}s - Calibration service ready")
+            logger.info(f"✅ PIPELINE INIT: Step 3/7 completed in {time.time() - step_start:.2f}s - Calibration service ready")
             
-            # Step 3: Load calibration environment
+            # Step 4: Load calibration environment
             step_start = time.time()
-            logger.info(f"🏭 PIPELINE INIT: Step 3/6 - Loading calibration environment: {environment_id}...")
+            logger.info(f"🏭 PIPELINE INIT: Step 4/7 - Loading calibration environment: {environment_id}...")
             if not await self.calibration_service.load_calibration_environment(environment_id):
                 logger.error(f"❌ PIPELINE INIT: Failed to load calibration environment: {environment_id}")
                 return False
-            logger.info(f"✅ PIPELINE INIT: Step 3/6 completed in {time.time() - step_start:.2f}s - Environment {environment_id} loaded")
+            logger.info(f"✅ PIPELINE INIT: Step 4/7 completed in {time.time() - step_start:.2f}s - Environment {environment_id} loaded")
             
-            # Step 4: Initialize detection service  
+            # Step 5: Initialize detection service  
             step_start = time.time()
-            logger.info("🔍 PIPELINE INIT: Step 4/6 - Initializing detection service (this may take 10-15 seconds)...")
+            logger.info("🔍 PIPELINE INIT: Step 5/7 - Initializing detection service (this may take 10-15 seconds)...")
             self.detection_service = DetectionService(
                 detector_type="faster_rcnn",
                 enable_gpu=True,
@@ -118,11 +138,11 @@ class PipelineOrchestrator:
             )
             
             await self.detection_service.initialize_detector()
-            logger.info(f"✅ PIPELINE INIT: Step 4/6 completed in {time.time() - step_start:.2f}s - Detection service ready")
+            logger.info(f"✅ PIPELINE INIT: Step 5/7 completed in {time.time() - step_start:.2f}s - Detection service ready")
             
-            # Step 5: Initialize ReID service
+            # Step 6: Initialize ReID service
             step_start = time.time()
-            logger.info("🧑‍🤝‍🧑 PIPELINE INIT: Step 5/6 - Initializing ReID service (this may take 5-10 seconds)...")
+            logger.info("🧑‍🤝‍🧑 PIPELINE INIT: Step 6/7 - Initializing ReID service (this may take 5-10 seconds)...")
             self.reid_service = ReIDService(
                 model_type="clip",
                 enable_gpu=True,
@@ -130,11 +150,11 @@ class PipelineOrchestrator:
             )
             
             await self.reid_service.initialize_model()
-            logger.info(f"✅ PIPELINE INIT: Step 5/6 completed in {time.time() - step_start:.2f}s - ReID service ready")
+            logger.info(f"✅ PIPELINE INIT: Step 6/7 completed in {time.time() - step_start:.2f}s - ReID service ready")
             
-            # Step 6: Initialize mapping and trajectory services
+            # Step 7: Initialize mapping and trajectory services
             step_start = time.time()
-            logger.info("🗺️ PIPELINE INIT: Step 6/6 - Initializing mapping and trajectory services...")
+            logger.info("🗺️ PIPELINE INIT: Step 7/7 - Initializing mapping and trajectory services...")
             self.mapping_service = MappingService()
             
             # Register camera views from calibration
@@ -149,7 +169,7 @@ class PipelineOrchestrator:
                 max_gap_duration=2.0,
                 smoothing_window=5
             )
-            logger.info(f"✅ PIPELINE INIT: Step 6/6 completed in {time.time() - step_start:.2f}s - Mapping services ready")
+            logger.info(f"✅ PIPELINE INIT: Step 7/7 completed in {time.time() - step_start:.2f}s - Mapping services ready")
             
             total_time = time.time() - overall_start
             logger.info(f"🎉 PIPELINE INIT: All pipeline services initialized successfully in {total_time:.2f}s total")
@@ -769,78 +789,68 @@ class PipelineOrchestrator:
             
             await self.update_task_status(task_id, "DOWNLOADING", 0.2, "Downloading video data")
             
-            # Simulate video processing pipeline
-            # In a real implementation, this would:
+            # Real video processing pipeline
             # 1. Download video segments from S3
             # 2. Extract frames 
             # 3. Process frames through detection -> reid -> mapping pipeline
             # 4. Stream results via WebSocket
             
-            # For now, simulate the pipeline stages
-            import asyncio
+            await self.update_task_status(task_id, "DOWNLOADING", 0.2, "Downloading video segments from S3")
             
-            stages = [
-                ("DOWNLOADING", 0.3, "Downloading video segments"),
-                ("EXTRACTING", 0.5, "Extracting frames from video"),
-                ("PROCESSING", 0.7, "Running AI detection and tracking"),
-                ("STREAMING", 0.9, "Streaming results to frontend"),
-            ]
-            
-            for stage, progress, step_desc in stages:
-                await self.update_task_status(task_id, stage, progress, step_desc)
+            # Download videos using VideoDataManagerService  
+            try:
+                # Get task data to extract camera info
+                task_info = await self.get_task_status(task_id)
+                if not task_info:
+                    logger.error(f"Task {task_id} not found")
+                    return
                 
-                # Simulate processing time
-                await asyncio.sleep(2.0)
+                # For demo, we'll use the first sub-video (index 0)
+                # In production, this could be configurable
+                sub_video_index = 0
+                logger.info(f"🎬 Downloading sub-video {sub_video_index} for environment '{environment_id}'")
                 
-                # Example frame batch processing (simplified)
-                if stage == "PROCESSING":
-                    try:
-                        # Create a mock frame batch with proper image data
-                        import numpy as np
-                        
-                        # Create mock image data (320x240 RGB image)
-                        mock_image = np.random.randint(0, 255, (240, 320, 3), dtype=np.uint8)
-                        
-                        # Get camera IDs for this environment
-                        camera_ids = ["c09", "c12", "c13", "c16"] if environment_id == "factory" else ["c01", "c02", "c03", "c05"]
-                        
-                        # Create camera frames with proper structure
-                        camera_frames = {}
-                        for cam_id in camera_ids[:2]:  # Use first 2 cameras for testing
-                            camera_frames[cam_id] = {
-                                "image": mock_image.copy(),
-                                "width": 320,
-                                "height": 240,
-                                "fps": 30,
-                                "format": "RGB",
-                                "encoding": "numpy",
-                                "timestamp": datetime.now(timezone.utc).isoformat()
-                            }
-                        
-                        mock_frame_batch = {
-                            "task_id": str(task_id),
-                            "environment_id": environment_id,
-                            "camera_frames": camera_frames,
-                            "batch_index": 0,
-                            "timestamp": datetime.now(timezone.utc).isoformat()
-                        }
-                        
-                        # Process the batch (this will use the actual pipeline components)
-                        results = await self.process_frame_batch(task_id, mock_frame_batch)
-                        
-                        logger.info(f"Processed frame batch for task {task_id}: {len(results.get('detection_results', {}).get('detections', []))} detections")
-                        
-                    except Exception as e:
-                        logger.warning(f"Frame processing failed for task {task_id}: {e}")
-                        # Continue pipeline even if frame processing fails
+                # Download videos from S3 with timeout
+                try:
+                    video_paths = await asyncio.wait_for(
+                        self.video_data_manager.download_sub_videos_for_environment_batch(
+                            task_id=task_id,
+                            environment_id=environment_id,
+                            sub_video_index=sub_video_index
+                        ),
+                        timeout=30.0  # 30 second timeout
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(f"🕒 Video download timed out after 30 seconds for task {task_id}")
+                    video_paths = {}
                 
-                # Send real-time tracking data during STREAMING phase
-                elif stage == "STREAMING":
-                    try:
-                        await self._send_tracking_updates(task_id, environment_id)
-                    except Exception as e:
-                        logger.warning(f"Streaming failed for task {task_id}: {e}")
-                        # Continue pipeline even if streaming fails
+                if not video_paths:
+                    logger.warning(f"No videos downloaded for task {task_id}")
+                    # Fall back to mock data for demo
+                    await self._send_tracking_updates_with_mock_frames(task_id, environment_id)
+                    return
+                
+                logger.info(f"✅ Downloaded {len(video_paths)} videos: {list(video_paths.keys())}")
+                
+                await self.update_task_status(task_id, "EXTRACTING", 0.4, "Extracting frames from videos")
+                
+                # Create frame provider
+                frame_provider = self.video_data_manager.get_batched_frame_provider(
+                    task_id=task_id,
+                    local_video_paths_map=video_paths,
+                    loop_videos=False
+                )
+                
+                await self.update_task_status(task_id, "PROCESSING", 0.6, "Processing frames with AI detection")
+                
+                # Process and stream real frames
+                await self._process_and_stream_real_frames(task_id, environment_id, frame_provider)
+                
+            except Exception as e:
+                logger.error(f"Video processing failed for task {task_id}: {e}")
+                # Fall back to mock data for demo
+                await self.update_task_status(task_id, "STREAMING", 0.9, "Streaming mock data (video processing failed)")
+                await self._send_tracking_updates_with_mock_frames(task_id, environment_id)
             
             # Complete the task successfully
             await self.complete_task(task_id, success=True)
@@ -849,6 +859,188 @@ class PipelineOrchestrator:
         except Exception as e:
             logger.error(f"Processing pipeline failed for task {task_id}: {e}")
             await self.complete_task(task_id, success=False)
+    
+    async def _process_and_stream_real_frames(self, task_id: UUID, environment_id: str, frame_provider) -> None:
+        """Process real video frames and stream results with actual person detection."""
+        import cv2
+        import base64
+        
+        logger.info(f"🎬 Starting real frame processing for task {task_id}")
+        
+        await self.update_task_status(task_id, "STREAMING", 0.8, "Streaming real frames with detections")
+        
+        frame_count = 0
+        max_frames = 20  # Process up to 20 frames for demo
+        
+        try:
+            while frame_count < max_frames:
+                # Get next batch of frames from all cameras
+                frame_batch, has_more = await frame_provider.get_next_frame_batch()
+                
+                if not frame_batch or not has_more:
+                    logger.info(f"No more frames available, processed {frame_count} frames")
+                    break
+                
+                # Convert frames to the format expected by the pipeline
+                camera_frames = {}
+                for cam_id, frame_data in frame_batch.items():
+                    if frame_data is not None:
+                        image_np, frame_path = frame_data  # Unpack the tuple
+                        if image_np is not None:
+                            camera_frames[cam_id] = {
+                                "image": image_np,
+                                "width": image_np.shape[1],
+                                "height": image_np.shape[0],
+                                "fps": 30,
+                                "format": "RGB",
+                                "encoding": "numpy",
+                                "timestamp": datetime.now(timezone.utc).isoformat()
+                            }
+                
+                if not camera_frames:
+                    continue
+                
+                # Process frames through detection pipeline
+                pipeline_batch = {
+                    "task_id": str(task_id),
+                    "environment_id": environment_id,
+                    "camera_frames": camera_frames,
+                    "batch_index": frame_count,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+                
+                # Run through detection -> reid -> mapping pipeline
+                try:
+                    results = await self.process_frame_batch(task_id, pipeline_batch)
+                    
+                    # Convert processed frames to base64 and send via WebSocket
+                    await self._send_real_frame_results(task_id, environment_id, frame_count, camera_frames, results)
+                    
+                    frame_count += 1
+                    logger.info(f"📹 Processed frame batch {frame_count}/{max_frames}")
+                    
+                    # Small delay between frames
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    logger.error(f"Frame processing error for batch {frame_count}: {e}")
+                    continue
+        
+        except Exception as e:
+            logger.error(f"Real frame processing failed: {e}")
+        finally:
+            # Clean up frame provider
+            try:
+                frame_provider.close()
+            except:
+                pass
+        
+        logger.info(f"✅ Completed real frame processing: {frame_count} frames processed")
+    
+    async def _send_real_frame_results(self, task_id: UUID, environment_id: str, frame_index: int, 
+                                     camera_frames: dict, detection_results: dict) -> None:
+        """Send real processed frames with detection results via WebSocket."""
+        import cv2
+        import base64
+        
+        try:
+            # Get detection results
+            detection_batch = detection_results.get("detection_results", {}).get("detection_batch")
+            detections_by_camera = {}
+            
+            if detection_batch:
+                # Group detections by camera
+                for detection in detection_batch.detections:
+                    cam_id = detection.camera_id
+                    if cam_id not in detections_by_camera:
+                        detections_by_camera[cam_id] = []
+                    detections_by_camera[cam_id].append(detection)
+            
+            # Create tracking update message with real frame data
+            cameras_data = {}
+            
+            for cam_id, frame_info in camera_frames.items():
+                # Get frame image
+                frame_image = frame_info["image"]  # numpy array
+                
+                # Draw bounding boxes on frame if we have detections
+                if cam_id in detections_by_camera:
+                    frame_with_boxes = frame_image.copy()
+                    for detection in detections_by_camera[cam_id]:
+                        # Draw bounding box
+                        x1, y1, x2, y2 = map(int, detection.bbox.to_xyxy())
+                        cv2.rectangle(frame_with_boxes, (x1, y1), (x2, y2), (0, 255, 0), 2)
+                        # Add confidence score
+                        label = f"Person {detection.confidence:.2f}"
+                        cv2.putText(frame_with_boxes, label, (x1, y1-10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 1)
+                    frame_to_encode = frame_with_boxes
+                else:
+                    frame_to_encode = frame_image
+                
+                # Convert to JPEG and then base64
+                if frame_to_encode.dtype != np.uint8:
+                    frame_to_encode = (frame_to_encode * 255).astype(np.uint8)
+                
+                # Convert RGB to BGR for OpenCV
+                if len(frame_to_encode.shape) == 3:
+                    frame_bgr = cv2.cvtColor(frame_to_encode, cv2.COLOR_RGB2BGR)
+                else:
+                    frame_bgr = frame_to_encode
+                
+                # Encode as JPEG
+                success, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if success:
+                    frame_base64 = base64.b64encode(buffer).decode('utf-8')
+                else:
+                    logger.warning(f"Failed to encode frame for camera {cam_id}")
+                    continue
+                
+                # Create tracking data for this camera
+                tracks = []
+                if cam_id in detections_by_camera:
+                    for i, detection in enumerate(detections_by_camera[cam_id]):
+                        track = {
+                            "track_id": detection.track_id or i,
+                            "global_id": f"person_{detection.track_id or i}",
+                            "bbox_xyxy": list(detection.bbox.to_xyxy()),
+                            "confidence": detection.confidence,
+                            "class_id": 1,  # Person class
+                            "map_coords": [detection.bbox.x, detection.bbox.y]  # Simplified
+                        }
+                        tracks.append(track)
+                
+                cameras_data[cam_id] = {
+                    "tracks": tracks,
+                    "frame_image": frame_base64,
+                    "frame_index": frame_index,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
+            
+            # Send tracking update message
+            tracking_message = {
+                "type": "tracking_update",
+                "task_id": str(task_id),
+                "cameras": cameras_data,
+                "frame_index": frame_index,
+                "timestamp": datetime.now(timezone.utc).isoformat()
+            }
+            
+            # Send via WebSocket
+            from app.api.websockets.connection_manager import binary_websocket_manager
+            success = await binary_websocket_manager.send_json_message(str(task_id), tracking_message)
+            
+            if success:
+                logger.info(f"📤 REAL STREAM: Sent frame {frame_index} for task {task_id} with {len(cameras_data)} cameras and {sum(len(data['tracks']) for data in cameras_data.values())} detections")
+            else:
+                logger.warning(f"⚠️ REAL STREAM: Failed to send frame {frame_index} for task {task_id}")
+                
+        except Exception as e:
+            logger.error(f"Error sending real frame results: {e}")
+    
+    async def _send_tracking_updates_with_mock_frames(self, task_id: UUID, environment_id: str) -> None:
+        """Fallback method that sends mock SVG frames (original behavior)."""
+        logger.info(f"📝 Sending mock frames for task {task_id} (fallback mode)")
+        await self._send_tracking_updates(task_id, environment_id)
     
     async def _send_tracking_updates(self, task_id: UUID, environment_id: str) -> None:
         """Send real-time tracking updates via WebSocket during streaming phase."""
