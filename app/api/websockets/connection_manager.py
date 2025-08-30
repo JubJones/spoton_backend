@@ -105,6 +105,15 @@ class BinaryWebSocketManager:
             # Accept the WebSocket connection
             await websocket.accept()
             
+            # Wait for WebSocket to be fully ready - prevents race condition
+            await asyncio.sleep(0.01)  # Small delay to ensure connection is stable
+            
+            # Verify WebSocket state after accept
+            from fastapi.websockets import WebSocketState
+            if websocket.client_state != WebSocketState.CONNECTED:
+                logger.error(f"WebSocket not in CONNECTED state after accept: {websocket.client_state}")
+                return False
+            
             # Initialize connection tracking
             if task_id not in self.active_connections:
                 self.active_connections[task_id] = []
@@ -358,9 +367,10 @@ class BinaryWebSocketManager:
             return False
     
     async def _send_immediate_message(self, task_id: str, message: Dict[str, Any]) -> bool:
-        """Send message immediately to all connections."""
+        """Send message immediately to all connections with enhanced state validation."""
         try:
             if task_id not in self.active_connections:
+                logger.debug(f"No active connections for task_id: {task_id}")
                 return False
             
             # Convert to JSON
@@ -380,25 +390,25 @@ class BinaryWebSocketManager:
                     use_compression = True
                     self._update_compression_stats(compression_ratio)
             
-            # Send to all connections
+            # Send to all connections with enhanced state validation
             success_count = 0
             connections_to_remove = []
             
             for websocket in self.active_connections[task_id]:
                 try:
-                    # Check WebSocket state before sending
-                    from fastapi.websockets import WebSocketState
-                    if websocket.client_state != WebSocketState.CONNECTED:
-                        logger.debug(f"WebSocket not connected (state: {websocket.client_state}), marking for removal")
+                    # Enhanced WebSocket state validation
+                    if not await self._is_websocket_ready(websocket):
+                        logger.debug(f"WebSocket not ready, marking for removal")
                         connections_to_remove.append(websocket)
                         continue
                     
-                    # Always send as text for JSON messages to maintain compatibility
-                    # Frontend clients expect text-based WebSocket messages
-                    await websocket.send_text(message_json)
-                    
-                    success_count += 1
-                    self._update_connection_metrics(task_id, websocket, len(message_bytes))
+                    # Send message with retry logic
+                    if await self._send_with_retry(websocket, message_json):
+                        success_count += 1
+                        self._update_connection_metrics(task_id, websocket, len(message_bytes))
+                    else:
+                        logger.warning(f"Failed to send message after retries")
+                        connections_to_remove.append(websocket)
                     
                 except Exception as e:
                     logger.error(f"Failed to send message to connection: {e}")
@@ -506,6 +516,53 @@ class BinaryWebSocketManager:
                 })
         
         return metrics
+    
+    async def _is_websocket_ready(self, websocket: WebSocket) -> bool:
+        """Check if WebSocket is ready for communication."""
+        try:
+            from fastapi.websockets import WebSocketState
+            
+            # Check client state
+            if websocket.client_state != WebSocketState.CONNECTED:
+                logger.debug(f"WebSocket client state not CONNECTED: {websocket.client_state}")
+                return False
+            
+            # Check application state if available
+            if hasattr(websocket, 'application_state'):
+                if websocket.application_state != WebSocketState.CONNECTED:
+                    logger.debug(f"WebSocket application state not CONNECTED: {websocket.application_state}")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error checking WebSocket readiness: {e}")
+            return False
+    
+    async def _send_with_retry(self, websocket: WebSocket, message: str, max_retries: int = 2) -> bool:
+        """Send message with retry logic to handle race conditions."""
+        for attempt in range(max_retries + 1):
+            try:
+                # Validate WebSocket is still ready before each attempt
+                if not await self._is_websocket_ready(websocket):
+                    logger.debug(f"WebSocket not ready on attempt {attempt + 1}")
+                    if attempt < max_retries:
+                        await asyncio.sleep(0.01 * (attempt + 1))  # Exponential backoff
+                        continue
+                    return False
+                
+                # Send the message
+                await websocket.send_text(message)
+                return True
+                
+            except Exception as e:
+                logger.debug(f"Send attempt {attempt + 1} failed: {e}")
+                if attempt < max_retries:
+                    await asyncio.sleep(0.01 * (attempt + 1))  # Exponential backoff
+                    continue
+                return False
+        
+        return False
     
     async def cleanup(self):
         """Clean up all connections and resources."""

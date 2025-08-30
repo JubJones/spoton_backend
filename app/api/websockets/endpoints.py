@@ -57,29 +57,53 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
         
         logger.info(f"WebSocket tracking connection established for task_id: {task_id}")
         
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
         # Start status monitoring if not already running
         if not status_handler.monitoring_active:
             await status_handler.start_monitoring()
         
-        # Send initial connection message
-        await binary_websocket_manager.send_json_message(
-            task_id,
-            {
-                "type": "connection_established",
-                "task_id": task_id,
-                "capabilities": [
-                    "binary_frames",
-                    "tracking_updates",
-                    "system_status",
-                    "message_compression"
-                ]
-            },
-            MessageType.CONTROL_MESSAGE
-        )
+        # Send initial connection message with retry logic
+        connection_message_sent = False
+        for attempt in range(3):
+            try:
+                success = await binary_websocket_manager.send_json_message(
+                    task_id,
+                    {
+                        "type": "connection_established",
+                        "task_id": task_id,
+                        "capabilities": [
+                            "binary_frames",
+                            "tracking_updates",
+                            "system_status",
+                            "message_compression"
+                        ]
+                    },
+                    MessageType.CONTROL_MESSAGE
+                )
+                if success:
+                    connection_message_sent = True
+                    break
+                else:
+                    logger.warning(f"Failed to send connection message, attempt {attempt + 1}/3")
+                    await asyncio.sleep(0.02 * (attempt + 1))
+            except Exception as e:
+                logger.warning(f"Error sending connection message attempt {attempt + 1}: {e}")
+                await asyncio.sleep(0.02 * (attempt + 1))
+        
+        if not connection_message_sent:
+            logger.error(f"Failed to send initial connection message after 3 attempts for task_id: {task_id}")
         
         # Main message loop
         while True:
             try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket no longer connected (state: {websocket.client_state}) for task_id: {task_id}")
+                    break
+                
                 # Receive message from client
                 data = await websocket.receive_text()
                 
@@ -96,6 +120,9 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
                 break
             except Exception as e:
                 logger.error(f"Error in WebSocket message loop for task_id {task_id}: {e}")
+                # Check if it's the specific race condition error
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected for task_id {task_id}, terminating connection")
                 break
                 
     except Exception as e:
@@ -135,23 +162,42 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
         
         logger.info(f"WebSocket frames connection established for task_id: {task_id}")
         
-        # Send initial frame capabilities
-        await binary_websocket_manager.send_json_message(
-            task_id,
-            {
-                "type": "frame_capabilities",
-                "task_id": task_id,
-                "supported_formats": ["jpeg", "png"],
-                "compression_enabled": True,
-                "adaptive_quality": True,
-                "frame_sync": True
-            },
-            MessageType.CONTROL_MESSAGE
-        )
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
+        # Send initial frame capabilities with retry logic
+        for attempt in range(3):
+            try:
+                success = await binary_websocket_manager.send_json_message(
+                    task_id,
+                    {
+                        "type": "frame_capabilities",
+                        "task_id": task_id,
+                        "supported_formats": ["jpeg", "png"],
+                        "compression_enabled": True,
+                        "adaptive_quality": True,
+                        "frame_sync": True
+                    },
+                    MessageType.CONTROL_MESSAGE
+                )
+                if success:
+                    break
+                else:
+                    logger.warning(f"Failed to send frame capabilities, attempt {attempt + 1}/3")
+                    await asyncio.sleep(0.02 * (attempt + 1))
+            except Exception as e:
+                logger.warning(f"Error sending frame capabilities attempt {attempt + 1}: {e}")
+                await asyncio.sleep(0.02 * (attempt + 1))
         
         # Frame streaming loop
         while True:
             try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket frames no longer connected for task_id: {task_id}")
+                    break
+                
                 # Receive control messages from client
                 data = await websocket.receive_text()
                 
@@ -168,6 +214,8 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
                 break
             except Exception as e:
                 logger.error(f"Error in WebSocket frames loop for task_id {task_id}: {e}")
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected in frames for task_id {task_id}")
                 break
                 
     except Exception as e:
@@ -209,23 +257,42 @@ async def websocket_system_endpoint(websocket: WebSocket):
         
         logger.info("WebSocket system connection established")
         
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
         # Start system monitoring
         await status_handler.start_monitoring()
         
-        # Send initial system status
-        system_status = await status_handler.get_system_status()
-        await binary_websocket_manager.send_json_message(
-            system_task_id,
-            {
-                "type": "system_status",
-                "data": system_status
-            },
-            MessageType.SYSTEM_STATUS
-        )
+        # Send initial system status with retry logic
+        for attempt in range(3):
+            try:
+                system_status = await status_handler.get_system_status()
+                success = await binary_websocket_manager.send_json_message(
+                    system_task_id,
+                    {
+                        "type": "system_status",
+                        "data": system_status
+                    },
+                    MessageType.SYSTEM_STATUS
+                )
+                if success:
+                    break
+                else:
+                    logger.warning(f"Failed to send system status, attempt {attempt + 1}/3")
+                    await asyncio.sleep(0.02 * (attempt + 1))
+            except Exception as e:
+                logger.warning(f"Error sending system status attempt {attempt + 1}: {e}")
+                await asyncio.sleep(0.02 * (attempt + 1))
         
         # System monitoring loop
         while True:
             try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info("WebSocket system no longer connected")
+                    break
+                
                 # Receive control messages from client
                 data = await websocket.receive_text()
                 
@@ -242,6 +309,8 @@ async def websocket_system_endpoint(websocket: WebSocket):
                 break
             except Exception as e:
                 logger.error(f"Error in WebSocket system loop: {e}")
+                if "Need to call 'accept' first" in str(e):
+                    logger.error("WebSocket race condition detected in system endpoint")
                 break
                 
     except Exception as e:
@@ -281,12 +350,21 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
         
         logger.info(f"WebSocket focus tracking connection established for task_id: {task_id}")
         
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
         # Initialize focus tracking for this task
         await focus_tracking_handler.handle_focus_connection(task_id)
         
         # Main message loop
         while True:
             try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket focus no longer connected for task_id: {task_id}")
+                    break
+                
                 # Receive message from client
                 data = await websocket.receive_text()
                 
@@ -303,6 +381,8 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
                 break
             except Exception as e:
                 logger.error(f"Error in WebSocket focus loop for task_id {task_id}: {e}")
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected in focus for task_id {task_id}")
                 break
                 
     except Exception as e:
@@ -343,12 +423,21 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
         
         logger.info(f"WebSocket analytics connection established for task_id: {task_id}")
         
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
         # Initialize analytics for this task
         await analytics_handler.handle_analytics_connection(task_id)
         
         # Main message loop
         while True:
             try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket analytics no longer connected for task_id: {task_id}")
+                    break
+                
                 # Receive message from client
                 data = await websocket.receive_text()
                 
@@ -365,6 +454,8 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
                 break
             except Exception as e:
                 logger.error(f"Error in WebSocket analytics loop for task_id {task_id}: {e}")
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected in analytics for task_id {task_id}")
                 break
                 
     except Exception as e:

@@ -295,8 +295,16 @@ class ReIDService:
             # Convert to FeatureVector objects
             feature_vectors = []
             for i, (detection, clip_feature) in enumerate(zip(detections, clip_features)):
+                # Handle case where clip_feature might be numpy array or have features attribute
+                if hasattr(clip_feature, 'features'):
+                    feature_data = clip_feature.features.tolist()
+                elif hasattr(clip_feature, 'tolist'):
+                    feature_data = clip_feature.tolist()
+                else:
+                    feature_data = list(clip_feature)
+                
                 feature_vector = FeatureVector(
-                    vector=clip_feature.features.tolist(),
+                    vector=feature_data,
                     extraction_timestamp=datetime.now(timezone.utc),
                     model_version=self.model.get_model_info().get("model_name", "clip"),
                     detection_id=detection.id,
@@ -356,9 +364,8 @@ class ReIDService:
             return None, 0.0
         
         try:
-            # Build query from feature vector
-            query_features = self.model.__class__().__new__(self.model.__class__)
-            query_features.features = np.array(feature_vector.vector, dtype=np.float32)
+            # Build query from feature vector using existing model
+            query_features = np.array(feature_vector.vector, dtype=np.float32)
             
             # Get all candidate identities (excluding same camera)
             candidates = []
@@ -384,8 +391,8 @@ class ReIDService:
             best_confidence = 0.0
             
             for identity, identity_feature in zip(candidates, candidate_features):
-                # Calculate similarity using CLIP model
-                similarity = self.model.calculate_similarity(query_features, identity_feature)
+                # Calculate similarity using CLIP model directly with numpy arrays
+                similarity = self.model._calculate_cosine_similarity(query_features, identity_feature)
                 
                 if similarity > best_confidence and similarity > self.similarity_threshold:
                     best_match = identity
@@ -416,9 +423,8 @@ class ReIDService:
             # In future, could use averaged features or select best quality
             most_recent_feature = identity_features[-1]
             
-            # Convert to CLIP feature format
-            clip_feature = self.model.__class__().__new__(self.model.__class__)
-            clip_feature.features = np.array(most_recent_feature.vector, dtype=np.float32)
+            # Convert to CLIP feature format - return as numpy array
+            clip_feature = np.array(most_recent_feature.vector, dtype=np.float32)
             
             return clip_feature
             
@@ -683,13 +689,12 @@ class ReIDService:
             List of (identity_id, similarity_score) tuples
         """
         try:
-            # Convert to CLIP feature format
-            query_features = self.model.__class__().__new__(self.model.__class__)
-            query_features.features = np.array(feature_vector.vector, dtype=np.float32)
+            # Convert feature vector to numpy array for model search
+            query_vector = np.array(feature_vector.vector, dtype=np.float32)
             
             # Find similar persons in database
             similar_persons = self.model.find_similar_persons(
-                query_features, 
+                query_vector, 
                 top_k=top_k, 
                 similarity_threshold=self.similarity_threshold
             )
