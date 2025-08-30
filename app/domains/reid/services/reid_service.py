@@ -292,21 +292,15 @@ class ReIDService:
             # Extract features using the CLIP model
             clip_features = await self.model.extract_features_batch(person_images)
             
-            # Convert to FeatureVector objects
+            # clip_features is already List[FeatureVector] from the CLIP model
+            # We just need to update the metadata with detection information
             feature_vectors = []
             for i, (detection, clip_feature) in enumerate(zip(detections, clip_features)):
-                # Handle case where clip_feature might be numpy array or have features attribute
-                if hasattr(clip_feature, 'features'):
-                    feature_data = clip_feature.features.tolist()
-                elif hasattr(clip_feature, 'tolist'):
-                    feature_data = clip_feature.tolist()
-                else:
-                    feature_data = list(clip_feature)
-                
+                # clip_feature is already a FeatureVector, just update metadata
                 feature_vector = FeatureVector(
-                    vector=feature_data,
-                    extraction_timestamp=datetime.now(timezone.utc),
-                    model_version=self.model.get_model_info().get("model_name", "clip"),
+                    vector=clip_feature.vector,  # Use the vector from the existing FeatureVector
+                    extraction_timestamp=clip_feature.extraction_timestamp,
+                    model_version=clip_feature.model_version,
                     detection_id=detection.id,
                     camera_id=detection.camera_id,
                     frame_index=detection.frame_index
@@ -447,9 +441,10 @@ class ReIDService:
                     track = self.active_tracks[track_key]
                     
                     # Get recent feature vectors from track
-                    for feature_vector in track.feature_vectors[-3:]:  # Last 3 features
+                    # track.feature_vectors is List[List[float]], so each feature_vector is List[float]
+                    for feature_vector_list in track.feature_vectors[-3:]:  # Last 3 features
                         features.append(FeatureVector(
-                            vector=feature_vector,
+                            vector=feature_vector_list,  # This is already List[float]
                             extraction_timestamp=track.last_updated,
                             model_version="current",
                             camera_id=camera_id

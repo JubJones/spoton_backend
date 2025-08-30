@@ -208,7 +208,14 @@ class BinaryWebSocketManager:
             True if sent successfully, False otherwise
         """
         try:
+            # Check if task has active connections
             if task_id not in self.active_connections:
+                logger.debug(f"No active connections for task_id: {task_id}, skipping frame")
+                return False
+            
+            # Check if there are actually connected websockets
+            if not self.active_connections[task_id]:
+                logger.debug(f"Empty connection list for task_id: {task_id}, skipping frame")
                 return False
             
             # Prepare binary message
@@ -279,7 +286,14 @@ class BinaryWebSocketManager:
             True if sent successfully, False otherwise
         """
         try:
+            # Check if task has active connections
             if task_id not in self.active_connections:
+                logger.debug(f"No active connections for task_id: {task_id}, skipping message")
+                return False
+            
+            # Check if there are actually connected websockets
+            if not self.active_connections[task_id]:
+                logger.debug(f"Empty connection list for task_id: {task_id}, skipping message")
                 return False
             
             # Add message type and timestamp
@@ -369,8 +383,14 @@ class BinaryWebSocketManager:
     async def _send_immediate_message(self, task_id: str, message: Dict[str, Any]) -> bool:
         """Send message immediately to all connections with enhanced state validation."""
         try:
+            # Check if task has active connections
             if task_id not in self.active_connections:
                 logger.debug(f"No active connections for task_id: {task_id}")
+                return False
+            
+            # Check if there are actually connected websockets
+            if not self.active_connections[task_id]:
+                logger.debug(f"Empty connection list for task_id: {task_id}")
                 return False
             
             # Convert to JSON

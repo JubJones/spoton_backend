@@ -104,8 +104,8 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
                     logger.info(f"WebSocket no longer connected (state: {websocket.client_state}) for task_id: {task_id}")
                     break
                 
-                # Receive message from client
-                data = await websocket.receive_text()
+                # Receive message from client with extended timeout for slow processing
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 
                 # Parse client message
                 try:
@@ -365,8 +365,8 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
                     logger.info(f"WebSocket focus no longer connected for task_id: {task_id}")
                     break
                 
-                # Receive message from client
-                data = await websocket.receive_text()
+                # Receive message from client with extended timeout for slow processing
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 
                 # Parse client message
                 try:
@@ -438,8 +438,8 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
                     logger.info(f"WebSocket analytics no longer connected for task_id: {task_id}")
                     break
                 
-                # Receive message from client
-                data = await websocket.receive_text()
+                # Receive message from client with extended timeout for slow processing
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
                 
                 # Parse client message
                 try:
