@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     POSTGRES_DB: str = "spotondb"
     DATABASE_URL: Optional[str] = None
 
-    DETECTOR_TYPE: str = "fasterrcnn"
+    DETECTOR_TYPE: str = "rtdetr"
     PERSON_CLASS_ID: int = 1
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
     DETECTION_USE_AMP: bool = False

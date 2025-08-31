@@ -12,13 +12,15 @@ from .base_detector import (
 # Import specific detector implementations to register them
 from .faster_rcnn_detector import FasterRCNNDetector
 from .yolo_detector import YOLODetector
+from .rtdetr_detector import RTDETRDetector
 
 __all__ = [
     'AbstractDetector',
     'DetectionResult',
     'DetectorFactory',
     'FasterRCNNDetector',
-    'YOLODetector'
+    'YOLODetector',
+    'RTDETRDetector'
 ]
 
 # Available detector types

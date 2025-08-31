@@ -140,6 +140,14 @@ class CleanAIModelFactory:
             from app.models.detectors import FasterRCNNDetector
             self._registry.register_detector("faster_rcnn", FasterRCNNDetector)
             
+            # Register RT-DETR detector
+            from app.models.rtdetr_detector import RTDETRDetector as LegacyRTDETRDetector
+            self._registry.register_detector("rtdetr", LegacyRTDETRDetector)
+            
+            # Register new domain-based detectors
+            from app.domains.detection.models.rtdetr_detector import RTDETRDetector
+            self._registry.register_detector("rt-detr", RTDETRDetector)
+            
             # Register existing tracker implementations  
             from app.models.trackers import BoxMOTTracker
             self._registry.register_tracker("boxmot", BoxMOTTracker)

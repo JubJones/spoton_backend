@@ -87,7 +87,7 @@ This is a multi-camera person tracking system with AI-powered detection, trackin
 - `NotificationService` - Manages WebSocket communications
 
 **Models Layer** (`app/models/`):
-- `FasterRCNNDetector` - Person detection using torchvision
+- `RTDETRDetector` - Person detection using RT-DETR (Real-Time Detection Transformer) via Ultralytics
 - `BoxMOTTracker` - Multi-object tracking with re-identification features
 - `CLIPFeatureExtractor` - Extract features for person re-identification
 
@@ -111,7 +111,7 @@ This is a multi-camera person tracking system with AI-powered detection, trackin
 3. **Video Processing**: 
    - Download sub-videos from S3 storage
    - Extract frames using OpenCV
-   - Run detection (Faster R-CNN) and tracking (BotSort)
+   - Run detection (RT-DETR) and tracking (BotSort)
    - Perform cross-camera re-identification using CLIP features
    - Apply homography transformations for map coordinates
 4. **Real-time Updates**: Stream tracking data and frame images via WebSocket

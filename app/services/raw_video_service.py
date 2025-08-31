@@ -144,7 +144,7 @@ class RawVideoService:
             logger.info(f"🎬 RAW PIPELINE: Starting raw streaming pipeline for task {task_id}, environment {environment_id}")
             
             # Update task status
-            await self._update_task_status(task_id, "INITIALIZING", 5.0, "Initializing raw video services")
+            await self._update_task_status(task_id, "INITIALIZING", 0.05, "Initializing raw video services")
             
             # Step 1: Initialize services
             logger.info(f"📹 RAW PIPELINE: Step 1/4 - Initializing services for task {task_id}")
@@ -152,7 +152,7 @@ class RawVideoService:
             if not services_initialized:
                 raise RuntimeError("Failed to initialize raw video services")
             
-            await self._update_task_status(task_id, "DOWNLOADING", 25.0, "Downloading video data")
+            await self._update_task_status(task_id, "DOWNLOADING", 0.25, "Downloading video data")
             
             # Step 2: Download video data
             logger.info(f"⬇️ RAW PIPELINE: Step 2/4 - Downloading video data for task {task_id}")
@@ -160,7 +160,7 @@ class RawVideoService:
             if not video_data:
                 raise RuntimeError("Failed to download video data")
             
-            await self._update_task_status(task_id, "EXTRACTING", 50.0, "Extracting raw frames")
+            await self._update_task_status(task_id, "EXTRACTING", 0.50, "Extracting raw frames")
             
             # Step 3: Extract frames
             logger.info(f"🖼️ RAW PIPELINE: Step 3/4 - Extracting frames for task {task_id}")
@@ -168,7 +168,7 @@ class RawVideoService:
             if not frames_extracted:
                 raise RuntimeError("Failed to extract frames")
             
-            await self._update_task_status(task_id, "STREAMING", 75.0, "Streaming raw video frames")
+            await self._update_task_status(task_id, "STREAMING", 0.75, "Streaming raw video frames")
             
             # Step 4: Stream frames
             logger.info(f"📡 RAW PIPELINE: Step 4/4 - Streaming frames for task {task_id}")
@@ -177,7 +177,7 @@ class RawVideoService:
                 raise RuntimeError("Failed to stream frames")
             
             # Mark as completed
-            await self._update_task_status(task_id, "COMPLETED", 100.0, "Raw video streaming completed successfully")
+            await self._update_task_status(task_id, "COMPLETED", 1.0, "Raw video streaming completed successfully")
             
             # Update statistics
             streaming_time = time.time() - streaming_start
@@ -209,15 +209,16 @@ class RawVideoService:
             if not video_configs:
                 raise ValueError(f"No video configuration found for environment {environment_id}")
             
-            # Download first sub-video for each camera
+            # Download all cameras for this environment using the batch method
+            video_paths = await self.video_data_manager.download_sub_videos_for_environment_batch(
+                task_id=uuid.uuid4(), environment_id=environment_id, sub_video_index=0
+            )
+            
+            # Process the downloaded video paths
             video_data = {}
             for video_config in video_configs:
                 camera_id = video_config.cam_id
-                
-                # Download the first sub-video (index 0)
-                video_path = await self.video_data_manager.download_sub_video(
-                    environment_id, camera_id, 0
-                )
+                video_path = video_paths.get(camera_id)
                 
                 if video_path:
                     video_data[camera_id] = {
@@ -352,7 +353,7 @@ class RawVideoService:
                     
                     # Log progress periodically
                     if frame_index % 30 == 0:  # Every 30 frames
-                        progress = (frame_index / total_frames) * 25 + 75  # 75-100% range
+                        progress = (frame_index / total_frames) * 0.25 + 0.75  # 0.75-1.0 range
                         await self._update_task_status(task_id, "STREAMING", progress, 
                                                      f"Streaming frame {frame_index}/{total_frames}")
                         logger.info(f"📡 RAW STREAM: Streamed frame {frame_index}/{total_frames} for task {task_id}")

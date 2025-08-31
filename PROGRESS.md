@@ -50,7 +50,7 @@ app/
 
 #### Major Changes:
 - **GPU Infrastructure**: Complete CUDA 12.1 setup with PyTorch GPU acceleration
-- **Detection Models**: Integrated Faster R-CNN and YOLO models with batch processing
+- **Detection Models**: Integrated RT-DETR and YOLO models with batch processing
 - **ReID System**: Implemented CLIP-based feature extraction with FAISS similarity search
 - **Spatial Mapping**: Added homography transformation with Kalman filtering
 - **Real-time Processing**: Achieved <50ms inference time with GPU optimization
@@ -230,7 +230,7 @@ app/
 - **Testing**: pytest, pytest-asyncio, pytest-cov
 
 **AI Models:**
-- **Detection**: Faster R-CNN, YOLO
+- **Detection**: RT-DETR, YOLO
 - **ReID**: CLIP model with FAISS similarity search
 - **Tracking**: BoT-SORT with Kalman filtering
 

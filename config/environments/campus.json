@@ -1,0 +1,351 @@
+{
+  "environment_id": "campus",
+  "name": "Campus Environment",
+  "environment_type": "campus",
+  "description": "Default campus environment with multiple zones and cameras",
+  "cameras": {
+    "c09": {
+      "camera_id": "c09",
+      "name": "Campus Entry Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 5.0,
+        "y": 2.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-30T09:22:38.608800",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "c12": {
+      "camera_id": "c12",
+      "name": "Campus Main Area Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 25.0,
+        "y": 15.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-30T09:22:38.608812",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "c13": {
+      "camera_id": "c13",
+      "name": "Campus Corridor Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 45.0,
+        "y": 10.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-30T09:22:38.608816",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "c16": {
+      "camera_id": "c16",
+      "name": "Campus Exit Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 65.0,
+        "y": 2.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-30T09:22:38.608819",
+      "calibration_accuracy": null,
+      "metadata": {}
+    }
+  },
+  "zones": {
+    "entrance": {
+      "zone_id": "entrance",
+      "name": "Campus Entrance",
+      "zone_type": "entrance",
+      "boundary_points": [
+        {
+          "x": 0,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 0
+        },
+        {
+          "x": 10,
+          "y": 5
+        },
+        {
+          "x": 0,
+          "y": 5
+        }
+      ],
+      "capacity_limit": 8,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 6,
+      "dwell_time_threshold": null,
+      "description": "Default campus entrance zone for campus environment",
+      "created_at": "2025-08-31T09:22:38.608837",
+      "area": 50.0,
+      "metadata": {}
+    },
+    "main_area": {
+      "zone_id": "main_area",
+      "name": "Campus Main Area",
+      "zone_type": "main_area",
+      "boundary_points": [
+        {
+          "x": 10,
+          "y": 0
+        },
+        {
+          "x": 60,
+          "y": 0
+        },
+        {
+          "x": 60,
+          "y": 30
+        },
+        {
+          "x": 10,
+          "y": 30
+        }
+      ],
+      "capacity_limit": 50,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 40,
+      "dwell_time_threshold": null,
+      "description": "Default campus main area zone for campus environment",
+      "created_at": "2025-08-31T09:22:38.608847",
+      "area": 1500.0,
+      "metadata": {}
+    },
+    "corridor": {
+      "zone_id": "corridor",
+      "name": "Campus Corridor",
+      "zone_type": "corridor",
+      "boundary_points": [
+        {
+          "x": 60,
+          "y": 5
+        },
+        {
+          "x": 70,
+          "y": 5
+        },
+        {
+          "x": 70,
+          "y": 15
+        },
+        {
+          "x": 60,
+          "y": 15
+        }
+      ],
+      "capacity_limit": 15,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 12,
+      "dwell_time_threshold": null,
+      "description": "Default campus corridor zone for campus environment",
+      "created_at": "2025-08-31T09:22:38.608855",
+      "area": 100.0,
+      "metadata": {}
+    },
+    "exit": {
+      "zone_id": "exit",
+      "name": "Campus Exit",
+      "zone_type": "exit",
+      "boundary_points": [
+        {
+          "x": 60,
+          "y": 0
+        },
+        {
+          "x": 70,
+          "y": 0
+        },
+        {
+          "x": 70,
+          "y": 5
+        },
+        {
+          "x": 60,
+          "y": 5
+        }
+      ],
+      "capacity_limit": 8,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 6,
+      "dwell_time_threshold": null,
+      "description": "Default campus exit zone for campus environment",
+      "created_at": "2025-08-31T09:22:38.608865",
+      "area": 50.0,
+      "metadata": {}
+    }
+  },
+  "layout": {
+    "layout_id": "campus_layout",
+    "name": "Campus Layout",
+    "bounds": {
+      "min": {
+        "x": 0,
+        "y": 0
+      },
+      "max": {
+        "x": 70,
+        "y": 30
+      }
+    },
+    "scale_meters_per_pixel": 0.1,
+    "reference_points": [
+      {
+        "coordinate": {
+          "x": 0,
+          "y": 0
+        },
+        "description": "Origin point"
+      },
+      {
+        "coordinate": {
+          "x": 35,
+          "y": 15
+        },
+        "description": "Center point"
+      }
+    ],
+    "walls": [],
+    "doors": [],
+    "landmarks": [],
+    "floor_plan_image_path": null,
+    "overlay_image_path": null
+  },
+  "timezone": "UTC",
+  "operating_hours": {
+    "monday": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "tuesday": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "wednesday": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "thursday": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "friday": {
+      "start": "06:00",
+      "end": "22:00"
+    },
+    "saturday": {
+      "start": "08:00",
+      "end": "18:00"
+    },
+    "sunday": {
+      "start": "10:00",
+      "end": "16:00"
+    }
+  },
+  "capacity_limits": {
+    "total": 100,
+    "entrance": 8,
+    "main_area": 50
+  },
+  "data_retention_days": 180,
+  "recording_enabled": true,
+  "analytics_enabled": true,
+  "user_permissions": {},
+  "is_active": true,
+  "created_at": "2025-08-31T09:22:38.608882",
+  "last_updated": "2025-08-31T09:22:38.608882",
+  "version": "1.0",
+  "validation_issues": {
+    "cameras": [
+      "Camera c09 missing homography matrix",
+      "Camera c12 missing homography matrix",
+      "Camera c13 missing homography matrix",
+      "Camera c16 missing homography matrix"
+    ]
+  },
+  "metadata": {}
+}

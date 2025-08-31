@@ -121,7 +121,7 @@ app/
 - [x] **Detection Service Implementation**
 - [x] **Detection Entities & Domain Objects**
 
-**Status**: Faster R-CNN and YOLO models integrated with GPU acceleration. Multi-camera batch processing achieving <50ms inference time. Strong domain typing implemented.
+**Status**: RT-DETR and YOLO models integrated with GPU acceleration. Multi-camera batch processing achieving <50ms inference time. Strong domain typing implemented.
 
 ### 1.3 **Cross-Camera Re-Identification Implementation** - *Core Feature 2*
 - [x] **ReID Model Integration**
@@ -854,7 +854,7 @@ POST   /api/v1/system/maintenance                            # System maintenanc
 ### Core Feature Implementation Details
 
 **Multi-View Person Detection (Core Feature 1)**:
-- Faster R-CNN and YOLO model integration with GPU acceleration
+- RT-DETR and YOLO model integration with GPU acceleration
 - Multi-camera batch processing with <50ms inference time
 - Confidence threshold filtering and NMS post-processing
 - Strong domain typing with Detection, BoundingBox, and FrameMetadata entities
@@ -884,7 +884,7 @@ app/
 ├── domains/
 │   ├── detection/
 │   │   ├── entities/          # Detection, BoundingBox, FrameMetadata
-│   │   ├── models/            # Faster R-CNN, YOLO, Base Detector
+│   │   ├── models/            # RT-DETR, YOLO, Base Detector
 │   │   └── services/          # Detection Service, Batch Processor
 │   ├── reid/
 │   │   ├── entities/          # PersonIdentity, Track, FeatureVector
