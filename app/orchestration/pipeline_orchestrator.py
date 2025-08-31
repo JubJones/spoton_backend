@@ -446,6 +446,9 @@ class PipelineOrchestrator:
             
             detection_results = await self._run_detection(frame_batch)
             
+            # Send heartbeat after detection to keep WebSocket alive
+            await self._send_processing_heartbeat(task_id, "detection_completed")
+            
             # Stage 2: Re-identification
             await self.update_task_status(
                 task_id, 
@@ -456,6 +459,9 @@ class PipelineOrchestrator:
             
             reid_results = await self._run_reid(detection_results)
             
+            # Send heartbeat after ReID to keep WebSocket alive
+            await self._send_processing_heartbeat(task_id, "reid_completed")
+            
             # Stage 3: Spatial Mapping
             await self.update_task_status(
                 task_id, 
@@ -465,6 +471,9 @@ class PipelineOrchestrator:
             )
             
             mapping_results = await self._run_mapping(reid_results)
+            
+            # Send heartbeat after mapping to keep WebSocket alive
+            await self._send_processing_heartbeat(task_id, "mapping_completed")
             
             # Calculate total processing time
             total_processing_time = time.time() - batch_start_time
@@ -825,12 +834,13 @@ class PipelineOrchestrator:
                     video_paths = {}
                 
                 if not video_paths:
-                    logger.warning(f"No videos downloaded for task {task_id}")
-                    # Fall back to mock data for demo
-                    await self._send_tracking_updates_with_mock_frames(task_id, environment_id)
-                    return
+                    logger.error(f"No videos downloaded for task {task_id} - FAILING to expose real issues")
+                    raise Exception(f"No videos downloaded for task {task_id}")
                 
                 logger.info(f"✅ Downloaded {len(video_paths)} videos: {list(video_paths.keys())}")
+                
+                # Send heartbeat after successful video download
+                await self._send_processing_heartbeat(task_id, "video_download_completed")
                 
                 await self.update_task_status(task_id, "EXTRACTING", 0.4, "Extracting frames from videos")
                 
@@ -841,6 +851,9 @@ class PipelineOrchestrator:
                     loop_videos=False
                 )
                 
+                # Send heartbeat after frame provider setup
+                await self._send_processing_heartbeat(task_id, "frame_extraction_ready")
+                
                 await self.update_task_status(task_id, "PROCESSING", 0.6, "Processing frames with AI detection")
                 
                 # Process and stream real frames
@@ -848,9 +861,8 @@ class PipelineOrchestrator:
                 
             except Exception as e:
                 logger.error(f"Video processing failed for task {task_id}: {e}")
-                # Fall back to mock data for demo
-                await self.update_task_status(task_id, "STREAMING", 0.9, "Streaming mock data (video processing failed)")
-                await self._send_tracking_updates_with_mock_frames(task_id, environment_id)
+                # NO MOCK FALLBACK - Let the real error propagate
+                raise e
             
             # Complete the task successfully
             await self.complete_task(task_id, success=True)
@@ -981,14 +993,22 @@ class PipelineOrchestrator:
                 if frame_to_encode.dtype != np.uint8:
                     frame_to_encode = (frame_to_encode * 255).astype(np.uint8)
                 
+                # Resize frame for WebSocket transmission (reduce size significantly)
+                height, width = frame_to_encode.shape[:2]
+                # Resize to 480p max to reduce bandwidth
+                if width > 640:
+                    new_width = 640
+                    new_height = int(height * (new_width / width))
+                    frame_to_encode = cv2.resize(frame_to_encode, (new_width, new_height))
+                
                 # Convert RGB to BGR for OpenCV
                 if len(frame_to_encode.shape) == 3:
                     frame_bgr = cv2.cvtColor(frame_to_encode, cv2.COLOR_RGB2BGR)
                 else:
                     frame_bgr = frame_to_encode
                 
-                # Encode as JPEG
-                success, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                # Encode as JPEG with lower quality for WebSocket streaming
+                success, buffer = cv2.imencode('.jpg', frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, 60])
                 if success:
                     frame_base64 = base64.b64encode(buffer).decode('utf-8')
                 else:
@@ -1137,6 +1157,29 @@ class PipelineOrchestrator:
                 continue
         
         logger.info(f"Completed real-time streaming for task {task_id}")
+    
+    async def _send_processing_heartbeat(self, task_id: uuid.UUID, stage: str) -> None:
+        """Send heartbeat message to keep WebSocket connection alive during long processing."""
+        try:
+            heartbeat_message = {
+                "type": "processing_heartbeat",
+                "task_id": str(task_id),
+                "stage": stage,
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "message": f"Processing stage '{stage}' completed, continuing..."
+            }
+            
+            # Send via WebSocket using binary WebSocket manager
+            from app.api.websockets.connection_manager import binary_websocket_manager
+            success = await binary_websocket_manager.send_json_message(str(task_id), heartbeat_message)
+            
+            if success:
+                logger.info(f"💓 HEARTBEAT: Sent heartbeat for task {task_id} stage '{stage}'")
+            else:
+                logger.debug(f"💓 HEARTBEAT: No active connections for task {task_id} heartbeat (stage: {stage})")
+                
+        except Exception as e:
+            logger.error(f"Error sending processing heartbeat for task {task_id}: {e}")
 
 
 # Global orchestrator instance

@@ -95,7 +95,7 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
         if not connection_message_sent:
             logger.error(f"Failed to send initial connection message after 3 attempts for task_id: {task_id}")
         
-        # Main message loop
+        # Main message loop - handle both interactive and listen-only clients
         while True:
             try:
                 # Check WebSocket state before receiving
@@ -104,15 +104,22 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
                     logger.info(f"WebSocket no longer connected (state: {websocket.client_state}) for task_id: {task_id}")
                     break
                 
-                # Receive message from client with extended timeout for slow processing
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                
-                # Parse client message
+                # Receive message from client with timeout, but handle listen-only clients gracefully
                 try:
-                    message = json.loads(data)
-                    await handle_client_message(task_id, message)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from client: {data}")
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await handle_client_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for streaming clients
+                    logger.debug(f"No client message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
                     continue
                 
             except WebSocketDisconnect:
@@ -189,7 +196,7 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
                 logger.warning(f"Error sending frame capabilities attempt {attempt + 1}: {e}")
                 await asyncio.sleep(0.02 * (attempt + 1))
         
-        # Frame streaming loop
+        # Frame streaming loop - handle both interactive and listen-only clients
         while True:
             try:
                 # Check WebSocket state before receiving
@@ -198,15 +205,22 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
                     logger.info(f"WebSocket frames no longer connected for task_id: {task_id}")
                     break
                 
-                # Receive control messages from client
-                data = await websocket.receive_text()
-                
-                # Parse client message
+                # Receive control messages from client with timeout handling
                 try:
-                    message = json.loads(data)
-                    await handle_frame_control_message(task_id, message)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from frames client: {data}")
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await handle_frame_control_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from frames client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for streaming clients
+                    logger.debug(f"No frame control message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
                     continue
                 
             except WebSocketDisconnect:
@@ -284,7 +298,7 @@ async def websocket_system_endpoint(websocket: WebSocket):
                 logger.warning(f"Error sending system status attempt {attempt + 1}: {e}")
                 await asyncio.sleep(0.02 * (attempt + 1))
         
-        # System monitoring loop
+        # System monitoring loop - handle both interactive and listen-only clients  
         while True:
             try:
                 # Check WebSocket state before receiving
@@ -293,15 +307,22 @@ async def websocket_system_endpoint(websocket: WebSocket):
                     logger.info("WebSocket system no longer connected")
                     break
                 
-                # Receive control messages from client
-                data = await websocket.receive_text()
-                
-                # Parse client message
+                # Receive control messages from client with timeout handling
                 try:
-                    message = json.loads(data)
-                    await handle_system_control_message(message)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from system client: {data}")
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await handle_system_control_message(message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from system client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for monitoring clients
+                    logger.debug("No system control message received in 30s (listen-only client)")
+                    # Keep connection alive for listen-only clients
                     continue
                 
             except WebSocketDisconnect:
@@ -366,14 +387,21 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
                     break
                 
                 # Receive message from client with extended timeout for slow processing
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                
-                # Parse client message
                 try:
-                    message = json.loads(data)
-                    await focus_tracking_handler.handle_client_message(task_id, message)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from focus client: {data}")
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await focus_tracking_handler.handle_client_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from focus client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for focus clients
+                    logger.debug(f"No focus message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
                     continue
                 
             except WebSocketDisconnect:
@@ -439,14 +467,21 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
                     break
                 
                 # Receive message from client with extended timeout for slow processing
-                data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
-                
-                # Parse client message
                 try:
-                    message = json.loads(data)
-                    await analytics_handler.handle_client_message(task_id, message)
-                except json.JSONDecodeError:
-                    logger.warning(f"Invalid JSON received from analytics client: {data}")
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await analytics_handler.handle_client_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from analytics client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for analytics clients
+                    logger.debug(f"No analytics message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
                     continue
                 
             except WebSocketDisconnect:
