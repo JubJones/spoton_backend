@@ -31,6 +31,7 @@ from app.infrastructure.cache.redis_client import RedisClient
 from app.services.analytics_engine import AnalyticsEngine
 
 from app.api.websockets import binary_websocket_manager as websocket_manager
+from app.services.raw_video_service import raw_video_service, RawVideoService
 
 logger = logging.getLogger(__name__)
 
@@ -244,3 +245,10 @@ def get_export_service(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Export service temporarily unavailable"
         )
+
+
+@lru_cache()
+def get_raw_video_service() -> RawVideoService:
+    """Dependency provider for RawVideoService."""
+    logger.debug("Initializing RawVideoService instance (or returning cached).")
+    return raw_video_service

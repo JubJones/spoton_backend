@@ -425,6 +425,115 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"WebSocket focus tracking connection closed for task_id: {task_id}")
 
 
+@router.websocket("/raw-tracking/{task_id}")
+async def websocket_raw_tracking_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket endpoint for raw video streaming without AI processing.
+    
+    Provides:
+    - Raw frame streaming from multiple cameras
+    - No AI processing (detection, tracking, re-identification)
+    - Direct video-to-frontend streaming
+    - Basic frame metadata
+    """
+    logger.info(f"WebSocket raw tracking connection request for task_id: {task_id}")
+    
+    connected = False
+    
+    try:
+        # Connect to binary WebSocket manager
+        connected = await binary_websocket_manager.connect(websocket, task_id)
+        
+        if not connected:
+            logger.error(f"Failed to connect raw tracking WebSocket for task_id: {task_id}")
+            await websocket.close(code=1011, reason="Connection failed")
+            return
+        
+        logger.info(f"WebSocket raw tracking connection established for task_id: {task_id}")
+        
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
+        # Send initial connection message with raw streaming capabilities
+        connection_message_sent = False
+        for attempt in range(3):
+            try:
+                success = await binary_websocket_manager.send_json_message(
+                    task_id,
+                    {
+                        "type": "raw_connection_established",
+                        "task_id": task_id,
+                        "mode": "raw_streaming",
+                        "capabilities": [
+                            "raw_frames",
+                            "no_ai_processing",
+                            "multi_camera_streaming",
+                            "basic_metadata"
+                        ]
+                    },
+                    MessageType.CONTROL_MESSAGE
+                )
+                if success:
+                    connection_message_sent = True
+                    break
+                else:
+                    logger.warning(f"Failed to send raw connection message, attempt {attempt + 1}/3")
+                    await asyncio.sleep(0.02 * (attempt + 1))
+            except Exception as e:
+                logger.warning(f"Error sending raw connection message attempt {attempt + 1}: {e}")
+                await asyncio.sleep(0.02 * (attempt + 1))
+        
+        if not connection_message_sent:
+            logger.error(f"Failed to send initial raw connection message after 3 attempts for task_id: {task_id}")
+        
+        # Main message loop - handle both interactive and listen-only clients
+        while True:
+            try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket raw tracking no longer connected (state: {websocket.client_state}) for task_id: {task_id}")
+                    break
+                
+                # Receive message from client with timeout, but handle listen-only clients gracefully
+                try:
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await handle_raw_client_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from raw client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for streaming clients
+                    logger.debug(f"No raw client message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
+                    continue
+                
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket raw client disconnected gracefully for task_id: {task_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket raw message loop for task_id {task_id}: {e}")
+                # Check if it's the specific race condition error
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected for raw task_id {task_id}, terminating connection")
+                break
+                
+    except Exception as e:
+        logger.error(f"Error in WebSocket raw tracking endpoint for task_id {task_id}: {e}")
+        
+    finally:
+        # Cleanup connection
+        if connected:
+            await binary_websocket_manager.disconnect(websocket, task_id)
+        
+        logger.info(f"WebSocket raw tracking connection closed for task_id: {task_id}")
+
+
 @router.websocket("/analytics/{task_id}")
 async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
     """
@@ -620,6 +729,57 @@ async def handle_system_control_message(message: Dict[str, Any]):
             
     except Exception as e:
         logger.error(f"Error handling system control message: {e}")
+
+
+async def handle_raw_client_message(task_id: str, message: Dict[str, Any]):
+    """Handle messages from raw tracking WebSocket clients."""
+    try:
+        message_type = message.get("type")
+        
+        if message_type == "ping":
+            # Respond to ping
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "pong",
+                    "timestamp": message.get("timestamp"),
+                    "mode": "raw_streaming"
+                },
+                MessageType.CONTROL_MESSAGE
+            )
+            
+        elif message_type == "subscribe_raw_frames":
+            # Subscribe to raw frame updates
+            logger.info(f"Client subscribed to raw frame updates for task_id: {task_id}")
+            
+        elif message_type == "unsubscribe_raw_frames":
+            # Unsubscribe from raw frame updates
+            logger.info(f"Client unsubscribed from raw frame updates for task_id: {task_id}")
+            
+        elif message_type == "request_raw_status":
+            # Send current raw streaming status
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "raw_streaming_status",
+                    "task_id": task_id,
+                    "mode": "raw_streaming",
+                    "status": "active",
+                    "message": "Raw video streaming active - no AI processing"
+                },
+                MessageType.STATUS_UPDATE
+            )
+            
+        elif message_type == "set_raw_quality":
+            # Set raw frame quality
+            quality = message.get("quality", 85)
+            logger.info(f"Setting raw frame quality to {quality} for task_id: {task_id}")
+            
+        else:
+            logger.warning(f"Unknown raw client message type received: {message_type}")
+            
+    except Exception as e:
+        logger.error(f"Error handling raw client message: {e}")
 
 
 # Health check endpoint for WebSocket status

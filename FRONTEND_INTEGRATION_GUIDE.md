@@ -368,6 +368,189 @@ const e2eTest = async () => {
 };
 ```
 
+## DEBUGGING - Raw Video Streaming (No AI Processing)
+
+For debugging and proof-of-concept development, the backend provides raw video streaming endpoints that bypass all AI processing. This allows frontend developers to test video playback and WebSocket communication without requiring AI models.
+
+### Raw Video Streaming Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|---------|----------|
+| `/api/v1/raw-processing-tasks/environments` | GET | List environments for raw streaming |
+| `/api/v1/raw-processing-tasks/start` | POST | Start raw video streaming |
+| `/api/v1/raw-processing-tasks/{id}/status` | GET | Get raw task status |
+| `/api/v1/raw-processing-tasks/{id}` | GET | Get raw task details |
+
+### Raw Video WebSocket
+
+**Connection URL**: `ws://localhost:3847/ws/raw-tracking/{taskId}`
+
+### Quick Raw Video Setup
+
+```javascript
+// 1. Check system health (same as regular)
+const health = await fetch('http://localhost:3847/health').then(r => r.json());
+
+// 2. Start raw video streaming (no AI processing)
+const rawTask = await fetch('http://localhost:3847/api/v1/raw-processing-tasks/start', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ environment_id: 'campus' })
+}).then(r => r.json());
+
+// 3. Connect to raw video WebSocket
+const rawWs = new WebSocket(`ws://localhost:3847/ws/raw-tracking/${rawTask.task_id}`);
+rawWs.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'tracking_update' && data.mode === 'raw_streaming') {
+    handleRawVideoFrames(data.payload);
+  }
+};
+```
+
+### Raw Video Message Format
+
+**Raw Tracking Update**:
+```javascript
+{
+  "type": "tracking_update",
+  "task_id": "uuid",
+  "global_frame_index": 123,
+  "timestamp_processed_utc": "2025-01-01T10:30:05.456Z",
+  "mode": "raw_streaming",
+  "cameras": {
+    "c09": {
+      "frame_image_base64": "data:image/jpeg;base64,...",
+      "tracks": [],  // Empty - no AI processing
+      "frame_width": 1920,
+      "frame_height": 1080,
+      "timestamp": "2025-01-01T10:30:05.456Z"
+    }
+  }
+}
+```
+
+### Key Differences from AI Processing
+
+| Feature | Regular Processing | Raw Video Streaming |
+|---------|-------------------|-------------------|
+| **Detection** | ✅ Person detection | ❌ No detection |
+| **Tracking** | ✅ Multi-object tracking | ❌ No tracking |
+| **Re-ID** | ✅ Cross-camera re-identification | ❌ No re-identification |
+| **Bounding Boxes** | ✅ Person bounding boxes | ❌ No bounding boxes |
+| **Frame Images** | ✅ Base64 encoded frames | ✅ Base64 encoded frames |
+| **Map Coordinates** | ✅ Spatial mapping | ❌ No mapping |
+| **Performance** | Slower (AI processing) | Faster (no processing) |
+| **Use Case** | Production tracking | Debug/PoC development |
+
+### Raw Video Client Example
+
+```javascript
+class RawVideoClient {
+  constructor() {
+    this.taskId = null;
+    this.ws = null;
+  }
+
+  async startRawStreaming(environmentId) {
+    // Start raw task
+    const response = await fetch('/api/v1/raw-processing-tasks/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment_id: environmentId })
+    });
+    
+    const task = await response.json();
+    this.taskId = task.task_id;
+
+    // Monitor until STREAMING
+    while (true) {
+      const status = await fetch(`/api/v1/raw-processing-tasks/${this.taskId}/status`).then(r => r.json());
+      if (status.status === 'STREAMING') break;
+      if (status.status === 'FAILED') throw new Error(status.details);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Connect WebSocket
+    this.connectRawWebSocket();
+  }
+
+  connectRawWebSocket() {
+    this.ws = new WebSocket(`ws://localhost:3847/ws/raw-tracking/${this.taskId}`);
+    
+    this.ws.onopen = () => {
+      this.ws.send(JSON.stringify({ type: 'subscribe_raw_frames' }));
+    };
+    
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'tracking_update' && message.mode === 'raw_streaming') {
+        this.handleRawFrames(message);
+      }
+    };
+  }
+
+  handleRawFrames(payload) {
+    const { cameras } = payload;
+    
+    Object.entries(cameras).forEach(([cameraId, data]) => {
+      // Display raw frame (no bounding boxes)
+      if (data.frame_image_base64) {
+        document.getElementById(`camera-${cameraId}`).src = data.frame_image_base64;
+      }
+      
+      // Show frame info
+      console.log(`Raw frame from ${cameraId}: ${data.frame_width}x${data.frame_height}`);
+    });
+  }
+}
+
+// Usage
+const rawClient = new RawVideoClient();
+await rawClient.startRawStreaming('campus');
+```
+
+### Development Workflow
+
+1. **Frontend Development**: Use raw video streaming to develop UI without AI dependencies
+2. **WebSocket Testing**: Test WebSocket connections and frame handling
+3. **Performance Testing**: Measure baseline performance without AI processing
+4. **Integration Testing**: Verify video playback before adding AI features
+5. **Production Ready**: Switch to regular processing endpoints when ready
+
+### Raw Video Environment Response
+
+```javascript
+// GET /api/v1/raw-processing-tasks/environments
+{
+  "status": "success",
+  "data": {
+    "environments": [
+      {
+        "environment_id": "campus",
+        "name": "Campus Environment (Raw)",
+        "description": "Raw video streaming campus environment with 4 cameras",
+        "camera_count": 4,
+        "cameras": ["c01", "c02", "c03", "c05"],
+        "available": true,
+        "mode": "raw_streaming"
+      }
+    ],
+    "total_count": 1
+  }
+}
+```
+
+---
+
+## Production Integration
+
+When ready for production, simply replace:
+- `/api/v1/raw-processing-tasks/` → `/api/v1/processing-tasks/`
+- `/ws/raw-tracking/` → `/ws/tracking/`
+- Handle `tracks` array in camera data for bounding boxes
+- Process `map_coords` for spatial tracking
+
 ---
 
 **Documentation**: http://localhost:3847/docs (Swagger UI)  
