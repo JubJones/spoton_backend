@@ -72,14 +72,14 @@ class BinaryWebSocketManager:
         self.pending_message_buffer: Dict[str, List[Dict[str, Any]]] = {}
         self.max_buffered_messages = 10
         
-        # Message size limits (WebSocket standard limit is ~1MB)
-        self.max_message_size = 800 * 1024  # 800KB to leave room for headers
-        self.large_message_compression_threshold = 100 * 1024  # 100KB
+        # Message size limits (Increased for video frame transmission)
+        self.max_message_size = 4 * 1024 * 1024  # 4MB for base64 video frames
+        self.large_message_compression_threshold = 2 * 1024 * 1024  # 2MB - Allow base64 video frames (~1.6MB)
         
-        # Message compression settings
+        # Message compression settings (Optimized for video frames)
         self.enable_compression = True
-        self.compression_threshold = 1024  # bytes
-        self.compression_level = 6
+        self.compression_threshold = 50 * 1024  # 50KB - only compress larger messages
+        self.compression_level = 1  # Fast compression for real-time streaming
         
         # Message batching settings
         self.enable_batching = True

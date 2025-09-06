@@ -253,3 +253,104 @@ async def get_raw_processing_task_details(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error retrieving raw processing task details"
         )
+
+
+@router.delete(
+    "/{task_id}/stop",
+    response_model=Dict[str, Any],
+    summary="Stop and cleanup a raw processing task"
+)
+async def stop_raw_processing_task(
+    task_id: uuid.UUID,
+    raw_video_service: RawVideoService = Depends(get_raw_video_service)
+):
+    """
+    Stop and cleanup a raw processing task.
+    This is useful for handling stuck streaming sessions.
+    """
+    try:
+        logger.info(f"🛑 RAW API REQUEST: Stop raw processing task {task_id}")
+        
+        # Stop the task in the raw video service
+        success = await raw_video_service.stop_raw_task(task_id)
+        
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, 
+                detail="Raw processing task not found or already stopped"
+            )
+        
+        logger.info(f"✅ RAW API REQUEST: Successfully stopped raw processing task {task_id}")
+        
+        return {
+            "status": "success",
+            "data": {
+                "task_id": str(task_id),
+                "message": "Raw processing task stopped successfully",
+                "stopped_at": str(datetime.utcnow().isoformat())
+            },
+            "timestamp": str(datetime.utcnow().isoformat())
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping raw processing task {task_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error stopping raw processing task"
+        )
+
+
+@router.delete(
+    "/environment/{environment_id}/cleanup",
+    response_model=Dict[str, Any],
+    summary="Cleanup all tasks for an environment"
+)
+async def cleanup_environment_tasks(
+    environment_id: str,
+    raw_video_service: RawVideoService = Depends(get_raw_video_service)
+):
+    """
+    Stop and cleanup all raw processing tasks for a specific environment.
+    This is useful for resolving "active streaming session already exists" errors.
+    """
+    try:
+        logger.info(f"🧹 RAW API REQUEST: Cleanup environment tasks for {environment_id}")
+        
+        # Get all tasks for this environment
+        all_tasks = await raw_video_service.get_all_raw_task_statuses()
+        environment_tasks = [
+            task for task in all_tasks 
+            if task.get("environment_id") == environment_id
+        ]
+        
+        stopped_tasks = []
+        
+        # Stop each task for this environment
+        for task in environment_tasks:
+            task_id = uuid.UUID(task["task_id"])
+            success = await raw_video_service.stop_raw_task(task_id)
+            if success:
+                stopped_tasks.append(str(task_id))
+                logger.info(f"✅ RAW CLEANUP: Stopped task {task_id} for environment {environment_id}")
+        
+        logger.info(f"🧹 RAW API REQUEST: Cleanup completed for environment {environment_id}, stopped {len(stopped_tasks)} tasks")
+        
+        return {
+            "status": "success",
+            "data": {
+                "environment_id": environment_id,
+                "message": f"Cleaned up {len(stopped_tasks)} tasks for environment {environment_id}",
+                "stopped_tasks": stopped_tasks,
+                "cleanup_at": str(datetime.utcnow().isoformat())
+            },
+            "timestamp": str(datetime.utcnow().isoformat())
+        }
+        
+    except Exception as e:
+        logger.error(f"Error cleaning up environment {environment_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error cleaning up environment tasks"
+        )

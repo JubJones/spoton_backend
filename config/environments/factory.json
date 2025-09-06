@@ -31,7 +31,7 @@
       "distortion_coefficients": null,
       "homography_matrix": null,
       "is_active": true,
-      "last_calibrated": "2025-08-29T09:22:38.609707",
+      "last_calibrated": "2025-08-29T13:02:52.097728",
       "calibration_accuracy": null,
       "metadata": {}
     },
@@ -62,7 +62,7 @@
       "distortion_coefficients": null,
       "homography_matrix": null,
       "is_active": true,
-      "last_calibrated": "2025-08-29T09:22:38.609713",
+      "last_calibrated": "2025-08-29T13:02:52.097739",
       "calibration_accuracy": null,
       "metadata": {}
     },
@@ -93,7 +93,7 @@
       "distortion_coefficients": null,
       "homography_matrix": null,
       "is_active": true,
-      "last_calibrated": "2025-08-29T09:22:38.609717",
+      "last_calibrated": "2025-08-29T13:02:52.097743",
       "calibration_accuracy": null,
       "metadata": {}
     },
@@ -124,7 +124,7 @@
       "distortion_coefficients": null,
       "homography_matrix": null,
       "is_active": true,
-      "last_calibrated": "2025-08-29T09:22:38.609720",
+      "last_calibrated": "2025-08-29T13:02:52.097746",
       "calibration_accuracy": null,
       "metadata": {}
     }
@@ -158,7 +158,7 @@
       "occupancy_threshold": 10,
       "dwell_time_threshold": null,
       "description": "Default production line 1 zone for factory environment",
-      "created_at": "2025-08-31T09:22:38.609739",
+      "created_at": "2025-08-31T13:02:52.097761",
       "area": 200.0,
       "metadata": {}
     },
@@ -190,7 +190,7 @@
       "occupancy_threshold": 10,
       "dwell_time_threshold": null,
       "description": "Default production line 2 zone for factory environment",
-      "created_at": "2025-08-31T09:22:38.609747",
+      "created_at": "2025-08-31T13:02:52.097770",
       "area": 200.0,
       "metadata": {}
     },
@@ -222,7 +222,7 @@
       "occupancy_threshold": 4,
       "dwell_time_threshold": null,
       "description": "Default quality control zone for factory environment",
-      "created_at": "2025-08-31T09:22:38.609755",
+      "created_at": "2025-08-31T13:02:52.097777",
       "area": 200.0,
       "metadata": {}
     },
@@ -254,7 +254,7 @@
       "occupancy_threshold": 5,
       "dwell_time_threshold": null,
       "description": "Default factory exit zone for factory environment",
-      "created_at": "2025-08-31T09:22:38.609765",
+      "created_at": "2025-08-31T13:02:52.097788",
       "area": 50.0,
       "metadata": {}
     }
@@ -328,8 +328,8 @@
   "analytics_enabled": true,
   "user_permissions": {},
   "is_active": true,
-  "created_at": "2025-08-31T09:22:38.609776",
-  "last_updated": "2025-08-31T09:22:38.609776",
+  "created_at": "2025-08-31T13:02:52.097800",
+  "last_updated": "2025-08-31T13:02:52.097800",
   "version": "1.0",
   "validation_issues": {
     "cameras": [

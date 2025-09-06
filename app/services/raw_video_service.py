@@ -288,6 +288,11 @@ class RawVideoService:
             
             # Stream frames
             while frame_index < total_frames:
+                # Check if task is still active (can be stopped by cleanup)
+                if task_id not in self.active_tasks:
+                    logger.info(f"📡 RAW STREAM: Task {task_id} was stopped, ending streaming at frame {frame_index}")
+                    break
+                    
                 current_time = time.time()
                 
                 # Read frames from all cameras
@@ -429,6 +434,64 @@ class RawVideoService:
     async def get_all_raw_task_statuses(self) -> List[Dict[str, Any]]:
         """Get all raw task statuses."""
         return list(self.tasks.values())
+
+    async def stop_raw_task(self, task_id: uuid.UUID) -> bool:
+        """
+        Stop and cleanup a raw processing task.
+        
+        Args:
+            task_id: UUID of the task to stop
+            
+        Returns:
+            bool: True if task was stopped successfully, False if not found
+        """
+        try:
+            task_id_str = str(task_id)
+            logger.info(f"🛑 RAW TASK STOP: Attempting to stop task {task_id_str}")
+            
+            # Check if task exists (use UUID object as key, not string)
+            if task_id not in self.tasks:
+                logger.warning(f"🛑 RAW TASK STOP: Task {task_id_str} not found in tasks")
+                return False
+            
+            # Get task info
+            task_info = self.tasks[task_id]
+            environment_id = task_info.get("environment_id")
+            
+            # Update task status to STOPPED
+            task_info["status"] = "STOPPED"
+            task_info["details"] = "Task stopped by user request"
+            task_info["updated_at"] = str(datetime.utcnow().isoformat())
+            
+            # Remove from active tasks (use UUID object as key)
+            if task_id in self.active_tasks:
+                self.active_tasks.remove(task_id)
+                logger.info(f"🛑 RAW TASK STOP: Removed {task_id_str} from active tasks")
+            
+            # Remove environment association
+            if environment_id and environment_id in self.environment_tasks:
+                if self.environment_tasks[environment_id] == task_id:
+                    del self.environment_tasks[environment_id]
+                    logger.info(f"🛑 RAW TASK STOP: Cleared environment {environment_id} association")
+            
+            # Clean up any WebSocket connections for this task
+            from app.api.websockets.connection_manager import binary_websocket_manager
+            connection_count = binary_websocket_manager.get_connection_count(task_id_str)
+            if connection_count > 0:
+                logger.info(f"🛑 RAW TASK STOP: Found {connection_count} WebSocket connections for task {task_id_str}")
+                # Disconnect all WebSocket connections for this task
+                if task_id_str in binary_websocket_manager.active_connections:
+                    connections_to_close = binary_websocket_manager.active_connections[task_id_str].copy()
+                    for websocket in connections_to_close:
+                        await binary_websocket_manager.disconnect(websocket, task_id_str)
+                    logger.info(f"🛑 RAW TASK STOP: Disconnected {len(connections_to_close)} WebSocket connections")
+            
+            logger.info(f"✅ RAW TASK STOP: Successfully stopped task {task_id_str}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"❌ RAW TASK STOP: Error stopping task {task_id}: {e}")
+            return False
     
     def get_streaming_stats(self) -> Dict[str, Any]:
         """Get streaming statistics."""
