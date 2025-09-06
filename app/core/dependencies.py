@@ -32,6 +32,7 @@ from app.services.analytics_engine import AnalyticsEngine
 
 from app.api.websockets import binary_websocket_manager as websocket_manager
 from app.services.raw_video_service import raw_video_service, RawVideoService
+from app.services.detection_video_service import detection_video_service, DetectionVideoService
 
 logger = logging.getLogger(__name__)
 
@@ -252,3 +253,10 @@ def get_raw_video_service() -> RawVideoService:
     """Dependency provider for RawVideoService."""
     logger.debug("Initializing RawVideoService instance (or returning cached).")
     return raw_video_service
+
+
+@lru_cache()
+def get_detection_video_service() -> DetectionVideoService:
+    """Dependency provider for DetectionVideoService."""
+    logger.debug("Initializing DetectionVideoService instance (or returning cached).")
+    return detection_video_service

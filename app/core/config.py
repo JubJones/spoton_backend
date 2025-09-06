@@ -83,6 +83,14 @@ class Settings(BaseSettings):
     PERSON_CLASS_ID: int = 1
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
     DETECTION_USE_AMP: bool = False
+    
+    # RT-DETR Configuration (Phase 1)
+    RTDETR_MODEL_PATH: str = "weights/rtdetr-l.pt"
+    RTDETR_CONFIDENCE_THRESHOLD: float = 0.5
+    RTDETR_NMS_THRESHOLD: float = 0.45
+    RTDETR_INPUT_SIZE: int = 640
+    DETECTION_ANNOTATION_ENABLED: bool = True
+    DETECTION_SAVE_ORIGINAL_FRAMES: bool = True
     TRACKER_TYPE: str = "botsort"
     WEIGHTS_DIR: str = "./weights" 
     REID_WEIGHTS_PATH: str = "clip_market1501.pt"

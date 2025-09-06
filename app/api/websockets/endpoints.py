@@ -425,6 +425,122 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"WebSocket focus tracking connection closed for task_id: {task_id}")
 
 
+@router.websocket("/detection-tracking/{task_id}")
+async def websocket_detection_tracking_endpoint(websocket: WebSocket, task_id: str):
+    """
+    WebSocket endpoint for RT-DETR detection processing (Phase 1).
+    
+    Provides:
+    - Real-time detection results from RT-DETR model
+    - Person detection bounding boxes and confidence scores
+    - Frame streaming with detection annotations
+    - Detection processing status updates
+    """
+    logger.info(f"WebSocket detection tracking connection request for task_id: {task_id}")
+    
+    connected = False
+    
+    try:
+        # Connect to binary WebSocket manager
+        connected = await binary_websocket_manager.connect(websocket, task_id)
+        
+        if not connected:
+            logger.error(f"Failed to connect detection tracking WebSocket for task_id: {task_id}")
+            await websocket.close(code=1011, reason="Connection failed")
+            return
+        
+        logger.info(f"WebSocket detection tracking connection established for task_id: {task_id}")
+        
+        # Wait briefly to ensure WebSocket is fully ready
+        await asyncio.sleep(0.05)
+        
+        # Send initial connection message with detection capabilities
+        connection_message_sent = False
+        for attempt in range(3):
+            try:
+                success = await binary_websocket_manager.send_json_message(
+                    task_id,
+                    {
+                        "type": "detection_connection_established",
+                        "task_id": task_id,
+                        "mode": "detection_processing",
+                        "capabilities": [
+                            "rtdetr_detection",
+                            "person_detection",
+                            "detection_frames",
+                            "detection_metadata",
+                            "confidence_scoring"
+                        ],
+                        "model_info": {
+                            "model_type": "RT-DETR",
+                            "model_variant": "rtdetr-l",
+                            "confidence_threshold": 0.5,
+                            "supported_classes": ["person"]
+                        }
+                    },
+                    MessageType.CONTROL_MESSAGE
+                )
+                if success:
+                    connection_message_sent = True
+                    break
+                else:
+                    logger.warning(f"Failed to send detection connection message, attempt {attempt + 1}/3")
+                    await asyncio.sleep(0.02 * (attempt + 1))
+            except Exception as e:
+                logger.warning(f"Error sending detection connection message attempt {attempt + 1}: {e}")
+                await asyncio.sleep(0.02 * (attempt + 1))
+        
+        if not connection_message_sent:
+            logger.error(f"Failed to send initial detection connection message after 3 attempts for task_id: {task_id}")
+        
+        # Main message loop - handle both interactive and listen-only clients
+        while True:
+            try:
+                # Check WebSocket state before receiving
+                from fastapi.websockets import WebSocketState
+                if websocket.client_state != WebSocketState.CONNECTED:
+                    logger.info(f"WebSocket detection tracking no longer connected (state: {websocket.client_state}) for task_id: {task_id}")
+                    break
+                
+                # Receive message from client with timeout, but handle listen-only clients gracefully
+                try:
+                    data = await asyncio.wait_for(websocket.receive_text(), timeout=30.0)
+                    
+                    # Parse client message
+                    try:
+                        message = json.loads(data)
+                        await handle_detection_client_message(task_id, message)
+                    except json.JSONDecodeError:
+                        logger.warning(f"Invalid JSON received from detection client: {data}")
+                        continue
+                        
+                except asyncio.TimeoutError:
+                    # Handle listen-only clients - no message received is normal for streaming clients
+                    logger.debug(f"No detection client message received in 30s for task_id {task_id} (listen-only client)")
+                    # Keep connection alive for listen-only clients
+                    continue
+                
+            except WebSocketDisconnect:
+                logger.info(f"WebSocket detection client disconnected gracefully for task_id: {task_id}")
+                break
+            except Exception as e:
+                logger.error(f"Error in WebSocket detection message loop for task_id {task_id}: {e}")
+                # Check if it's the specific race condition error
+                if "Need to call 'accept' first" in str(e):
+                    logger.error(f"WebSocket race condition detected for detection task_id {task_id}, terminating connection")
+                break
+                
+    except Exception as e:
+        logger.error(f"Error in WebSocket detection tracking endpoint for task_id {task_id}: {e}")
+        
+    finally:
+        # Cleanup connection
+        if connected:
+            await binary_websocket_manager.disconnect(websocket, task_id)
+        
+        logger.info(f"WebSocket detection tracking connection closed for task_id: {task_id}")
+
+
 @router.websocket("/raw-tracking/{task_id}")
 async def websocket_raw_tracking_endpoint(websocket: WebSocket, task_id: str):
     """
@@ -729,6 +845,84 @@ async def handle_system_control_message(message: Dict[str, Any]):
             
     except Exception as e:
         logger.error(f"Error handling system control message: {e}")
+
+
+async def handle_detection_client_message(task_id: str, message: Dict[str, Any]):
+    """Handle messages from detection tracking WebSocket clients."""
+    try:
+        message_type = message.get("type")
+        
+        if message_type == "ping":
+            # Respond to ping with detection mode
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "pong",
+                    "timestamp": message.get("timestamp"),
+                    "mode": "detection_processing",
+                    "model": "RT-DETR-l"
+                },
+                MessageType.CONTROL_MESSAGE
+            )
+            
+        elif message_type == "subscribe_detection_updates":
+            # Subscribe to detection updates
+            logger.info(f"Client subscribed to detection updates for task_id: {task_id}")
+            
+        elif message_type == "unsubscribe_detection_updates":
+            # Unsubscribe from detection updates
+            logger.info(f"Client unsubscribed from detection updates for task_id: {task_id}")
+            
+        elif message_type == "request_detection_status":
+            # Send current detection processing status
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "detection_status",
+                    "task_id": task_id,
+                    "mode": "detection_processing",
+                    "model": "RT-DETR-l",
+                    "status": "active",
+                    "message": "RT-DETR person detection active",
+                    "capabilities": [
+                        "person_detection",
+                        "confidence_scoring",
+                        "bounding_boxes",
+                        "detection_metadata"
+                    ]
+                },
+                MessageType.STATUS_UPDATE
+            )
+            
+        elif message_type == "set_detection_confidence":
+            # Set detection confidence threshold
+            confidence = message.get("confidence", 0.5)
+            logger.info(f"Setting detection confidence threshold to {confidence} for task_id: {task_id}")
+            
+        elif message_type == "request_detection_stats":
+            # Send detection statistics
+            # This would integrate with DetectionVideoService for actual stats
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "detection_statistics",
+                    "task_id": task_id,
+                    "stats": {
+                        "model_type": "RT-DETR-l",
+                        "confidence_threshold": 0.5,
+                        "total_detections": 0,
+                        "processing_fps": 0.0,
+                        "average_detection_time": 0.0
+                    }
+                },
+                MessageType.CONTROL_MESSAGE
+            )
+            
+        else:
+            logger.warning(f"Unknown detection client message type received: {message_type}")
+            
+    except Exception as e:
+        logger.error(f"Error handling detection client message: {e}")
 
 
 async def handle_raw_client_message(task_id: str, message: Dict[str, Any]):

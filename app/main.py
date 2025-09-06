@@ -10,6 +10,7 @@ from app.core import event_handlers
 from app.core.security_config import configure_security_middleware, get_cors_config
 from app.api.v1.endpoints import processing_tasks
 from app.api.v1.endpoints import raw_processing_tasks
+from app.api.v1.endpoints import detection_processing_tasks
 from app.api.v1.endpoints import media as media_endpoints
 from app.api.v1.endpoints import focus_tracking
 from app.api.v1.endpoints import playback_controls
@@ -91,6 +92,11 @@ app.include_router(
     raw_processing_tasks.router,
     prefix=f"{api_v1_router_prefix}/raw-processing-tasks",
     tags=["V1 - Raw Processing Tasks (Debug)"]
+)
+app.include_router(
+    detection_processing_tasks.router,
+    prefix=f"{api_v1_router_prefix}/detection-processing-tasks",
+    tags=["V1 - RT-DETR Detection Tasks (Phase 1)"]
 )
 app.include_router(
     media_endpoints.router,
