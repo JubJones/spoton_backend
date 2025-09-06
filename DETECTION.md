@@ -27,10 +27,14 @@ results = model("path/to/bus.jpg")
 
 ### 2.3 Processing Pipeline
 1. **Download video frames** from S3 storage (same as raw endpoint)
-2. **Run RT-DETR detection** on each frame
-3. **Annotate images** with detection bounding boxes and confidence scores
-4. **Extract detection data** (bboxes, confidence, class, etc.)
-5. **Stream both annotated images and detection data** to frontend via WebSocket
+2. **Run RT-DETR detection** on each frame (batched processing)
+3. **Multi-object tracking** using BoxMOT trackers per camera
+4. **Re-ID feature extraction** for new/refreshed tracks (batched)
+5. **Cross-camera association** using cosine similarity and EMA gallery updates
+6. **Homography projection** to map coordinates (if calibrated)
+7. **Handoff trigger detection** based on exit rules and quadrant overlap
+8. **Annotate images** with detection bboxes, track IDs, and global IDs
+9. **Stream enhanced tracking data** with re-ID and mapping info via WebSocket
 
 ## 3. Technical Specifications
 
@@ -45,8 +49,24 @@ results = model("path/to/bus.jpg")
 - **Confidence Threshold**: 0.5 (configurable)
 - **NMS Threshold**: 0.45 (configurable)
 - **Input Resolution**: 640x640 (RT-DETR standard)
-- **Annotation**: Draw bounding boxes with confidence scores on images
-- **Output Format**: Base64 encoded annotated images + structured detection data
+- **Annotation**: Draw bounding boxes with track IDs, global IDs, and confidence scores
+- **Output Format**: Base64 encoded annotated images + structured tracking data
+
+### 3.3 Re-ID Processing
+- **Feature Model**: CLIP Market1501-trained model for person re-identification
+- **Feature Dimensions**: 512-dimensional embeddings (CLIP standard)
+- **Similarity Metric**: Cosine similarity on L2-normalized embeddings
+- **Similarity Threshold**: 0.75 (configurable)
+- **Gallery Management**: Main gallery + lost track gallery with EMA updates
+- **Refresh Interval**: 30 frames (configurable)
+- **Conflict Resolution**: Best match wins, second-pass matching for reverted tracks
+
+### 3.4 Homography Mapping
+- **Calibration Method**: RANSAC-based homography computation
+- **Input Points**: Minimum 4 corresponding image-map point pairs
+- **Projection Target**: Foot point (center-bottom of bounding box)
+- **Coordinate System**: Bird's eye view map in meters
+- **Error Handling**: Graceful fallback when projection fails
 
 ## 4. API Endpoints
 
@@ -100,6 +120,12 @@ DELETE /api/v1/detection-processing-tasks/environment/{environment_id}/cleanup
           "height": 250.7,
           "center_x": 150.65,
           "center_y": 275.55
+        },
+        "track_id": 15,
+        "global_id": 123,
+        "map_coords": {
+          "map_x": 15.23,
+          "map_y": 35.87
         }
       }
     ],
@@ -155,13 +181,24 @@ The response schema includes placeholder fields for future pipeline components:
 #### 6.3 Re-ID Data (Future)
 ```json
 "reid_data": {
-  "global_person_id": "person_global_123",
+  "global_id": 123,
   "reid_confidence": 0.92,
-  "feature_embedding": "base64-encoded-clip-features",
-  "appearance_features": {
-    "dominant_colors": ["blue", "black"],
-    "clothing_type": ["shirt", "pants"],
-    "approximate_height": 175.2
+  "feature_vector": "base64-encoded-clip-embedding-512d",
+  "feature_model": "clip_market1501",
+  "gallery_type": "main",
+  "similarity_score": 0.87,
+  "reid_state": {
+    "last_reid_frame": 145,
+    "reid_refresh_due": false,
+    "handoff_triggered": true,
+    "association_type": "matched"
+  },
+  "gallery_metadata": {
+    "ema_alpha": 0.1,
+    "last_seen_camera": "c09",
+    "first_seen_frame": 120,
+    "track_age": 25,
+    "embedding_dimension": 512
   }
 }
 ```
@@ -169,14 +206,26 @@ The response schema includes placeholder fields for future pipeline components:
 #### 6.4 Homography & Mapping (Future)
 ```json
 "homography_data": {
-  "camera_matrix": "3x3-homography-matrix",
-  "calibration_confidence": 0.95
+  "matrix": [
+    [1.2, 0.1, -45.6],
+    [0.05, 1.1, -12.3],
+    [0.0001, 0.0002, 1.0]
+  ],
+  "matrix_available": true,
+  "calibration_points": {
+    "image_points": [[100, 200], [300, 150], [250, 400], [450, 380]],
+    "map_points": [[10.5, 20.2], [30.1, 18.7], [25.3, 40.8], [45.2, 38.5]]
+  }
 },
 "mapping_coordinates": {
-  "world_x": 15.2,
-  "world_y": 35.8,
-  "floor_level": 1,
-  "coordinate_system": "factory_map_v1"
+  "map_x": 15.23,
+  "map_y": 35.87,
+  "projection_successful": true,
+  "foot_point": {
+    "image_x": 150.65,
+    "image_y": 275.55
+  },
+  "coordinate_system": "bev_map_meters"
 }
 ```
 
@@ -187,6 +236,10 @@ The response schema includes placeholder fields for future pipeline components:
 - **RTDETRDetector**: RT-DETR model wrapper with inference methods
 - **DetectionAnnotator**: Image annotation utility for drawing bboxes
 - **DetectionWebSocketManager**: WebSocket communication handler
+- **ReIDStateManager**: Manages global ID galleries and track-to-global mappings
+- **ReIDFeatureExtractor**: Handles feature extraction decisions and batched processing
+- **ReIDAssociationService**: Performs similarity matching and conflict resolution
+- **HomographyService**: Manages coordinate transformations using calibrated matrices
 
 ### 7.2 Configuration
 ```python
@@ -197,14 +250,38 @@ RTDETR_NMS_THRESHOLD = 0.45
 RTDETR_INPUT_SIZE = 640
 DETECTION_ANNOTATION_ENABLED = True
 DETECTION_SAVE_ORIGINAL_FRAMES = True
+
+# Re-ID Configuration
+REID_MODEL_PATH = "weights/clip_market1501.pt"
+REID_MODEL_TYPE = "clip"
+REID_SIMILARITY_THRESHOLD = 0.75
+REID_REFRESH_INTERVAL_FRAMES = 30
+REID_GALLERY_EMA_ALPHA = 0.1
+REID_LOST_TRACK_BUFFER_FRAMES = 100
+
+# Homography Configuration
+HOMOGRAPHY_POINTS_DIR = "homography_points/"
+ENABLE_BEV_MAP_PROJECTION = True
+HOMOGRAPHY_RANSAC_THRESHOLD = 5.0
+
+# Handoff Configuration
+MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT = 0.5
+CAMERA_HANDOFF_RULES_ENABLED = True
+POSSIBLE_CAMERA_OVERLAPS = [("c09", "c12"), ("c12", "c13"), ("c13", "c16")]
 ```
 
 ### 7.3 Error Handling
-- Model loading failures
+- Model loading failures (Detection and Re-ID models)
 - GPU/CPU fallback scenarios
 - Frame processing timeouts
 - WebSocket connection management
 - S3 download failures
+- Re-ID feature extraction failures
+- Homography matrix computation errors
+- Gallery state corruption recovery
+- Track association conflicts
+- Invalid embedding normalization
+- Handoff trigger validation failures
 
 ## 8. Performance Requirements
 
