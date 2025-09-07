@@ -89,8 +89,12 @@ const status = await fetch(`/api/v1/processing-tasks/${taskId}/status`).then(r =
 |----------|---------|----------|
 | `/health` | GET | System health check |
 | `/api/v1/environments/` | GET | List environments |
-| `/api/v1/processing-tasks/start` | POST | Start processing |
-| `/api/v1/processing-tasks/{id}/status` | GET | Task status |
+| `/api/v1/processing-tasks/start` | POST | Start full AI processing |
+| `/api/v1/processing-tasks/{id}/status` | GET | Full processing task status |
+| `/api/v1/detection-processing-tasks/start` | POST | Start RT-DETR detection only |
+| `/api/v1/detection-processing-tasks/{id}/status` | GET | Detection task status |
+| `/api/v1/raw-processing-tasks/start` | POST | Start raw video streaming |
+| `/api/v1/raw-processing-tasks/{id}/status` | GET | Raw streaming task status |
 | `/api/v1/focus/{taskId}` | POST/GET/DELETE | Person focus control |
 | `/api/v1/controls/{taskId}/play` | POST | Start playback |
 | `/api/v1/controls/{taskId}/pause` | POST | Pause playback |
@@ -135,7 +139,9 @@ GET /api/v1/persons/{personId}/details?include_history=true
 ## WebSocket Communication
 
 ### Connection URLs
-- **Tracking**: `ws://localhost:3847/ws/tracking/{taskId}`
+- **Full Processing**: `ws://localhost:3847/ws/tracking/{taskId}`
+- **Detection Processing**: `ws://localhost:3847/ws/detection-tracking/{taskId}`
+- **Raw Video Streaming**: `ws://localhost:3847/ws/raw-tracking/{taskId}`
 - **System**: `ws://localhost:3847/ws/system`
 - **Focus**: `ws://localhost:3847/ws/focus/{taskId}`
 
@@ -368,6 +374,265 @@ const e2eTest = async () => {
 };
 ```
 
+## RT-DETR DETECTION - Person Detection with AI (Phase 1)
+
+The backend provides RT-DETR detection endpoints that perform real-time person detection using the RT-DETR-l model. This is the first phase of the AI pipeline, providing person detection with bounding boxes but without tracking or re-identification.
+
+### Detection Processing Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|---------|----------|
+| `/api/v1/detection-processing-tasks/environments` | GET | List environments for detection processing |
+| `/api/v1/detection-processing-tasks/start` | POST | Start RT-DETR detection processing |
+| `/api/v1/detection-processing-tasks/{id}/status` | GET | Get detection task status |
+| `/api/v1/detection-processing-tasks/{id}` | GET | Get detection task details |
+| `/api/v1/detection-processing-tasks/{id}/stop` | DELETE | Stop detection task |
+| `/api/v1/detection-processing-tasks/environment/{env_id}/cleanup` | DELETE | Cleanup environment tasks |
+
+### Detection WebSocket
+
+**Connection URL**: `ws://localhost:3847/ws/detection-tracking/{taskId}`
+
+### Quick Detection Setup
+
+```javascript
+// 1. Check system health (same as regular)
+const health = await fetch('http://localhost:3847/health').then(r => r.json());
+
+// 2. Start RT-DETR detection processing
+const detectionTask = await fetch('http://localhost:3847/api/v1/detection-processing-tasks/start', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ environment_id: 'campus' })
+}).then(r => r.json());
+
+// 3. Connect to detection WebSocket
+const detectionWs = new WebSocket(`ws://localhost:3847/ws/detection-tracking/${detectionTask.task_id}`);
+detectionWs.onmessage = (event) => {
+  const data = JSON.parse(event.data);
+  if (data.type === 'tracking_update' && data.mode === 'detection_processing') {
+    handleDetectionResults(data.payload);
+  }
+};
+```
+
+### Detection Message Format
+
+**Detection Tracking Update**:
+```javascript
+{
+  "type": "tracking_update",
+  "task_id": "uuid",
+  "global_frame_index": 123,
+  "timestamp_processed_utc": "2025-01-01T10:30:05.456Z",
+  "mode": "detection_processing",
+  "cameras": {
+    "c09": {
+      "frame_image_base64": "data:image/jpeg;base64,...",
+      "tracks": [
+        {
+          "track_id": 1,
+          "global_id": null,  // No tracking yet (Phase 1)
+          "bbox_xyxy": [110.2, 220.5, 160.0, 330.8],
+          "confidence": 0.92,
+          "map_coords": null,  // No mapping yet (Phase 1)
+          "is_focused": false,
+          "detection_class": "person",
+          "detection_score": 0.92
+        }
+      ],
+      "frame_width": 1920,
+      "frame_height": 1080,
+      "timestamp": "2025-01-01T10:30:05.456Z",
+      "detection_count": 1
+    }
+  },
+  "person_count_per_camera": {
+    "c09": 1,
+    "c12": 0,
+    "c13": 2,
+    "c16": 1
+  }
+}
+```
+
+### Detection vs Other Processing Modes
+
+| Feature | Detection Processing | Raw Video Streaming | Full Processing Pipeline |
+|---------|---------------------|---------------------|-------------------------|
+| **Person Detection** | ✅ RT-DETR detection | ❌ No detection | ✅ Advanced detection |
+| **Bounding Boxes** | ✅ Person bounding boxes | ❌ No bounding boxes | ✅ Tracked bounding boxes |
+| **Confidence Scores** | ✅ Detection confidence | ❌ No scores | ✅ Detection + tracking confidence |
+| **Tracking** | ❌ No tracking (single frame) | ❌ No tracking | ✅ Multi-object tracking |
+| **Re-ID** | ❌ No re-identification | ❌ No re-identification | ✅ Cross-camera re-ID |
+| **Map Coordinates** | ❌ No spatial mapping | ❌ No mapping | ✅ Spatial mapping |
+| **Frame Images** | ✅ Base64 encoded frames | ✅ Base64 encoded frames | ✅ Base64 encoded frames |
+| **Performance** | Medium (AI detection only) | Fastest (no processing) | Slower (full AI pipeline) |
+| **Use Case** | Detection development/testing | Debug/PoC development | Production tracking |
+
+### Detection Client Example
+
+```javascript
+class DetectionClient {
+  constructor() {
+    this.taskId = null;
+    this.ws = null;
+  }
+
+  async startDetectionProcessing(environmentId) {
+    // Start detection task
+    const response = await fetch('/api/v1/detection-processing-tasks/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ environment_id: environmentId })
+    });
+    
+    const task = await response.json();
+    this.taskId = task.task_id;
+
+    // Monitor until PROCESSING
+    while (true) {
+      const status = await fetch(`/api/v1/detection-processing-tasks/${this.taskId}/status`).then(r => r.json());
+      if (status.status === 'PROCESSING') break;
+      if (status.status === 'FAILED') throw new Error(status.details);
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+
+    // Connect WebSocket
+    this.connectDetectionWebSocket();
+  }
+
+  connectDetectionWebSocket() {
+    this.ws = new WebSocket(`ws://localhost:3847/ws/detection-tracking/${this.taskId}`);
+    
+    this.ws.onopen = () => {
+      this.ws.send(JSON.stringify({ type: 'subscribe_detection' }));
+    };
+    
+    this.ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === 'tracking_update' && message.mode === 'detection_processing') {
+        this.handleDetectionResults(message);
+      }
+    };
+  }
+
+  handleDetectionResults(payload) {
+    const { cameras, person_count_per_camera } = payload;
+    
+    Object.entries(cameras).forEach(([cameraId, data]) => {
+      // Display frame with detection bounding boxes
+      if (data.frame_image_base64) {
+        document.getElementById(`camera-${cameraId}`).src = data.frame_image_base64;
+      }
+      
+      // Update person count
+      document.getElementById(`count-${cameraId}`).textContent = 
+        person_count_per_camera[cameraId] || 0;
+      
+      // Draw detection bounding boxes (no tracking IDs)
+      data.tracks?.forEach(detection => {
+        this.drawDetectionBox(cameraId, detection);
+      });
+      
+      // Show detection statistics
+      console.log(`Detections in ${cameraId}: ${data.detection_count}`);
+    });
+  }
+
+  drawDetectionBox(cameraId, detection) {
+    const canvas = document.getElementById(`canvas-${cameraId}`);
+    const ctx = canvas.getContext('2d');
+    
+    const [x1, y1, x2, y2] = detection.bbox_xyxy;
+    const confidence = detection.confidence;
+    
+    // Draw bounding box
+    ctx.strokeStyle = confidence > 0.8 ? 'green' : 'orange';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    
+    // Draw confidence score
+    ctx.fillStyle = 'white';
+    ctx.fillRect(x1, y1 - 25, 80, 20);
+    ctx.fillStyle = 'black';
+    ctx.font = '12px Arial';
+    ctx.fillText(`${(confidence * 100).toFixed(1)}%`, x1 + 5, y1 - 8);
+  }
+}
+
+// Usage
+const detectionClient = new DetectionClient();
+await detectionClient.startDetectionProcessing('campus');
+```
+
+### Detection Environment Response
+
+```javascript
+// GET /api/v1/detection-processing-tasks/environments
+{
+  "status": "success",
+  "data": {
+    "environments": [
+      {
+        "environment_id": "campus",
+        "name": "Campus Environment (RT-DETR Detection)",
+        "description": "RT-DETR detection environment with 4 cameras and 120 video segments",
+        "camera_count": 4,
+        "cameras": ["c09", "c12", "c13", "c16"],
+        "available": true,
+        "total_sub_videos": 120,
+        "mode": "detection_processing",
+        "detection_features": {
+          "model": "RT-DETR-l",
+          "person_detection": true,
+          "confidence_threshold": 0.5,
+          "real_time_processing": true
+        }
+      }
+    ],
+    "total_count": 1,
+    "detection_capabilities": {
+      "model_type": "RT-DETR",
+      "model_variant": "rtdetr-l",
+      "supported_classes": ["person"],
+      "real_time_inference": true,
+      "confidence_threshold": 0.5,
+      "input_resolution": "640x640"
+    }
+  },
+  "timestamp": "2025-01-01T10:30:05.456Z"
+}
+```
+
+### Development Workflow with Detection
+
+1. **Detection Development**: Use RT-DETR detection to develop person detection UI
+2. **Bounding Box Testing**: Test bounding box rendering and confidence display
+3. **Performance Testing**: Measure detection performance vs raw streaming
+4. **AI Integration Testing**: Verify RT-DETR model integration before full pipeline
+5. **Production Ready**: Upgrade to full processing pipeline when ready
+
+### Detection Task Management
+
+```javascript
+// Get detection task details
+const taskDetails = await fetch(`/api/v1/detection-processing-tasks/${taskId}`)
+  .then(r => r.json());
+
+// Stop detection task if needed
+await fetch(`/api/v1/detection-processing-tasks/${taskId}/stop`, {
+  method: 'DELETE'
+});
+
+// Cleanup all tasks for an environment
+await fetch(`/api/v1/detection-processing-tasks/environment/campus/cleanup`, {
+  method: 'DELETE'
+});
+```
+
+---
+
 ## DEBUGGING - Raw Video Streaming (No AI Processing)
 
 For debugging and proof-of-concept development, the backend provides raw video streaming endpoints that bypass all AI processing. This allows frontend developers to test video playback and WebSocket communication without requiring AI models.
@@ -543,13 +808,67 @@ await rawClient.startRawStreaming('campus');
 
 ---
 
-## Production Integration
+## Processing Mode Selection Guide
 
-When ready for production, simply replace:
-- `/api/v1/raw-processing-tasks/` → `/api/v1/processing-tasks/`
-- `/ws/raw-tracking/` → `/ws/tracking/`
-- Handle `tracks` array in camera data for bounding boxes
-- Process `map_coords` for spatial tracking
+Choose the right processing mode based on your development needs:
+
+### 🚀 **Full Processing Pipeline** (`/api/v1/processing-tasks/`)
+**Best for**: Production applications, complete tracking systems
+- ✅ Person detection, tracking, re-identification, spatial mapping
+- ✅ Cross-camera person tracking with global IDs
+- ✅ Focus tracking and person details
+- ⚡ **WebSocket**: `ws://localhost:3847/ws/tracking/{taskId}`
+
+### 🎯 **RT-DETR Detection** (`/api/v1/detection-processing-tasks/`)
+**Best for**: Detection-focused applications, AI development
+- ✅ Real-time person detection with RT-DETR
+- ✅ Bounding boxes and confidence scores
+- ❌ No tracking or re-identification
+- ⚡ **WebSocket**: `ws://localhost:3847/ws/detection-tracking/{taskId}`
+
+### 🔧 **Raw Video Streaming** (`/api/v1/raw-processing-tasks/`)
+**Best for**: Frontend development, debugging, proof-of-concept
+- ✅ Video frames without AI processing
+- ❌ No detection, tracking, or AI features
+- ⚡ **WebSocket**: `ws://localhost:3847/ws/raw-tracking/{taskId}`
+
+### Development Progression Path
+
+1. **Start with Raw**: Develop UI components and video playback
+2. **Add Detection**: Integrate person detection and bounding boxes
+3. **Full Pipeline**: Add tracking, re-ID, and spatial features
+
+```javascript
+// Example: Progressive development approach
+class SpotOnProgressiveClient {
+  // Phase 1: Raw video for UI development
+  async startRawDevelopment() {
+    const task = await fetch('/api/v1/raw-processing-tasks/start', {
+      method: 'POST',
+      body: JSON.stringify({ environment_id: 'campus' })
+    }).then(r => r.json());
+    // Develop video display, controls, layout
+  }
+
+  // Phase 2: Add detection for AI features
+  async startDetectionDevelopment() {
+    const task = await fetch('/api/v1/detection-processing-tasks/start', {
+      method: 'POST',
+      body: JSON.stringify({ environment_id: 'campus' })
+    }).then(r => r.json());
+    // Add bounding boxes, person counting, confidence display
+  }
+
+  // Phase 3: Full production features
+  async startFullProduction() {
+    const task = await fetch('/api/v1/processing-tasks/start', {
+      method: 'POST',
+      body: JSON.stringify({ environment_id: 'campus' })
+    }).then(r => r.json());
+    // Add tracking, focus, cross-camera features
+  }
+}
+```
 
 ---
 

@@ -22,6 +22,7 @@ services:
     volumes:
       - ./app:/app/app  # Mount local code for development
       - ./data:/app/data  # Mount calibration and data files
+      - ./homography_data:/app/homography_data  # Mount homography calibration files
       # Remove these volume mounts for production deployment
     env_file:
       - .env

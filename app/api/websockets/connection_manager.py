@@ -343,8 +343,12 @@ class BinaryWebSocketManager:
             message_size = len(json.dumps(message).encode('utf-8'))
             logger.info(f"📏 WS DEBUG: Message size: {message_size} bytes ({message_size/1024:.1f} KB) for task_id: {task_id}")
             
-            # Handle batching
+            # Handle batching - Skip batching for tracking_update messages since they use per-camera messaging
             if self.enable_batching and message_type == MessageType.TRACKING_UPDATE:
+                # Tracking updates already use per-camera messaging to avoid oversized messages
+                # Send immediately to prevent re-batching individual camera messages
+                return await self._send_immediate_message(task_id, message)
+            elif self.enable_batching and message_type != MessageType.TRACKING_UPDATE:
                 return await self._handle_batched_message(task_id, message)
             else:
                 return await self._send_immediate_message(task_id, message)

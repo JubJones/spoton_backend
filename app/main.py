@@ -20,7 +20,9 @@ from app.api.v1.endpoints import export as export_endpoints
 from app.api.v1.endpoints import analytics as analytics_endpoints
 from app.api.v1.endpoints import auth as auth_endpoints
 from app.api.v1.endpoints import system_monitoring
+from app.api.v1.endpoints import phase5_status
 from app.api.websockets import endpoints as ws_router
+from app.api import health as health_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -152,11 +154,21 @@ app.include_router(
     tags=["V1 - System Monitoring"]
 )
 
+# Phase 5: Production Readiness Status API
+app.include_router(
+    phase5_status.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - Phase 5 Status"]
+)
+
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
+
+# Phase 5: Enhanced Health Check System
+app.include_router(health_router.router, tags=["Phase 5 - Health Checks"])
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    return {"message": f"Welcome to {settings.APP_NAME} - Version {app.version}"}
+    return {"message": f"Welcome to {settings.APP_NAME} - Version {app.version} - Phase 5 Production Ready"}
 
 @app.get("/health", tags=["Health"])
 async def health_check(request: Request):

@@ -148,13 +148,14 @@ async def start_detection_processing_task_endpoint(
     detection_service: DetectionVideoService = Depends(get_detection_video_service)
 ):
     """
-    Initiates a background task for RT-DETR detection processing on video data.
+    Initiates a background task for RT-DETR person detection processing on video data.
 
-    Phase 1 Process:
+    Simplified Detection Process:
     1. Initialize RT-DETR model and detection services
     2. Download video data for the specified environment
-    3. Process frames with person detection 
-    4. Stream detection results via WebSocket
+    3. Process frames with RT-DETR person detection
+    4. Stream detection results via WebSocket with annotated frames
+    5. Future pipeline features (tracking, re-ID, homography) are sent as static null values
 
     The process runs entirely in the background. Use the returned URLs to monitor
     status and receive real-time detection updates.
@@ -166,9 +167,9 @@ async def start_detection_processing_task_endpoint(
         task_id = await detection_service.initialize_raw_task(params.environment_id)
         logger.info(f"🆔 DETECTION API REQUEST: Task ID {task_id} created for environment {params.environment_id}")
 
-        # Add the main detection pipeline execution to background tasks
+        # Add the simplified detection pipeline to background tasks
         background_tasks.add_task(
-            detection_service.run_detection_pipeline,
+            detection_service.process_detection_task_simple,
             task_id=task_id,
             environment_id=params.environment_id
         )

@@ -278,7 +278,8 @@ class RawVideoService:
             frame_interval = 1.0 / target_fps
             
             # Get frame count for progress tracking
-            total_frames = min(data.get("frame_count", 0) for data in video_data.values() if data.get("frame_count", 0) > 0)
+            frame_counts = [data.get("frame_count", 0) for data in video_data.values() if data.get("frame_count", 0) > 0]
+            total_frames = min(frame_counts) if frame_counts else 0
             if total_frames == 0:
                 logger.warning("No frames available for streaming")
                 return False
@@ -325,33 +326,40 @@ class RawVideoService:
                     "mode": "raw_streaming"
                 }
                 
-                # Create tracking update message with raw frame data
-                tracking_message = {
-                    "type": MessageType.TRACKING_UPDATE.value,
-                    "task_id": str(task_id),
-                    "global_frame_index": frame_index,
-                    "timestamp_processed_utc": datetime.now(timezone.utc).isoformat(),
-                    "mode": "raw_streaming",
-                    "cameras": {}
-                }
+                # Send individual messages per camera to avoid oversized WebSocket messages
+                success_count = 0
+                timestamp_utc = datetime.now(timezone.utc).isoformat()
                 
-                # Add camera data with base64 encoded frames
                 for camera_id, frame in camera_frames.items():
                     # Convert frame to base64
                     frame_base64 = await frame_handler.create_frame_base64(frame, quality=85)
                     
-                    tracking_message["cameras"][camera_id] = {
-                        "frame_image_base64": frame_base64,
-                        "tracks": [],  # No tracks in raw mode
-                        "frame_width": frame.shape[1],
-                        "frame_height": frame.shape[0],
-                        "timestamp": datetime.now(timezone.utc).isoformat()
+                    # Create individual camera message
+                    camera_message = {
+                        "type": MessageType.TRACKING_UPDATE.value,
+                        "task_id": str(task_id),
+                        "camera_id": camera_id,
+                        "global_frame_index": frame_index,
+                        "timestamp_processed_utc": timestamp_utc,
+                        "mode": "raw_streaming",
+                        "camera_data": {
+                            "frame_image_base64": frame_base64,
+                            "tracks": [],  # No tracks in raw mode
+                            "frame_width": frame.shape[1],
+                            "frame_height": frame.shape[0],
+                            "timestamp": timestamp_utc
+                        }
                     }
+                    
+                    # Send individual camera message
+                    camera_success = await binary_websocket_manager.send_json_message(
+                        str(task_id), camera_message, MessageType.TRACKING_UPDATE
+                    )
+                    
+                    if camera_success:
+                        success_count += 1
                 
-                # Send tracking message
-                success = await binary_websocket_manager.send_json_message(
-                    str(task_id), tracking_message, MessageType.TRACKING_UPDATE
-                )
+                success = success_count > 0
                 
                 if success:
                     self.streaming_stats["total_frames_streamed"] += len(camera_frames)

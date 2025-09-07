@@ -886,10 +886,15 @@ async def handle_detection_client_message(task_id: str, message: Dict[str, Any])
                     "message": "RT-DETR person detection active",
                     "capabilities": [
                         "person_detection",
-                        "confidence_scoring",
+                        "confidence_scoring", 
                         "bounding_boxes",
-                        "detection_metadata"
-                    ]
+                        "detection_metadata",
+                        "frame_annotation",
+                        "base64_encoding",
+                        "realtime_streaming",
+                        "progress_tracking"
+                    ],
+                    "phase": "Phase 2: Core Detection Pipeline"
                 },
                 MessageType.STATUS_UPDATE
             )
@@ -900,20 +905,54 @@ async def handle_detection_client_message(task_id: str, message: Dict[str, Any])
             logger.info(f"Setting detection confidence threshold to {confidence} for task_id: {task_id}")
             
         elif message_type == "request_detection_stats":
-            # Send detection statistics
-            # This would integrate with DetectionVideoService for actual stats
+            # Send detection statistics (Phase 2: Enhanced stats)
+            from app.core.dependencies import get_detection_video_service
+            detection_service = get_detection_video_service()
+            stats = detection_service.get_detection_stats()
+            
             await binary_websocket_manager.send_json_message(
                 task_id,
                 {
                     "type": "detection_statistics",
                     "task_id": task_id,
+                    "phase": "Phase 2: Core Detection Pipeline",
                     "stats": {
                         "model_type": "RT-DETR-l",
                         "confidence_threshold": 0.5,
-                        "total_detections": 0,
-                        "processing_fps": 0.0,
-                        "average_detection_time": 0.0
+                        "total_frames_processed": stats.get("total_frames_processed", 0),
+                        "total_detections_found": stats.get("total_detections_found", 0),
+                        "frames_annotated": stats.get("frames_annotated", 0),
+                        "websocket_messages_sent": stats.get("websocket_messages_sent", 0),
+                        "average_detection_time_ms": stats.get("average_detection_time", 0.0),
+                        "average_annotation_time_ms": stats.get("annotation_time", 0.0),
+                        "successful_detections": stats.get("successful_detections", 0),
+                        "failed_detections": stats.get("failed_detections", 0),
+                        "detector_loaded": stats.get("detector_loaded", False)
                     }
+                },
+                MessageType.CONTROL_MESSAGE
+            )
+            
+        elif message_type == "request_frame_overlay":
+            # Phase 2: Request frame overlay capabilities
+            await binary_websocket_manager.send_json_message(
+                task_id,
+                {
+                    "type": "frame_overlay_info",
+                    "task_id": task_id,
+                    "overlay_capabilities": {
+                        "original_frame_encoding": "base64_jpeg",
+                        "annotated_frame_encoding": "base64_jpeg",
+                        "annotation_features": [
+                            "bounding_boxes",
+                            "confidence_scores",
+                            "person_labels",
+                            "detection_ids"
+                        ],
+                        "supported_qualities": [30, 50, 70, 85, 95],
+                        "default_quality": 85
+                    },
+                    "phase": "Phase 2: Core Detection Pipeline"
                 },
                 MessageType.CONTROL_MESSAGE
             )

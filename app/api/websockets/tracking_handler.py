@@ -188,34 +188,57 @@ class TrackingHandler:
         person_updates: List[Dict[str, Any]]
     ) -> bool:
         """
-        Send batch tracking updates.
+        Send batch tracking updates using per-camera messaging to avoid WebSocket size limits.
         
         Args:
             task_id: Task identifier
             person_updates: List of person update data
             
         Returns:
-            True if sent successfully
+            True if all camera messages sent successfully
         """
         try:
-            # Create batch message
-            batch_message = {
-                "type": "batch_tracking_update",
-                "task_id": task_id,
-                "update_count": len(person_updates),
-                "persons": person_updates,
-                "batch_timestamp": datetime.now(timezone.utc).isoformat()
-            }
+            # Group person updates by camera to avoid oversized WebSocket messages
+            camera_updates = {}
+            for person_update in person_updates:
+                camera_id = person_update.get("camera_id")
+                if camera_id:
+                    if camera_id not in camera_updates:
+                        camera_updates[camera_id] = []
+                    camera_updates[camera_id].append(person_update)
             
-            # Send batch
-            success = await binary_websocket_manager.send_json_message(
-                task_id, batch_message, MessageType.TRACKING_UPDATE
-            )
+            # Send individual messages per camera to avoid oversized WebSocket messages
+            all_success = True
+            total_sent = 0
+            batch_timestamp = datetime.now(timezone.utc).isoformat()
             
-            if success:
-                self.tracking_stats["total_updates_sent"] += len(person_updates)
+            for camera_id, camera_persons in camera_updates.items():
+                camera_message = {
+                    "type": "tracking_update",
+                    "task_id": task_id,
+                    "camera_id": camera_id,
+                    "update_count": len(camera_persons),
+                    "persons": camera_persons,
+                    "batch_timestamp": batch_timestamp
+                }
                 
-            return success
+                # Send individual camera message
+                camera_success = await binary_websocket_manager.send_json_message(
+                    task_id, camera_message, MessageType.TRACKING_UPDATE
+                )
+                
+                if camera_success:
+                    total_sent += len(camera_persons)
+                    logger.debug(f"Sent tracking updates for camera {camera_id}: {len(camera_persons)} persons")
+                else:
+                    all_success = False
+                    logger.warning(f"Failed to send tracking updates for camera {camera_id}")
+            
+            if all_success:
+                self.tracking_stats["total_updates_sent"] += total_sent
+                logger.debug(f"All camera tracking updates sent successfully: {total_sent} total persons")
+            
+            return all_success
             
         except Exception as e:
             logger.error(f"Error sending batch tracking updates: {e}")
