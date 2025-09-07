@@ -29,6 +29,7 @@ from app.api.websockets.connection_manager import binary_websocket_manager, Mess
 from app.api.websockets.frame_handler import frame_handler
 from app.services.homography_service import HomographyService
 from app.services.handoff_detection_service import HandoffDetectionService
+from app.services.trail_management_service import TrailManagementService
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,9 @@ class DetectionVideoService(RawVideoService):
         # Phase 4: Spatial intelligence services
         self.homography_service: Optional[HomographyService] = None
         self.handoff_service: Optional[HandoffDetectionService] = None
+        
+        # Trail management service for 2D mapping feature
+        self.trail_service = TrailManagementService(trail_length=3)
         
         # Detection statistics (enhanced for Phase 2)
         self.detection_stats = {
@@ -116,6 +120,9 @@ class DetectionVideoService(RawVideoService):
             
             logger.info(f"🗺️ SPATIAL INTELLIGENCE: Homography matrices loaded: {homography_validation}")
             logger.info(f"🗺️ SPATIAL INTELLIGENCE: Handoff configuration valid: {all(handoff_validation.values())}")
+            
+            # Start trail cleanup background task
+            await self._start_trail_cleanup_task()
             
             logger.info("✅ DETECTION SERVICE INIT: Detection and spatial intelligence services initialized successfully")
             return True
@@ -466,11 +473,30 @@ class DetectionVideoService(RawVideoService):
             if self.homography_service:
                 homography_data = self.homography_service.get_homography_data(camera_id)
             
-            # Phase 4: Prepare mapping coordinates data
+            # Phase 4: Prepare mapping coordinates data WITH TRAILS
             mapping_coordinates = []
             if "detections" in detection_data:
                 for detection in detection_data["detections"]:
                     if "map_coords" in detection and (detection["map_coords"]["map_x"] != 0 or detection["map_coords"]["map_y"] != 0):
+                        # UPDATE TRAIL for this detection
+                        trail = await self.trail_service.update_trail(
+                            camera_id=camera_id,
+                            detection_id=detection["detection_id"],
+                            map_x=detection["map_coords"]["map_x"],
+                            map_y=detection["map_coords"]["map_y"]
+                        )
+                        
+                        # Convert trail to frontend format
+                        trail_data = [
+                            {
+                                "x": point.map_x,
+                                "y": point.map_y,
+                                "frame_offset": point.frame_offset,
+                                "timestamp": point.timestamp.isoformat()
+                            }
+                            for point in trail[:3]  # Last 3 positions
+                        ]
+                        
                         # Extract foot point used for projection
                         foot_point = {
                             "image_x": detection["bbox"]["center_x"],
@@ -483,7 +509,8 @@ class DetectionVideoService(RawVideoService):
                             "map_y": detection["map_coords"]["map_y"],
                             "projection_successful": True,
                             "foot_point": foot_point,
-                            "coordinate_system": detection.get("spatial_data", {}).get("coordinate_system", "bev_map_meters")
+                            "coordinate_system": detection.get("spatial_data", {}).get("coordinate_system", "bev_map_meters"),
+                            "trail": trail_data  # NEW: Trail data added
                         }
                         mapping_coordinates.append(coord_data)
             
@@ -769,6 +796,21 @@ class DetectionVideoService(RawVideoService):
         except Exception as e:
             logger.error(f"Error updating detection stats: {e}")
     
+    async def _start_trail_cleanup_task(self):
+        """Start background task for trail cleanup to prevent memory leaks."""
+        async def cleanup_loop():
+            """Background cleanup loop for trail management."""
+            while True:
+                try:
+                    await self.trail_service.cleanup_old_trails(max_age_seconds=30)
+                    await asyncio.sleep(10)  # Cleanup every 10 seconds
+                except Exception as e:
+                    logger.warning(f"Trail cleanup error: {e}")
+                    await asyncio.sleep(30)  # Longer sleep on error
+        
+        asyncio.create_task(cleanup_loop())
+        logger.info("🧹 TRAIL CLEANUP: Background cleanup task started")
+    
     def get_detection_stats(self) -> Dict[str, Any]:
         """Get detection statistics with Phase 4 spatial intelligence status."""
         stats = dict(self.detection_stats)
@@ -782,6 +824,12 @@ class DetectionVideoService(RawVideoService):
                 "handoff_service_loaded": self.handoff_service is not None,
                 "homography_matrices_count": len(self.homography_service._homography_matrices) if self.homography_service else 0,
                 "handoff_configuration_valid": all(self.handoff_service.validate_configuration().values()) if self.handoff_service else False
+            },
+            # Trail management statistics for 2D mapping
+            "trail_management": {
+                "service_loaded": self.trail_service is not None,
+                "total_cameras": len(self.trail_service.trails) if self.trail_service else 0,
+                "total_active_trails": sum(len(camera_trails) for camera_trails in self.trail_service.trails.values()) if self.trail_service else 0
             }
         })
         return stats
