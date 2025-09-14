@@ -106,7 +106,8 @@ async def health_check(request: Request):
     tracker_factory_state = getattr(request.app.state, 'tracker_factory', None)
     homography_service_state = getattr(request.app.state, 'homography_service', None)
 
-    detector_ready = detector_state and detector_state._model_loaded_flag
+    # Detector is initialized per task (RT-DETR). Do not require preload for health.
+    detector_ready = True
     tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
     homography_ready = homography_service_state and homography_service_state._preloaded
 
