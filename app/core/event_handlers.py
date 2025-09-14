@@ -3,7 +3,6 @@ from fastapi import FastAPI
 import torch # For device selection
 
 from app.core.config import settings # For passing to services
-from app.models.detectors import FasterRCNNDetector
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.homography_service import HomographyService
 from app.services.environment_configuration_service import initialize_environment_configuration_service
@@ -55,21 +54,9 @@ async def on_startup(app: FastAPI):
         logger.warning(f"Defaulting to CPU due to error in device selection.")
 
 
-    # 2. Initialize and Preload Detector
-    logger.info("Initializing and preloading detector model...")
-    try:
-        detector = FasterRCNNDetector() # __init__ uses settings
-        # FasterRCNNDetector's load_model will use its internally determined device or one passed
-        # For consistency, ensure it uses the app.state.compute_device if possible
-        # detector.device = app.state.compute_device # If detector's __init__ doesn't already set this
-        await detector.load_model()
-        await detector.warmup() # Warm up the detector
-        app.state.detector = detector # Store instance
-        logger.info("Detector model preloaded and warmed up successfully.")
-    except Exception as e:
-        logger.error(f"CRITICAL: Failed to preload detector model: {e}", exc_info=True)
-        # Potentially raise to prevent app startup if detector is critical
-        app.state.detector = None # Mark as not loaded
+    # 2. Skip legacy detector preload (Faster R-CNN). RT-DETR is initialized per detection task.
+    logger.info("Skipping legacy Faster R-CNN preload; RT-DETR loads within detection pipeline.")
+    app.state.detector = None
 
 
     # 3. Initialize CameraTrackerFactory and Preload Prototype Tracker
