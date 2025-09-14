@@ -1,5 +1,1 @@
-"""
-Interaction Domain
-
-Handles user control, focus tracking, and interactive features.
-"""
+# Interaction domain module

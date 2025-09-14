@@ -25,7 +25,6 @@ from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
 from app.services.homography_service import HomographyService
 
 from app.models.base_models import AbstractDetector
-from app.domains.export.services import ExportService, DataSerializationService, ReportGeneratorService
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.infrastructure.cache.redis_client import RedisClient
 from app.services.analytics_engine import AnalyticsEngine
@@ -212,40 +211,6 @@ def get_analytics_service() -> AnalyticsEngine:
     except Exception as e:
         logger.warning(f"Failed to create AnalyticsEngine, using mock: {e}")
         return MockAnalyticsEngine()
-
-@lru_cache()
-def get_data_serialization_service() -> DataSerializationService:
-    """Dependency provider for DataSerializationService."""
-    return DataSerializationService()
-
-@lru_cache()
-def get_report_generator_service() -> ReportGeneratorService:
-    """Dependency provider for ReportGeneratorService."""
-    return ReportGeneratorService()
-
-@lru_cache()
-def get_export_service(
-    tracking_repository: TrackingRepository = Depends(get_tracking_repository),
-    redis_client: RedisClient = Depends(get_redis_client),
-    analytics_service: AnalyticsEngine = Depends(get_analytics_service),
-    data_serialization_service: DataSerializationService = Depends(get_data_serialization_service),
-    report_generator_service: ReportGeneratorService = Depends(get_report_generator_service)
-) -> ExportService:
-    """Dependency provider for ExportService."""
-    try:
-        return ExportService(
-            tracking_repository=tracking_repository,
-            redis_client=redis_client,
-            analytics_service=analytics_service,
-            data_serialization_service=data_serialization_service,
-            report_generator_service=report_generator_service
-        )
-    except Exception as e:
-        logger.error(f"Failed to create ExportService: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Export service temporarily unavailable"
-        )
 
 
 @lru_cache()

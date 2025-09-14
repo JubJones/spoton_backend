@@ -178,7 +178,7 @@ async def start_detection_processing_task_endpoint(
 
         # Construct response URLs relative to the API prefix
         status_url = f"{settings.API_V1_PREFIX}/detection-processing-tasks/{task_id}/status"
-        websocket_url = f"/ws/detection-tracking/{task_id}"
+        websocket_url = f"/ws/tracking/{task_id}"
 
         return schemas.ProcessingTaskCreateResponse(
             task_id=task_id,

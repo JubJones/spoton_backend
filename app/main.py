@@ -8,19 +8,9 @@ from typing import Callable # For ASGIApp type hint
 from app.core.config import settings
 from app.core import event_handlers
 from app.core.security_config import configure_security_middleware, get_cors_config
-from app.api.v1.endpoints import processing_tasks
-from app.api.v1.endpoints import raw_processing_tasks
 from app.api.v1.endpoints import detection_processing_tasks
-from app.api.v1.endpoints import media as media_endpoints
-from app.api.v1.endpoints import focus_tracking
-from app.api.v1.endpoints import playback_controls
 from app.api.v1.endpoints import environments
-from app.api.v1.endpoints import data_ingestion
-from app.api.v1.endpoints import export as export_endpoints
 from app.api.v1.endpoints import analytics as analytics_endpoints
-from app.api.v1.endpoints import auth as auth_endpoints
-from app.api.v1.endpoints import system_monitoring
-from app.api.v1.endpoints import phase5_status
 from app.api.websockets import endpoints as ws_router
 from app.api import health as health_router
 
@@ -86,34 +76,9 @@ app.add_middleware(CORSMiddleware, **cors_config)
 
 api_v1_router_prefix = settings.API_V1_PREFIX
 app.include_router(
-    processing_tasks.router,
-    prefix=f"{api_v1_router_prefix}/processing-tasks",
-    tags=["V1 - Processing Tasks"]
-)
-app.include_router(
-    raw_processing_tasks.router,
-    prefix=f"{api_v1_router_prefix}/raw-processing-tasks",
-    tags=["V1 - Raw Processing Tasks (Debug)"]
-)
-app.include_router(
     detection_processing_tasks.router,
     prefix=f"{api_v1_router_prefix}/detection-processing-tasks",
     tags=["V1 - RT-DETR Detection Tasks (Phase 1)"]
-)
-app.include_router(
-    media_endpoints.router,
-    prefix=f"{api_v1_router_prefix}/media",
-    tags=["V1 - Media Content"]
-)
-app.include_router(
-    focus_tracking.router,
-    prefix=f"{api_v1_router_prefix}",
-    tags=["V1 - Focus Tracking"]
-)
-app.include_router(
-    playback_controls.router,
-    prefix=f"{api_v1_router_prefix}",
-    tags=["V1 - Playback Controls"]
 )
 app.include_router(
     environments.router,
@@ -121,54 +86,19 @@ app.include_router(
     tags=["V1 - Environment Management"]
 )
 app.include_router(
-    data_ingestion.router,
-    prefix=f"{api_v1_router_prefix}/data-ingestion",
-    tags=["V1 - Data Ingestion"]
-)
-# Conditionally include routers based on configuration
-if settings.ENABLE_EXPORT_ENDPOINTS:
-    app.include_router(
-        export_endpoints.router,
-        prefix=f"{api_v1_router_prefix}",
-        tags=["V1 - Data Export"]
-    )
-
-if settings.ENABLE_ANALYTICS_ENDPOINTS:
-    app.include_router(
-        analytics_endpoints.router,
-        prefix=f"{api_v1_router_prefix}/analytics",
-        tags=["V1 - Analytics"]
-    )
-
-if settings.ENABLE_AUTH_ENDPOINTS:
-    app.include_router(
-        auth_endpoints.router,
-        prefix=f"{api_v1_router_prefix}/auth",
-        tags=["V1 - Authentication"]
-    )
-
-# System monitoring is always enabled for operational visibility
-app.include_router(
-    system_monitoring.router,
-    prefix=f"{api_v1_router_prefix}",
-    tags=["V1 - System Monitoring"]
-)
-
-# Phase 5: Production Readiness Status API
-app.include_router(
-    phase5_status.router,
-    prefix=f"{api_v1_router_prefix}",
-    tags=["V1 - Phase 5 Status"]
+    analytics_endpoints.router,
+    prefix=f"{api_v1_router_prefix}/analytics",
+    tags=["V1 - Analytics"]
 )
 
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
 
-# Phase 5: Enhanced Health Check System
-app.include_router(health_router.router, tags=["Phase 5 - Health Checks"])
+# Health Check System
+app.include_router(health_router.router, tags=["Health Checks"])
 
 @app.get("/", tags=["Root"])
 async def read_root():
-    return {"message": f"Welcome to {settings.APP_NAME} - Version {app.version} - Phase 5 Production Ready"}
+    return {"message": f"Welcome to {settings.APP_NAME} - Version {app.version}"}
 
 @app.get("/health", tags=["Health"])
 async def health_check(request: Request):

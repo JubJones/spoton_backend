@@ -22,7 +22,6 @@ from fastapi.responses import JSONResponse
 from app.utils.memory_manager import memory_manager
 from app.utils.error_handler import production_error_handler
 from app.utils.metrics_collector import production_metrics_collector
-from app.services.batch_optimization_service import batch_optimization_service
 
 # Core dependencies
 from app.core.config import settings
@@ -414,40 +413,18 @@ class HealthChecker:
         )
     
     async def _check_batch_optimization(self) -> HealthStatus:
-        """Check Phase 5 batch optimization service."""
+        """Check batch optimization service (stub)."""
         start_time = time.time()
-        try:
-            batch_metrics = batch_optimization_service.get_performance_metrics()
-            
-            current_batch_size = batch_metrics.get("batch_processing", {}).get("current_batch_size", 0)
-            throughput = batch_metrics.get("batch_processing", {}).get("throughput_fps", 0)
-            efficiency = batch_metrics.get("system_utilization", {}).get("current_efficiency", 0)
-            
-            if efficiency > 0.7:
-                status = "healthy"
-                message = f"Batch optimization active - {throughput:.1f} FPS, {efficiency:.1%} efficiency"
-            elif efficiency > 0.4:
-                status = "degraded"
-                message = f"Batch optimization suboptimal - {efficiency:.1%} efficiency"
-            else:
-                status = "unhealthy"
-                message = f"Batch optimization inefficient - {efficiency:.1%} efficiency"
-            
-            details = {
-                "current_batch_size": current_batch_size,
-                "throughput_fps": throughput,
-                "efficiency": efficiency,
-                "total_batches_processed": batch_metrics.get("batch_processing", {}).get("total_batches_processed", 0),
-                "performance_trend": batch_metrics.get("performance_optimization", {}).get("performance_trend", "unknown")
-            }
-            
-        except Exception as e:
-            status = "unhealthy"
-            message = f"Batch optimization check failed: {str(e)}"
-            details = {"error": str(e)}
-        
+        status = "healthy"
+        message = "Batch optimization not enabled"
+        details = {
+            "current_batch_size": 0,
+            "throughput_fps": 0,
+            "efficiency": 1.0
+        }
+
         response_time = (time.time() - start_time) * 1000
-        
+
         return HealthStatus(
             service="batch_optimization",
             status=status,
