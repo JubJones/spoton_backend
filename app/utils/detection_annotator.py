@@ -108,10 +108,8 @@ class DetectionAnnotator:
         # Draw bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), self.style.box_color, self.style.box_thickness)
         
-        # Draw confidence label
-        label = f"{class_name}: {confidence:.2f}"
-        if detection_id and detection_id != f"det_{detection_idx:03d}":
-            label = f"{detection_id} | {label}"
+        # Draw confidence label as "<id>: <conf>"
+        label = f"{detection_id}: {confidence:.2f}"
         
         self._draw_label(frame, label, x1, y1)
     

@@ -370,6 +370,7 @@ class HomographyService:
             
             # Extract transformed coordinates
             map_x, map_y = transformed[0, 0]
+            logger.debug(f"Homography projection for camera {camera_id}: image_point={image_point} -> map=({map_x:.4f}, {map_y:.4f})")
             
             # Validate transformed coordinates
             if np.isfinite(map_x) and np.isfinite(map_y):
@@ -407,3 +408,45 @@ class HomographyService:
             data["calibration_points"] = self.calibration_points[camera_id]
         
         return data
+
+    # ====== Phase 4: Coordinate Validation & Bounds Helpers ======
+    def get_map_bounds(self, camera_id: str) -> Optional[Tuple[float, float, float, float]]:
+        """
+        Compute expected map bounds from calibration points for a camera.
+        Returns (min_x, max_x, min_y, max_y) or None if unavailable.
+        """
+        try:
+            if camera_id not in self.calibration_points:
+                return None
+            map_points = self.calibration_points[camera_id].get("map_points")
+            if not map_points:
+                return None
+            arr = np.array(map_points, dtype=np.float64)
+            min_x = float(np.min(arr[:, 0]))
+            max_x = float(np.max(arr[:, 0]))
+            min_y = float(np.min(arr[:, 1]))
+            max_y = float(np.max(arr[:, 1]))
+            # Add 10% padding
+            pad_x = max(1.0, 0.1 * max(abs(min_x), abs(max_x)))
+            pad_y = max(1.0, 0.1 * max(abs(min_y), abs(max_y)))
+            return (min_x - pad_x, max_x + pad_x, min_y - pad_y, max_y + pad_y)
+        except Exception as e:
+            logger.debug(f"Failed computing map bounds for {camera_id}: {e}")
+            return None
+
+    def validate_map_coordinate(self, camera_id: str, map_x: float, map_y: float) -> bool:
+        """
+        Validate that map coordinate is finite and within reasonable bounds for the camera.
+        Allows (0,0) as valid if within computed bounds or when no bounds are available.
+        """
+        try:
+            if not (np.isfinite(map_x) and np.isfinite(map_y)):
+                return False
+            bounds = self.get_map_bounds(camera_id)
+            if bounds is None:
+                # Fallback permissive bounds to avoid false negatives; values in meters
+                return abs(map_x) <= 10000 and abs(map_y) <= 10000
+            min_x, max_x, min_y, max_y = bounds
+            return (min_x <= map_x <= max_x) and (min_y <= map_y <= max_y)
+        except Exception:
+            return False

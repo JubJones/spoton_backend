@@ -174,36 +174,24 @@ class DetectionVideoService(RawVideoService):
                 
                 # Phase 4: Apply spatial intelligence
                 map_coords = {"map_x": 0, "map_y": 0}  # Default fallback
+                projection_success = False
                 handoff_triggered = False
                 candidate_cameras = []
                 
-                # Homography coordinate transformation
+                # Homography coordinate transformation (Unified Phase 4 system only)
                 if self.homography_service:
                     # Use foot point (bottom center of bounding box) for mapping
                     foot_point = (bbox_dict["center_x"], bbox_dict["y2"])
-                    
-                    # Try Phase 4 JSON-based projection first
                     projected_coords = self.homography_service.project_to_map(camera_id, foot_point)
                     if projected_coords:
-                        map_coords = {"map_x": projected_coords[0], "map_y": projected_coords[1]}
-                    else:
-                        # Fallback to existing preload system
-                        env_id = self._get_environment_for_camera(camera_id)
-                        if env_id:
-                            from app.shared.types import CameraID
-                            matrix = self.homography_service.get_homography_matrix(env_id, CameraID(camera_id))
-                            if matrix is not None:
-                                # Apply transformation using existing method
-                                try:
-                                    import cv2
-                                    point = np.array([[foot_point[0], foot_point[1]]], dtype=np.float32)
-                                    point = point.reshape(-1, 1, 2)
-                                    transformed = cv2.perspectiveTransform(point, matrix)
-                                    map_x, map_y = transformed[0, 0]
-                                    if np.isfinite(map_x) and np.isfinite(map_y):
-                                        map_coords = {"map_x": float(map_x), "map_y": float(map_y)}
-                                except Exception as homography_error:
-                                    logger.debug(f"Homography transformation failed: {homography_error}")
+                        candidate_map_x, candidate_map_y = projected_coords
+                        # Validate coordinates including allowing (0,0) if within bounds
+                        if self.homography_service.validate_map_coordinate(camera_id, candidate_map_x, candidate_map_y):
+                            map_coords = {"map_x": candidate_map_x, "map_y": candidate_map_y}
+                            projection_success = True
+                            logger.debug(f"Map coords accepted for {camera_id}: ({candidate_map_x:.4f}, {candidate_map_y:.4f})")
+                        else:
+                            logger.debug(f"Projected coords out of bounds for {camera_id}: ({candidate_map_x}, {candidate_map_y})")
                 
                 # Handoff detection
                 if self.handoff_service:
@@ -225,7 +213,8 @@ class DetectionVideoService(RawVideoService):
                     "spatial_data": {
                         "handoff_triggered": handoff_triggered,
                         "candidate_cameras": candidate_cameras,
-                        "coordinate_system": "bev_map_meters" if map_coords["map_x"] != 0 or map_coords["map_y"] != 0 else None
+                        "coordinate_system": "bev_map_meters" if projection_success else None,
+                        "projection_successful": projection_success
                     }
                 }
                 
@@ -477,18 +466,29 @@ class DetectionVideoService(RawVideoService):
             mapping_coordinates = []
             if "detections" in detection_data:
                 for detection in detection_data["detections"]:
-                    if "map_coords" in detection and (detection["map_coords"]["map_x"] != 0 or detection["map_coords"]["map_y"] != 0):
+                    # Accept valid coordinates, including (0,0). Validate bounds if possible.
+                    if "map_coords" in detection:
+                        mx = detection["map_coords"].get("map_x")
+                        my = detection["map_coords"].get("map_y")
+                        is_valid = (
+                            mx is not None and my is not None and
+                            (self.homography_service.validate_map_coordinate(camera_id, mx, my) if self.homography_service else True)
+                        )
+                        if not is_valid:
+                            logger.debug(f"Skipping invalid map_coords for {camera_id}: ({mx}, {my})")
+                            continue
                         # UPDATE TRAIL for this detection
                         trail = await self.trail_service.update_trail(
                             camera_id=camera_id,
                             detection_id=detection["detection_id"],
-                            map_x=detection["map_coords"]["map_x"],
-                            map_y=detection["map_coords"]["map_y"]
+                            map_x=mx,
+                            map_y=my
                         )
                         
                         # Convert trail to frontend format
                         trail_data = [
                             {
+                                # Keep frontend-facing fields 'x'/'y' as per workflow frontend
                                 "x": point.map_x,
                                 "y": point.map_y,
                                 "frame_offset": point.frame_offset,
@@ -505,8 +505,8 @@ class DetectionVideoService(RawVideoService):
                         
                         coord_data = {
                             "detection_id": detection["detection_id"],
-                            "map_x": detection["map_coords"]["map_x"],
-                            "map_y": detection["map_coords"]["map_y"],
+                            "map_x": mx,
+                            "map_y": my,
                             "projection_successful": True,
                             "foot_point": foot_point,
                             "coordinate_system": detection.get("spatial_data", {}).get("coordinate_system", "bev_map_meters"),
