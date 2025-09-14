@@ -163,6 +163,17 @@ async def start_detection_processing_task_endpoint(
     try:
         logger.info(f"🎬 DETECTION API REQUEST: Start detection processing task endpoint called for environment: {params.environment_id}")
         
+        # Apply per-request feature flags (backward compatible: only override if provided)
+        original_tracking = getattr(settings, 'TRACKING_ENABLED', True)
+        original_reid = getattr(settings, 'REID_ENABLED', True)
+        try:
+            if params.enable_tracking is not None:
+                settings.TRACKING_ENABLED = bool(params.enable_tracking)
+            if params.enable_reid is not None:
+                settings.REID_ENABLED = bool(params.enable_reid)
+        except Exception:
+            pass
+
         # Initialize task state in the detection service
         task_id = await detection_service.initialize_raw_task(params.environment_id)
         logger.info(f"🆔 DETECTION API REQUEST: Task ID {task_id} created for environment {params.environment_id}")
@@ -180,12 +191,19 @@ async def start_detection_processing_task_endpoint(
         status_url = f"{settings.API_V1_PREFIX}/detection-processing-tasks/{task_id}/status"
         websocket_url = f"/ws/tracking/{task_id}"
 
-        return schemas.ProcessingTaskCreateResponse(
+        response = schemas.ProcessingTaskCreateResponse(
             task_id=task_id,
             message=f"RT-DETR detection processing task for environment '{params.environment_id}' initiated.",
             status_url=status_url,
             websocket_url=websocket_url
         )
+        # Restore global settings to avoid affecting other requests
+        try:
+            settings.TRACKING_ENABLED = original_tracking
+            settings.REID_ENABLED = original_reid
+        except Exception:
+            pass
+        return response
     except ValueError as ve:
         logger.warning(f"Value error starting detection task for environment {params.environment_id}: {ve}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(ve))

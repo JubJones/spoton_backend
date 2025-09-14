@@ -10,6 +10,7 @@ import numpy as np
 import base64
 import logging
 from typing import List, Dict, Tuple, Optional
+import hashlib
 from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class DetectionAnnotator:
         
         logger.info("DetectionAnnotator initialized for Phase 2 detection pipeline")
     
-    def annotate_frame(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
+    def annotate_frame(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None) -> np.ndarray:
         """
         Annotate frame with detection bounding boxes and confidence scores.
         
@@ -62,16 +63,24 @@ class DetectionAnnotator:
         try:
             annotated_frame = frame.copy()
             
-            if not detections:
+            if detections:
+                for i, detection in enumerate(detections):
+                    try:
+                        self._draw_detection_box(annotated_frame, detection, i)
+                    except Exception as e:
+                        logger.warning(f"Error annotating detection {i}: {e}")
+                        continue
+            else:
                 logger.debug("No detections to annotate")
-                return annotated_frame
             
-            for i, detection in enumerate(detections):
-                try:
-                    self._draw_detection_box(annotated_frame, detection, i)
-                except Exception as e:
-                    logger.warning(f"Error annotating detection {i}: {e}")
-                    continue
+            # Draw tracks on top (if provided), using global-ID based colors
+            if tracks:
+                for t in tracks:
+                    try:
+                        self._draw_track_box(annotated_frame, t)
+                    except Exception as e:
+                        logger.warning(f"Error annotating track {t.get('track_id')}: {e}")
+                        continue
             
             logger.debug(f"Annotated frame with {len(detections)} detections")
             return annotated_frame
@@ -105,13 +114,64 @@ class DetectionAnnotator:
         x2 = max(x1 + 1, min(x2, w))
         y2 = max(y1 + 1, min(y2, h))
         
-        # Draw bounding box
+        # Draw bounding box (default green for plain detections)
         cv2.rectangle(frame, (x1, y1), (x2, y2), self.style.box_color, self.style.box_thickness)
         
-        # Draw confidence label as "<id>: <conf>"
-        label = f"{detection_id}: {confidence:.2f}"
-        
+        # Compose label safely (avoid empty 'ID:' bug)
+        id_text = detection_id if detection_id else f"det_{detection_idx:03d}"
+        label = f"{id_text}: {confidence:.2f}"
         self._draw_label(frame, label, x1, y1)
+
+    def _draw_track_box(self, frame: np.ndarray, track: Dict):
+        """Draw track bounding box, using non-default color if global_id is present, consistent across cameras."""
+        bbox = track.get("bbox_xyxy", None)
+        if not bbox or len(bbox) < 4:
+            return
+        x1 = int(bbox[0]); y1 = int(bbox[1]); x2 = int(bbox[2]); y2 = int(bbox[3])
+        if x2 <= x1 or y2 <= y1:
+            return
+        h, w = frame.shape[:2]
+        x1 = max(0, min(x1, w - 1)); y1 = max(0, min(y1, h - 1))
+        x2 = max(x1 + 1, min(x2, w)); y2 = max(y1 + 1, min(y2, h))
+
+        # Choose color: default green; if global_id present, choose deterministic non-green color
+        color = self.style.box_color
+        global_id = track.get("global_id")
+        if global_id:
+            color = self._color_for_global_id(global_id)
+
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(2, self.style.box_thickness))
+
+        # Prepare label: prefer global_id, else track_id; never leave empty
+        track_id = track.get("track_id")
+        label_id = None
+        if isinstance(global_id, str) and global_id.strip():
+            label_id = f"ID:{global_id}"
+        elif track_id is not None:
+            label_id = f"T:{track_id}"
+        else:
+            label_id = "person"
+
+        conf = track.get("confidence")
+        label = f"{label_id}{(f' {conf:.2f}' if isinstance(conf, (int, float)) else '')}"
+        self._draw_label_with_color(frame, label, x1, y1, color)
+
+    def _color_for_global_id(self, global_id: str) -> Tuple[int, int, int]:
+        """Map a global_id to a consistent non-green BGR color."""
+        # Distinct, bright colors (BGR), excluding default green
+        palette: List[Tuple[int, int, int]] = [
+            (255, 0, 0),    # Blue
+            (0, 0, 255),    # Red
+            (0, 255, 255),  # Yellow
+            (255, 0, 255),  # Magenta
+            (255, 255, 0),  # Cyan
+            (128, 0, 255),  # Purple
+            (0, 128, 255),  # Orange-ish
+            (255, 128, 0),  # Teal-ish
+        ]
+        digest = hashlib.md5(global_id.encode("utf-8")).hexdigest()
+        idx = int(digest[:8], 16) % len(palette)
+        return palette[idx]
     
     def _draw_label(self, frame: np.ndarray, label: str, x: int, y: int):
         """Draw text label with background rectangle."""
@@ -135,6 +195,26 @@ class DetectionAnnotator:
         )
         
         # Draw label text
+        cv2.putText(
+            frame, label, (label_x, label_y - 5),
+            self.font, self.style.font_scale, self.style.text_color, self.style.font_thickness
+        )
+
+    def _draw_label_with_color(self, frame: np.ndarray, label: str, x: int, y: int, color: Tuple[int, int, int]):
+        """Draw text label with a specific background color."""
+        label_size, baseline = cv2.getTextSize(
+            label, self.font, self.style.font_scale, self.style.font_thickness
+        )
+        h, w = frame.shape[:2]
+        label_y = max(label_size[1] + self.style.label_padding, y)
+        label_x = min(x, w - label_size[0])
+        cv2.rectangle(
+            frame,
+            (label_x, label_y - label_size[1] - self.style.label_padding),
+            (label_x + label_size[0], label_y + baseline),
+            color,
+            -1
+        )
         cv2.putText(
             frame, label, (label_x, label_y - 5),
             self.font, self.style.font_scale, self.style.text_color, self.style.font_thickness
@@ -177,7 +257,7 @@ class DetectionAnnotator:
             logger.error(f"Error encoding frame to base64: {e}")
             return ""
     
-    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict]) -> Dict[str, str]:
+    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None) -> Dict[str, str]:
         """
         Create both original and annotated frame encodings for WebSocket streaming.
         
@@ -193,7 +273,7 @@ class DetectionAnnotator:
             original_b64 = self.frame_to_base64(frame)
             
             # Create and encode annotated frame
-            annotated_frame = self.annotate_frame(frame, detections)
+            annotated_frame = self.annotate_frame(frame, detections, tracks)
             annotated_b64 = self.frame_to_base64(annotated_frame)
             
             return {
