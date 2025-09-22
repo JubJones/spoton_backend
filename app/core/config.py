@@ -86,6 +86,12 @@ class Settings(BaseSettings):
     
     # RT-DETR Configuration (Phase 1)
     RTDETR_MODEL_PATH: str = "weights/rtdetr-l.pt"
+    # Optional per-environment model overrides. If provided and file exists,
+    # detection will use these weights for the corresponding environment.
+    RTDETR_MODEL_PATH_CAMPUS: Optional[str] = None
+    RTDETR_MODEL_PATH_FACTORY: Optional[str] = None
+    # Optional external weights directory (e.g., sibling repo with weights)
+    EXTERNAL_WEIGHTS_BASE_DIR: Optional[str] = None
     RTDETR_CONFIDENCE_THRESHOLD: float = 0.5
     RTDETR_NMS_THRESHOLD: float = 0.45
     RTDETR_INPUT_SIZE: int = 640

@@ -1,2 +1,3 @@
+"campus.pt", "factory.pt": https://drive.google.com/drive/folders/1l07VJeQ_1B3E3aoGs3zox1XsbjGUxLtt?hl=th
 "clip_market1501.pt": "https://drive.google.com/uc?id=1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7",
 named as clip_market1501.pt

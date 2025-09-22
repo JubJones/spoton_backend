@@ -53,6 +53,10 @@ class DetectionVideoService(RawVideoService):
         
         # RT-DETR detector instance (Phase 1)
         self.detector: Optional[RTDETRDetector] = None
+        # Maintain detectors by environment to support separate weights
+        self.detectors_by_env: Dict[str, RTDETRDetector] = {}
+        # Track the resolved weights per environment for logging/debug
+        self.detector_weights_by_env: Dict[str, str] = {}
         
         # Phase 2: Detection annotator for bounding box visualization
         self.annotator = DetectionAnnotator()
@@ -123,18 +127,25 @@ class DetectionVideoService(RawVideoService):
                 logger.error("❌ DETECTION SERVICE INIT: Failed to initialize parent video services")
                 return False
             
-            # Initialize RT-DETR detector
-            logger.info("🧠 DETECTION SERVICE INIT: Loading RT-DETR model...")
-            self.detector = RTDETRDetector(
-                model_name=settings.RTDETR_MODEL_PATH.split("/")[-1],  # Extract filename
-                confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
-            )
-            
-            # Load model
-            await self.detector.load_model()
-            
-            # Warm up model for better performance
-            await self.detector.warmup()
+            # Initialize RT-DETR detector for the requested environment
+            weights_path = self._resolve_rtdetr_weights_for_environment(environment_id)
+            logger.info(f"🧠 DETECTION SERVICE INIT: Loading RT-DETR model for '{environment_id}' from: {weights_path}")
+
+            if environment_id not in self.detectors_by_env:
+                detector = RTDETRDetector(
+                    model_name=weights_path,
+                    confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
+                )
+                await detector.load_model()
+                await detector.warmup()
+                self.detectors_by_env[environment_id] = detector
+                self.detector_weights_by_env[environment_id] = weights_path
+            else:
+                # If already loaded, ensure we point the default handle to it
+                logger.info(f"🧠 DETECTION SERVICE INIT: Reusing cached RT-DETR model for '{environment_id}'")
+
+            # Maintain backward-compatible single-detector reference for existing methods
+            self.detector = self.detectors_by_env.get(environment_id)
             
             # Phase 4: Initialize spatial intelligence services
             logger.info("🗺️ DETECTION SERVICE INIT: Initializing spatial intelligence services...")
@@ -169,6 +180,51 @@ class DetectionVideoService(RawVideoService):
         except Exception as e:
             logger.error(f"❌ DETECTION SERVICE INIT: Failed to initialize detection services: {e}")
             return False
+
+    def _resolve_rtdetr_weights_for_environment(self, environment_id: str) -> str:
+        """Resolve the best RT-DETR weights path for the given environment.
+
+        Resolution order per environment:
+        1) Settings override (RTDETR_MODEL_PATH_CAMPUS / RTDETR_MODEL_PATH_FACTORY)
+        2) External base dir (EXTERNAL_WEIGHTS_BASE_DIR) with '<env>.pt'
+        3) Known absolute fallback for local dev: '/Users/ksetdhavanic/Documents/PS/spoton_ml/weights/<env>.pt'
+        4) Local weights directory './weights/<env>.pt'
+        5) Global default: settings.RTDETR_MODEL_PATH
+        """
+        try:
+            import os
+            env_key = (environment_id or "").strip().lower()
+            # 1) Settings override
+            if env_key == "factory" and getattr(settings, "RTDETR_MODEL_PATH_FACTORY", None):
+                candidate = settings.RTDETR_MODEL_PATH_FACTORY
+                if os.path.isfile(candidate):
+                    return candidate
+            if env_key == "campus" and getattr(settings, "RTDETR_MODEL_PATH_CAMPUS", None):
+                candidate = settings.RTDETR_MODEL_PATH_CAMPUS
+                if os.path.isfile(candidate):
+                    return candidate
+
+            # 2) External base dir
+            if getattr(settings, "EXTERNAL_WEIGHTS_BASE_DIR", None):
+                candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.pt")
+                if os.path.isfile(candidate):
+                    return candidate
+
+            # 3) Known absolute fallback (user-provided location)
+            absolute_base = "/Users/ksetdhavanic/Documents/PS/spoton_ml/weights"
+            candidate = os.path.join(absolute_base, f"{env_key}.pt")
+            if os.path.isfile(candidate):
+                return candidate
+
+            # 4) Local weights dir
+            candidate = os.path.join("weights", f"{env_key}.pt")
+            if os.path.isfile(candidate):
+                return candidate
+
+            # 5) Global default
+            return settings.RTDETR_MODEL_PATH
+        except Exception:
+            return settings.RTDETR_MODEL_PATH
 
     # --- Core Integration Architecture Methods (scaffolding) ---
     async def initialize_tracking_services(self, environment_id: str) -> bool:
@@ -292,11 +348,14 @@ class DetectionVideoService(RawVideoService):
         detection_start = time.time()
         
         try:
-            if not self.detector:
-                raise RuntimeError("RT-DETR detector not initialized")
+            # Select detector by environment of the camera, fallback to default
+            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
+            detector = self.detectors_by_env.get(env_for_camera) or self.detector
+            if not detector:
+                raise RuntimeError("RT-DETR detector not initialized for the current environment")
             
             # Run RT-DETR detection
-            detections = await self.detector.detect(frame)
+            detections = await detector.detect(frame)
             
             # Calculate processing time
             processing_time = (time.time() - detection_start) * 1000
