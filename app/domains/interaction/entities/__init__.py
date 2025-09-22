@@ -1,1 +1,0 @@
-# Interaction entities module

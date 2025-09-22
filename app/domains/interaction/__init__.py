@@ -1,1 +1,0 @@
-# Interaction domain module

@@ -17,7 +17,7 @@ from app.core.config import Settings, VideoSetEnvironmentConfig, CameraHandoffDe
 from app.shared.types import CameraID, ExitRuleModel, QuadrantName
 
 # Import test fixtures
-from tests.fixtures.test_fixtures import *
+# Note: fixtures previously imported from tests.fixtures.test_fixtures have been removed
 
 @pytest.fixture(scope="session")
 def mock_settings_base_values() -> Dict[str, Any]:

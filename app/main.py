@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Callable # For ASGIApp type hint
 
 from app.core.config import settings
-from app.core import event_handlers
 from app.core.security_config import configure_security_middleware, get_cors_config
 from app.api.v1.endpoints import detection_processing_tasks
 from app.api.v1.endpoints import environments
@@ -49,10 +48,43 @@ async def lifespan(app_instance: FastAPI):
     Path(settings.LOCAL_FRAME_EXTRACTION_DIR).mkdir(parents=True, exist_ok=True)
     logger.info(f"Ensured local video download dir: {settings.LOCAL_VIDEO_DOWNLOAD_DIR}")
     logger.info(f"Ensured local frame extraction dir: {settings.LOCAL_FRAME_EXTRACTION_DIR}")
-    await event_handlers.on_startup(app_instance)
-    yield
-    logger.info("Application shutdown sequence initiated...")
-    await event_handlers.on_shutdown(app_instance)
+
+    # Minimal built-in startup/shutdown to replace removed event_handlers
+    try:
+        import torch
+        from app.services.camera_tracker_factory import CameraTrackerFactory
+        from app.services.homography_service import HomographyService
+        # Select compute device (CPU by default in CPU images)
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        app_instance.state.compute_device = device
+        logger.info(f"Compute device set to: {device}")
+
+        # Preload tracker factory (loads ReID model prototype)
+        tracker_factory = CameraTrackerFactory(device=device)
+        try:
+            await tracker_factory.preload_prototype_tracker()
+        except Exception as e:
+            logger.warning(f"Tracker prototype preload failed (non-fatal): {e}")
+        app_instance.state.tracker_factory = tracker_factory
+
+        # Preload homography matrices
+        homography_service = HomographyService(settings)
+        try:
+            await homography_service.preload_all_homography_matrices()
+        except Exception as e:
+            logger.warning(f"Homography preload failed (non-fatal): {e}")
+        app_instance.state.homography_service = homography_service
+
+        # Detector is initialized on-demand by services; keep None for now
+        app_instance.state.detector = None
+    except Exception as e:
+        logger.warning(f"Startup initialization encountered issues: {e}")
+
+    try:
+        yield
+    finally:
+        logger.info("Application shutdown sequence initiated...")
+        # Place for graceful shutdown/cleanup if needed
 
 app = FastAPI(
     title=settings.APP_NAME,

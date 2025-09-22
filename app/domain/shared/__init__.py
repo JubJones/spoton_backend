@@ -1,1 +1,0 @@
-# Domain shared components
