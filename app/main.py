@@ -6,10 +6,12 @@ from pathlib import Path
 from typing import Callable # For ASGIApp type hint
 
 from app.core.config import settings
-from app.core import event_handlers
-from app.api.v1.endpoints import processing_tasks
-from app.api.v1.endpoints import media as media_endpoints
-from app.api import websockets as ws_router
+from app.core.security_config import configure_security_middleware, get_cors_config
+from app.api.v1.endpoints import detection_processing_tasks
+from app.api.v1.endpoints import environments
+from app.api.v1.endpoints import analytics as analytics_endpoints
+from app.api.websockets import endpoints as ws_router
+from app.api import health as health_router
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -46,10 +48,43 @@ async def lifespan(app_instance: FastAPI):
     Path(settings.LOCAL_FRAME_EXTRACTION_DIR).mkdir(parents=True, exist_ok=True)
     logger.info(f"Ensured local video download dir: {settings.LOCAL_VIDEO_DOWNLOAD_DIR}")
     logger.info(f"Ensured local frame extraction dir: {settings.LOCAL_FRAME_EXTRACTION_DIR}")
-    await event_handlers.on_startup(app_instance)
-    yield
-    logger.info("Application shutdown sequence initiated...")
-    await event_handlers.on_shutdown(app_instance)
+
+    # Minimal built-in startup/shutdown to replace removed event_handlers
+    try:
+        import torch
+        from app.services.camera_tracker_factory import CameraTrackerFactory
+        from app.services.homography_service import HomographyService
+        # Select compute device (CPU by default in CPU images)
+        device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+        app_instance.state.compute_device = device
+        logger.info(f"Compute device set to: {device}")
+
+        # Preload tracker factory (loads ReID model prototype)
+        tracker_factory = CameraTrackerFactory(device=device)
+        try:
+            await tracker_factory.preload_prototype_tracker()
+        except Exception as e:
+            logger.warning(f"Tracker prototype preload failed (non-fatal): {e}")
+        app_instance.state.tracker_factory = tracker_factory
+
+        # Preload homography matrices
+        homography_service = HomographyService(settings)
+        try:
+            await homography_service.preload_all_homography_matrices()
+        except Exception as e:
+            logger.warning(f"Homography preload failed (non-fatal): {e}")
+        app_instance.state.homography_service = homography_service
+
+        # Detector is initialized on-demand by services; keep None for now
+        app_instance.state.detector = None
+    except Exception as e:
+        logger.warning(f"Startup initialization encountered issues: {e}")
+
+    try:
+        yield
+    finally:
+        logger.info("Application shutdown sequence initiated...")
+        # Place for graceful shutdown/cleanup if needed
 
 app = FastAPI(
     title=settings.APP_NAME,
@@ -61,28 +96,37 @@ app = FastAPI(
     redoc_url=f"/redoc"
 )
 
+# Configure security middleware (includes rate limiting, security headers, etc.)
+configure_security_middleware(app)
+
+# Add header logging middleware after security middleware
 app.add_middleware(HeaderLoggingMiddleware)
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configure secure CORS based on environment
+cors_config = get_cors_config()
+app.add_middleware(CORSMiddleware, **cors_config)
 
 api_v1_router_prefix = settings.API_V1_PREFIX
 app.include_router(
-    processing_tasks.router,
-    prefix=f"{api_v1_router_prefix}/processing-tasks",
-    tags=["V1 - Processing Tasks"]
+    detection_processing_tasks.router,
+    prefix=f"{api_v1_router_prefix}/detection-processing-tasks",
+    tags=["V1 - RT-DETR Detection Tasks (Phase 1)"]
 )
 app.include_router(
-    media_endpoints.router,
-    prefix=f"{api_v1_router_prefix}/media",
-    tags=["V1 - Media Content"]
+    environments.router,
+    prefix=f"{api_v1_router_prefix}",
+    tags=["V1 - Environment Management"]
 )
+app.include_router(
+    analytics_endpoints.router,
+    prefix=f"{api_v1_router_prefix}/analytics",
+    tags=["V1 - Analytics"]
+)
+
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
+
+# Health Check System
+app.include_router(health_router.router, tags=["Health Checks"])
 
 @app.get("/", tags=["Root"])
 async def read_root():
@@ -94,7 +138,8 @@ async def health_check(request: Request):
     tracker_factory_state = getattr(request.app.state, 'tracker_factory', None)
     homography_service_state = getattr(request.app.state, 'homography_service', None)
 
-    detector_ready = detector_state and detector_state._model_loaded_flag
+    # Detector is initialized per task (RT-DETR). Do not require preload for health.
+    detector_ready = True
     tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
     homography_ready = homography_service_state and homography_service_state._preloaded
 

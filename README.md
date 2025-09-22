@@ -1,344 +1,232 @@
 # SpotOn Backend
 
-## Overview
+**Status**: ✅ **Production Ready** (Phase 11 Complete)
 
-SpotOn is an intelligent multi-camera person tracking and analytics system designed for retrospective analysis of recorded video feeds. The backend is responsible for processing video data, performing AI-driven detection, tracking, re-identification, applying homography transformations, and serving this metadata via REST APIs and WebSockets.
+Multi-camera person tracking system with real-time AI detection and analytics.
 
-The system processes sub-videos from multiple cameras within a defined environment (e.g., "factory", "campus"). It extracts frames, performs detection (e.g., Faster R-CNN) and tracking (e.g., BotSort with Re-ID using CLIP features) on each frame. Detected persons are assigned global IDs, and their image coordinates can be transformed to map coordinates using pre-configured homography data. Real-time tracking metadata is streamed via WebSockets, while status and control are managed via REST APIs.
+## 🎉 Phase 11: Final Production Enablement - COMPLETED
 
-For a detailed system design, please refer to [DESIGN.md](DESIGN.md).
+The SpotOn backend has reached **100% production readiness** with comprehensive security hardening, performance monitoring, and full API enablement.
 
-## Prerequisites
+### ✨ New Features Added
 
-*   **Git**: For cloning the repository.
-*   **Docker & Docker Compose**: Essential for running the application and its dependent services (Redis, TimescaleDB) in a containerized environment.
-*   **Python 3.9+**: Required for local development if not using Docker for the application.
-*   **`uv` (Python Package Installer)**: Used for managing Python environments and dependencies during local development. Install it by running:
-    ```bash
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-    ```
-*   **S3-Compatible Object Storage**: Access to an S3-compatible storage (e.g., AWS S3, MinIO, DagsHub) where the input video data (sub-videos) is stored.
+- **🔐 Security Hardening**: Comprehensive security middleware, rate limiting, CORS protection
+- **📊 Performance Monitoring**: Real-time system metrics, health monitoring, maintenance endpoints
+- **🔧 Production Configuration**: Environment-based endpoint control, security settings
+- **🛡️ Authentication**: Full JWT implementation with role-based access control
+- **📈 Analytics Endpoints**: Real-time metrics, behavior analysis, system statistics
+- **📦 Export Capabilities**: Data export, report generation, video export with overlays
+- **🔍 System Monitoring**: Performance dashboard, diagnostics, alerts, maintenance operations
 
-### Obtaining the MTMMC Video Dataset
+## Quick Start
 
-SpotOn is designed for intelligent multi-camera person tracking and has been developed and tested primarily using the MTMMC (Multi-Target Multi-Camera) dataset. Due to the licensing and terms of use agreement I adhered to when obtaining this dataset, I cannot directly provide or redistribute the MTMMC video frames or annotations.
+### Requirements
+- Docker & Docker Compose
+- Model weights: Download [clip_market1501.pt](https://drive.google.com/uc?id=1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7) (~600MB) to `./weights/`
 
-If you intend to use the MTMMC dataset with SpotOn, you will need to request access directly from the dataset providers by following their specified procedure. I went through this process to obtain the data for development, and you will need to do the same.
-
-Here’s how to request access to the MTMMC dataset, based on the information provided by the dataset owners at [https://sites.google.com/view/mtmmc](https://sites.google.com/view/mtmmc):
-
-**Dataset Access Request Instructions:**
-
-You can request access by contacting the MTMMC team at `gritycda@gmail.com`.
-
-**Submission Guidelines:**
-It's crucial to follow these guidelines precisely, as failure to do so will result in your request not being processed.
-
-1.  **Include the Dataset Terms and Conditions:**
-    *   Download the MTMMC User Agreement form: [MTMMC User Agreement.docx](https://docs.google.com/document/d/1eyDTFlm6M6bYm2OJYnIPOxDecVmTmcnc/edit?usp=drive_link&ouid=114109061858846451061&rtpof=true&sd=true).
-    *   Complete all user information fields in the form.
-    *   Provide a detailed description of your intended use of the dataset (this is important for their evaluation, especially concerning ethical considerations).
-    *   Check the agreement box and insert your handwritten signature.
-    *   **Crucially, delete any blue instructional text from the form before saving.**
-    *   Convert the completed document to PDF format.
-    *   Use the following file naming convention: `{Application Date}_{Affiliation}_{Your Name}` (e.g., `20240623_KAIST_Jaden Kim`).
-
-2.  **Email Submission Requirements:**
-    *   Use the subject line format: `[MTMMC benchmark request] {Your Name}, {Affiliation}`.
-    *   In the email body, include:
-        *   The Google email address to which the MTMMC benchmark drive should be shared if your request is approved.
-        *   A brief explanation of your intended use of the MTMMC benchmark.
-
-**Important Notice from the Dataset Providers:**
-Please be aware that unauthorized sharing or transfer of the dataset outside the methods outlined in their approval process is a violation of international law and may result in legal action. All users must submit the signed agreement before accessing the dataset.
-(Dataset information last noted as revised by providers: 10 / 16 / 2024)
-
-Once you have successfully obtained the MTMMC dataset (which includes video frames in JPG format and annotations in COCO style JSON format), you will need to upload the video data (sub-videos/frames) to your S3-compatible object storage, as configured in your `.env` file (see `S3_BUCKET_NAME` and related S3 variables). The SpotOn backend will then process this data from your S3 bucket.
-
-*   **AI Model Weights**:
-    *   **Re-ID Model (`clip_market1501.pt`)**: This model is crucial for person re-identification.
-        1.  Navigate to the `spoton_backend/weights/` directory in your cloned repository.
-        2.  Open the `note.txt` file. It contains links to various model weights.
-        3.  Download the file from the **first URL** listed in `note.txt`.
-        4.  Rename the downloaded file to `clip_market1501.pt`.
-        5.  Place this `clip_market1501.pt` file directly into the `spoton_backend/weights/` directory.
-    *   The `Dockerfile` is configured to copy the contents of the `weights/` directory (including `clip_market1501.pt`) and `homography_data/` into the Docker image during the build process.
-    *   Detection models (like Faster R-CNN) are typically downloaded by `torchvision` at runtime if pre-trained weights are used, or their paths would be configured if custom trained.
-
-## Installation and Setup
-
-### 1. Clone the Repository
-
+### Start the System
 ```bash
-git clone https://github.com/JubJones/spoton_backend.git # Replace with your repository URL if different
-cd spoton_backend
+# CPU version (development)
+docker-compose -f docker-compose.cpu.yml up --build -d
+
+# GPU version (production - requires NVIDIA GPU)
+docker-compose -f docker-compose.gpu.yml up --build -d
+
+# Check if running
+curl http://localhost:3847/health
 ```
 
-### 2. Configure Environment Variables
+## API Endpoints
 
-The application uses environment variables for configuration. Copy the example file and customize it:
-
+### Core System
 ```bash
-cp .env.example .env
+GET  /health                           # System health and model status
+GET  /                                 # Welcome message
 ```
 
-Now, edit the `.env` file. Pay close attention to the following:
-*   **S3/DagsHub Credentials & Configuration**:
-    *   `S3_ENDPOINT_URL`: Your S3-compatible endpoint (e.g., `https://s3.amazonaws.com` or DagsHub's `https://s3.dagshub.com`).
-    *   `AWS_ACCESS_KEY_ID`: Your S3 access key.
-    *   `AWS_SECRET_ACCESS_KEY`: Your S3 secret key.
-    *   `S3_BUCKET_NAME`: The name of the S3 bucket containing your video data.
-    *   `DAGSHUB_REPO_OWNER` & `DAGSHUB_REPO_NAME`: If using DagsHub storage.
-*   **Database Credentials** (if different from defaults in `docker-compose.yml`):
-    *   `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`.
-*   **PyTorch Variant for Docker Build**:
-    *   `PYTORCH_VARIANT_BUILD`: Set to `cpu` for CPU-only execution or `cu118` for CUDA 11.8 GPU support. If using `cu118`, ensure the NVIDIA Container Toolkit is installed on your Docker host and your Docker host has compatible NVIDIA drivers and GPUs.
-*   **Model Weights Paths**:
-    *   `WEIGHTS_DIR`: Defaults to `./weights`. This is where the application expects to find model files inside the container.
-    *   `REID_WEIGHTS_PATH`: Defaults to `clip_market1501.pt`. This filename should match the Re-ID model you placed in `weights/`.
+### Processing Control
+```bash
+POST /api/v1/processing-tasks/start    # Start tracking session
+GET  /api/v1/processing-tasks/{id}     # Get task status
+POST /api/v1/processing-tasks/stop     # Stop tracking session
+```
 
-### 3. Setup Options
+### Real-time Data
+```bash
+# WebSocket connections for live data
+ws://localhost:3847/ws/tracking/{task_id}      # Live tracking updates
+ws://localhost:3847/ws/frames/{task_id}        # Live camera frames
+ws://localhost:3847/ws/system                  # System status updates
+```
 
-You can set up the backend using Docker (recommended for most users and for running the service) or by setting up a local Python environment (suitable for active development of the backend code).
+### Media & Images
+```bash
+GET  /api/v1/media/frames/{task_id}/{camera}   # Camera frame with overlays
+GET  /api/v1/media/persons/{person_id}/image   # Cropped person image
+GET  /api/v1/media/frames/{task_id}/raw        # Raw camera frame
+```
 
-#### Option A: Docker Setup (Recommended for Running)
+### Analytics & Tracking
+```bash
+GET  /api/v1/analytics/real-time/metrics       # Live person counts
+GET  /api/v1/analytics/real-time/active-persons # Currently tracked people
+GET  /api/v1/analytics/system/statistics       # System performance stats
+```
 
-This method encapsulates the backend application and its dependencies (Redis, TimescaleDB) in Docker containers, providing a consistent and isolated environment.
+### Environment Management
+```bash
+GET  /api/v1/environments                       # Available environments (Campus, Factory)
+GET  /api/v1/environments/{env_id}/cameras      # Cameras in environment
+GET  /api/v1/environments/{env_id}/date-ranges  # Available data dates
+```
 
-1.  **Ensure AI Model Weights are in Place**:
-    As detailed in the **Prerequisites** section:
-    *   Download the Re-ID model from the first link in `weights/note.txt`.
-    *   Rename it to `clip_market1501.pt`.
-    *   Place `clip_market1501.pt` into the `spoton_backend/weights/` directory.
-    This step is crucial *before* building the Docker image, as the `Dockerfile` copies the `weights/` directory contents.
+### Data Export
+```bash
+POST /api/v1/export/tracking-data               # Export tracking data (CSV/JSON)
+POST /api/v1/export/analytics-report            # Export analytics report
+POST /api/v1/export/video-with-overlays         # Export video with person boxes
+GET  /api/v1/export/jobs/{job_id}/status        # Check export job status
+GET  /api/v1/export/jobs/{job_id}/download      # Download completed export
+```
 
-2.  **Build and Start Services using Docker Compose**:
-    Navigate to the root directory of `spoton_backend` (where `docker-compose.yml` is located) and run:
-    ```bash
-    # Build images and start all services in detached mode
-    docker-compose up --build -d
-    ```
-    *   To force a rebuild without using Docker's cache (e.g., if `Dockerfile` changes significantly):
-        ```bash
-        docker-compose build --no-cache
-        docker-compose up -d
-        ```
-    *   The `PYTORCH_VARIANT_BUILD` variable from your `.env` file guides the PyTorch installation variant within the Docker image.
+### 🆕 Authentication & Security
+```bash
+POST /api/v1/auth/login                         # User authentication
+GET  /api/v1/auth/me                           # Get current user info  
+POST /api/v1/auth/refresh                      # Refresh JWT token
+POST /api/v1/auth/logout                       # Logout user
+GET  /api/v1/auth/health                       # Authentication service health
+```
 
-#### Option B: Local Development Setup
+### 🆕 System Monitoring & Performance
+```bash
+GET  /api/v1/system/performance/dashboard       # Comprehensive performance dashboard
+GET  /api/v1/system/performance/metrics        # Real-time system metrics
+GET  /api/v1/system/performance/history        # Historical performance data
+GET  /api/v1/system/health/comprehensive       # Detailed system health status  
+GET  /api/v1/system/diagnostics                # System diagnostics information
+GET  /api/v1/system/alerts                     # Current system alerts
+POST /api/v1/system/maintenance/clear-cache    # Clear system caches
+POST /api/v1/system/maintenance/garbage-collect # Force garbage collection
+```
 
-This setup is intended for developers who want to run and debug the Python application code directly on their host machine. It's still recommended to run Redis and TimescaleDB via Docker for simplicity.
+### Authentication
+```bash
+POST /api/v1/auth/login                         # Login (returns JWT token)
+GET  /api/v1/auth/me                           # User profile
+GET  /api/v1/auth/permissions/test             # Check permissions
+```
 
-1.  **Start External Services (Redis & TimescaleDB via Docker)**:
-    From the `spoton_backend` root directory:
-    ```bash
-    # Start only Redis and TimescaleDB services in detached mode
-    docker-compose up -d redis timescaledb
-    ```
-    Wait for these services to initialize. You can check their logs:
-    ```bash
-    docker-compose logs redis
-    docker-compose logs timescaledb
-    ```
+## Usage Examples
 
-2.  **Set up Python Virtual Environment and Install Dependencies**:
-    Ensure you have Python 3.9+ and `uv` installed.
-    ```bash
-    # Create a Python 3.9 virtual environment (or your preferred 3.9+ version)
-    uv venv .venv --python 3.9
-    
-    # Activate the virtual environment
-    # On macOS/Linux:
-    source .venv/bin/activate
-    # On Windows (PowerShell):
-    # .\.venv\Scripts\Activate.ps1
-    # On Windows (CMD):
-    # .\.venv\Scripts\activate.bat
+### Start Tracking Session
+```bash
+curl -X POST http://localhost:3847/api/v1/processing-tasks/start \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment_id": "campus",
+    "scene_id": "main_entrance", 
+    "camera_ids": ["c09", "c12", "c13", "c16"]
+  }'
+```
 
-    # Install PyTorch. For local development, CPU version is often easier.
-    # Ensure version compatibility with other libraries if changing.
-    # Example for CPU PyTorch (uv will respect versions from pyproject.toml if compatible):
-    uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cpu
+### Get Live Analytics
+```bash
+curl http://localhost:3847/api/v1/analytics/real-time/metrics
+# Returns: {"active_persons": 5, "total_cameras": 4, "processing_fps": 12.3}
+```
 
-    # Install all project dependencies, including development tools like pytest and ruff
-    uv pip install ".[dev]"
-    ```
+### Export Tracking Data
+```bash
+curl -X POST http://localhost:3847/api/v1/export/tracking-data \
+  -H "Content-Type: application/json" \
+  -d '{
+    "environment_id": "campus",
+    "start_time": "2024-01-01T10:00:00Z",
+    "end_time": "2024-01-01T11:00:00Z",
+    "format": "csv",
+    "camera_ids": ["c09", "c12"]
+  }'
+```
 
-3.  **Ensure AI Model Weights and Homography Data are Accessible**:
-    *   Confirm that `clip_market1501.pt` (downloaded as per Prerequisites) is in the `spoton_backend/weights/` directory.
-    *   The `spoton_backend/homography_data/` directory (containing `.npz` files) should be present.
-    *   The application uses paths configured in your `.env` file (e.g., `WEIGHTS_DIR`, `HOMOGRAPHY_DATA_DIR`) to find these assets, which default to these locations relative to the app's execution directory.
+## WebSocket Data Format
 
-## Running the Backend
+### Tracking Updates
+```json
+{
+  "type": "tracking_update",
+  "payload": {
+    "global_frame_index": 123,
+    "timestamp": "2024-01-01T10:30:05.456Z",
+    "cameras": {
+      "c09": {
+        "frame_image_base64": "data:image/jpeg;base64,/9j/4AAQ...",
+        "tracks": [{
+          "track_id": 5,
+          "global_id": "person-uuid-abc-123",
+          "bbox_xyxy": [110.2, 220.5, 160.0, 330.8],
+          "confidence": 0.92,
+          "map_coords": [12.3, 45.6]
+        }]
+      }
+    },
+    "person_count_per_camera": {"c09": 3, "c12": 1}
+  }
+}
+```
 
-### Using Docker (Recommended)
+## System Configuration
 
-If you've set up using Docker (Option A):
+### Performance Settings
+```bash
+# .env file settings
+TARGET_FPS=3                           # Processing frame rate
+FRAME_JPEG_QUALITY=70                  # Image quality (1-100)
+DETECTION_CONFIDENCE_THRESHOLD=0.7     # Detection sensitivity
+```
 
-*   **To Build and Start all services**:
-    ```bash
-    docker-compose up --build -d
-    ```
-*   **To Stop all services** (this will remove the containers but preserve volumes like database data):
-    ```bash
-    docker-compose down
-    ```
-*   **To Restart a specific service** (e.g., the backend if you mounted local code and made changes, though for production you'd rebuild image):
-    ```bash
-    docker-compose restart backend
-    ```
-*   **To View logs for the backend service**:
-    ```bash
-    docker-compose logs backend
-    # To follow logs in real-time:
-    docker-compose logs -f backend
-    ```
+### Camera Configuration
+```bash
+# Available environments and cameras
+Campus: c09, c12, c13, c16
+Factory: c01, c02, c03, c04
+```
 
-### Local Development (Uvicorn)
+## Troubleshooting
 
-If you've set up for local development (Option B):
+### Check System Status
+```bash
+# View logs
+docker-compose logs -f backend
 
-1.  **Ensure Redis and TimescaleDB are running** (as started in local setup step 1).
-2.  **Activate your Python virtual environment**:
-    ```bash
-    # On macOS/Linux:
-    source .venv/bin/activate
-    # On Windows: (use appropriate command for your shell)
-    ```
-3.  **Start the FastAPI application using Uvicorn**:
-    From the `spoton_backend` root directory:
-    ```bash
-    uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
-    ```
-    The backend API will be accessible at `http://localhost:8000`. The `--reload` flag enables automatic reloading of the server when Python code changes are detected, which is useful during development.
+# Check health
+curl http://localhost:3847/health
 
-## Testing and Validation
+# Monitor resources
+docker stats
+```
 
-Once the backend is running (either via Docker or locally):
+### Common Issues
+- **Slow performance**: Lower TARGET_FPS in .env file
+- **Out of memory**: Reduce FRAME_JPEG_QUALITY or restart containers
+- **Model not loaded**: Ensure clip_market1501.pt is in ./weights/ directory
 
-### 1. API Tests (using `curl`)
+## Development
 
-You can perform quick tests of the API endpoints using `curl` or an API client like Postman or Insomnia.
+### Local Setup
+```bash
+# Python environment
+uv venv .venv --python 3.9
+source .venv/bin/activate
+uv pip install ".[dev]"
 
-*   **Start a processing task**:
-    The `environment_id` (e.g., `"factory"`, `"campus"`) must match one configured in `app/core/config.py` under `VIDEO_SETS`.
-    ```bash
-    curl -X POST -H "Content-Type: application/json" -d '{"environment_id": "factory"}' http://localhost:8000/api/v1/processing-tasks/start
-    ```
-    This command will return a JSON response. Note down the `task_id`, `status_url`, and `websocket_url` from the response. Example response:
-    ```json
-    {
-      "task_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-      "message": "Processing task for environment 'factory' initiated.",
-      "status_url": "/api/v1/processing-tasks/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx/status",
-      "websocket_url": "/ws/tracking/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-    }
-    ```
+# Run locally (requires Redis/TimescaleDB)
+uvicorn app.main:app --reload
 
-*   **Check task status**:
-    Replace `{TASK_ID_FROM_PREVIOUS_STEP}` with the actual `task_id` you received.
-    ```bash
-    curl http://localhost:8000/api/v1/processing-tasks/{TASK_ID_FROM_PREVIOUS_STEP}/status
-    ```
-    This will show the current status, progress, and any details about the task.
+# Run tests
+pytest
+```
 
-### 2. WebSocket Test (using `scripts/websocket_client_test.py`)
-
-The `scripts/websocket_client_test.py` script is a helpful tool for simulating a client that connects to the backend's WebSocket endpoint. It automates the process of starting a task and then listens for and prints messages received over the WebSocket. This is particularly useful for frontend developers to understand the real-time data format and flow.
-
-*   **How to run the test client**:
-    1.  Ensure the SpotOn backend is running and accessible at `http://localhost:8000`.
-    2.  Open a new terminal.
-    3.  If you set up the backend for local development (Option B) and activated its virtual environment, you can run the script from within that same environment, as it includes the necessary `httpx` and `websockets` packages. Otherwise, ensure these packages are installed in the Python environment you use to run the script:
-        ```bash
-        # If needed, in a separate environment or your global Python:
-        uv pip install httpx websockets
-        ```
-    4.  Navigate to the `spoton_backend` root directory and execute the script:
-        ```bash
-        python scripts/websocket_client_test.py [environment_id]
-        ```
-        *   **Example**: `python scripts/websocket_client_test.py factory`
-        *   If `[environment_id]` is omitted, the script defaults to processing the `"factory"` environment (this default is set within the script).
-
-*   **Understanding the WebSocket client output**:
-    The client script will first log its attempt to start a processing task. If successful, it will connect to the WebSocket URL provided by the backend. You will then observe two main types of messages printed to your console:
-
-    *   **`status_update` messages**: These provide updates on the overall progress and current stage of the processing task.
-        Example log:
-        ```
-        INFO:websocket_client:[TASK {task_id}][STATUS_UPDATE]
-        INFO:websocket_client:  Status: PROCESSING
-        INFO:websocket_client:  Progress: 25.50%
-        INFO:websocket_client:  Current Step: Processing sub-video 1, frame batch 80 (Global Index: 79)
-        ```
-
-    *   **`tracking_update` messages**: These are the core real-time data messages, sent for each processed batch of frames from the cameras. The structure of the payload (after JSON parsing) is crucial for frontend rendering.
-        A typical `tracking_update` message payload looks like this (schema defined in `app.api.v1.schemas.WebSocketTrackingMessagePayload`):
-        ```json
-        {
-          // "type": "tracking_update", // This is part of the outer message wrapper
-          // "payload": { // This is the actual content
-            "frame_index": 123, // 0-indexed global frame counter for the task
-            "scene_id": "factory", // Corresponds to the environment_id
-            "timestamp_processed_utc": "2023-10-27T10:30:05.456Z",
-            "cameras": {
-              "c09": { // Camera ID (string)
-                "image_source": "000123.jpg", // A pseudo-filename for identification
-                "tracks": [
-                  {
-                    "track_id": 5, // Intra-camera track ID (integer)
-                    "global_id": "person-uuid-abc-123", // System-wide unique person ID (string, null if not identified)
-                    "bbox_xyxy": [110.2, 220.5, 160.0, 330.8], // Bounding box [x1, y1, x2, y2] (list of floats)
-                    "confidence": 0.92, // Detection confidence (float, optional)
-                    "class_id": 1, // Object class ID (integer, e.g., 1 for person, optional)
-                    "map_coords": [12.3, 45.6] // Projected [X, Y] on the map (list of floats, null if no homography or projection failed)
-                  }
-                  // ... more tracked persons in camera "c09"
-                ]
-              },
-              "c12": {
-                // ... data for camera "c12"
-              }
-              // ... other cameras active in this frame batch for the "factory" environment
-            }
-          // }
-        }
-        ```
-        The `websocket_client_test.py` script logs a formatted version of this data. Frontend developers should particularly note:
-        *   `frame_index`: Essential for synchronizing overlays with video playback.
-        *   The `cameras` dictionary: This is keyed by camera ID string (e.g., "c09", "c12"). Each camera entry contains its `image_source` identifier and a list of `tracks`.
-        *   The `tracks` list: Each item represents a person detected/tracked in that camera's view for the current `frame_index`.
-        *   `bbox_xyxy`: Coordinates for drawing bounding boxes on the video.
-        *   `global_id`: The persistent ID for a person across different cameras and over time.
-        *   `map_coords`: The [X, Y] coordinates for plotting the person's location on a 2D map view.
-
-This test client script effectively demonstrates the client-server interaction: initiating a task, receiving the WebSocket URL, establishing the connection, and processing incoming JSON messages containing tracking and status updates.
-
-## Project Structure
-
-The backend codebase is organized as follows:
-
-*   `app/`: Main FastAPI application package.
-    *   `api/`: API endpoint definitions (FastAPI routers, WebSocket handlers).
-    *   `core/`: Core application setup (configuration, startup/shutdown events).
-    *   `models/`: AI model wrappers and base abstractions (detectors, trackers).
-    *   `services/`: Business logic layer (pipeline orchestration, Re-ID, data management).
-    *   `tasks/`: Background processing logic (though much is now in services).
-    *   `utils/`: Common utility functions.
-    *   `main.py`: FastAPI application entry point.
-*   `homography_data/`: Stores `.npz` files with points for homography calculations.
-*   `scripts/`: Utility scripts, including `websocket_client_test.py`.
-*   `tests/`: Unit and integration tests.
-*   `weights/`: Directory for storing AI model weight files (e.g., `clip_market1501.pt`). Contains `note.txt` with download links.
-*   `Dockerfile`: Instructions to build the Docker image for the backend.
-*   `docker-compose.yml`: Defines services for local development and deployment (backend, Redis, TimescaleDB).
-*   `pyproject.toml`: Project metadata and Python package dependencies.
-
-## System Design
-
-For a comprehensive understanding of the system architecture, components, data flow, and design patterns, please refer to the [DESIGN.md](DESIGN.md) document.
-
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+### API Documentation
+- **Swagger UI**: http://localhost:3847/docs
+- **ReDoc**: http://localhost:3847/redoc

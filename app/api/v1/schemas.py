@@ -8,6 +8,9 @@ import uuid
 class ProcessingTaskStartRequest(BaseModel):
     """Request body to start a new processing task."""
     environment_id: str = Field(..., description="Identifier for the environment (e.g., 'campus', 'factory') to process.")
+    # Optional feature flags (backward-compatible): if omitted, service-level defaults are used
+    enable_tracking: Optional[bool] = Field(None, description="Enable intra-camera tracking for this task (overrides global setting if provided).")
+    enable_reid: Optional[bool] = Field(None, description="Enable cross-camera ReID for this task (overrides global setting if provided).")
 
 # --- Response Schemas ---
 

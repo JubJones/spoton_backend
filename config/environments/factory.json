@@ -1,0 +1,343 @@
+{
+  "environment_id": "factory",
+  "name": "Factory Environment",
+  "environment_type": "factory",
+  "description": "Default factory environment with production lines and quality control",
+  "cameras": {
+    "f01": {
+      "camera_id": "f01",
+      "name": "Factory Line 1 Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 10.0,
+        "y": 5.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 60.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-29T13:02:52.097728",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "f02": {
+      "camera_id": "f02",
+      "name": "Factory Line 2 Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 30.0,
+        "y": 5.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 60.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-29T13:02:52.097739",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "f03": {
+      "camera_id": "f03",
+      "name": "Factory QC Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 50.0,
+        "y": 5.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 60.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-29T13:02:52.097743",
+      "calibration_accuracy": null,
+      "metadata": {}
+    },
+    "f04": {
+      "camera_id": "f04",
+      "name": "Factory Exit Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 70.0,
+        "y": 2.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 60.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-08-29T13:02:52.097746",
+      "calibration_accuracy": null,
+      "metadata": {}
+    }
+  },
+  "zones": {
+    "production_line_1": {
+      "zone_id": "production_line_1",
+      "name": "Production Line 1",
+      "zone_type": "main_area",
+      "boundary_points": [
+        {
+          "x": 5,
+          "y": 0
+        },
+        {
+          "x": 25,
+          "y": 0
+        },
+        {
+          "x": 25,
+          "y": 10
+        },
+        {
+          "x": 5,
+          "y": 10
+        }
+      ],
+      "capacity_limit": 12,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 10,
+      "dwell_time_threshold": null,
+      "description": "Default production line 1 zone for factory environment",
+      "created_at": "2025-08-31T13:02:52.097761",
+      "area": 200.0,
+      "metadata": {}
+    },
+    "production_line_2": {
+      "zone_id": "production_line_2",
+      "name": "Production Line 2",
+      "zone_type": "main_area",
+      "boundary_points": [
+        {
+          "x": 25,
+          "y": 0
+        },
+        {
+          "x": 45,
+          "y": 0
+        },
+        {
+          "x": 45,
+          "y": 10
+        },
+        {
+          "x": 25,
+          "y": 10
+        }
+      ],
+      "capacity_limit": 12,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 10,
+      "dwell_time_threshold": null,
+      "description": "Default production line 2 zone for factory environment",
+      "created_at": "2025-08-31T13:02:52.097770",
+      "area": 200.0,
+      "metadata": {}
+    },
+    "quality_control": {
+      "zone_id": "quality_control",
+      "name": "Quality Control",
+      "zone_type": "restricted",
+      "boundary_points": [
+        {
+          "x": 45,
+          "y": 0
+        },
+        {
+          "x": 65,
+          "y": 0
+        },
+        {
+          "x": 65,
+          "y": 10
+        },
+        {
+          "x": 45,
+          "y": 10
+        }
+      ],
+      "capacity_limit": 5,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 4,
+      "dwell_time_threshold": null,
+      "description": "Default quality control zone for factory environment",
+      "created_at": "2025-08-31T13:02:52.097777",
+      "area": 200.0,
+      "metadata": {}
+    },
+    "factory_exit": {
+      "zone_id": "factory_exit",
+      "name": "Factory Exit",
+      "zone_type": "exit",
+      "boundary_points": [
+        {
+          "x": 65,
+          "y": 0
+        },
+        {
+          "x": 75,
+          "y": 0
+        },
+        {
+          "x": 75,
+          "y": 5
+        },
+        {
+          "x": 65,
+          "y": 5
+        }
+      ],
+      "capacity_limit": 6,
+      "access_restrictions": [],
+      "monitoring_enabled": true,
+      "occupancy_threshold": 5,
+      "dwell_time_threshold": null,
+      "description": "Default factory exit zone for factory environment",
+      "created_at": "2025-08-31T13:02:52.097788",
+      "area": 50.0,
+      "metadata": {}
+    }
+  },
+  "layout": {
+    "layout_id": "factory_layout",
+    "name": "Factory Floor Layout",
+    "bounds": {
+      "min": {
+        "x": 0,
+        "y": 0
+      },
+      "max": {
+        "x": 75,
+        "y": 10
+      }
+    },
+    "scale_meters_per_pixel": 0.1,
+    "reference_points": [
+      {
+        "coordinate": {
+          "x": 0,
+          "y": 0
+        },
+        "description": "Factory entrance"
+      },
+      {
+        "coordinate": {
+          "x": 37.5,
+          "y": 5
+        },
+        "description": "Factory center"
+      }
+    ],
+    "walls": [],
+    "doors": [],
+    "landmarks": [],
+    "floor_plan_image_path": null,
+    "overlay_image_path": null
+  },
+  "timezone": "UTC",
+  "operating_hours": {
+    "monday": {
+      "start": "06:00",
+      "end": "18:00"
+    },
+    "tuesday": {
+      "start": "06:00",
+      "end": "18:00"
+    },
+    "wednesday": {
+      "start": "06:00",
+      "end": "18:00"
+    },
+    "thursday": {
+      "start": "06:00",
+      "end": "18:00"
+    },
+    "friday": {
+      "start": "06:00",
+      "end": "18:00"
+    }
+  },
+  "capacity_limits": {
+    "total": 40,
+    "production_line_1": 12,
+    "production_line_2": 12
+  },
+  "data_retention_days": 60,
+  "recording_enabled": true,
+  "analytics_enabled": true,
+  "user_permissions": {},
+  "is_active": true,
+  "created_at": "2025-08-31T13:02:52.097800",
+  "last_updated": "2025-08-31T13:02:52.097800",
+  "version": "1.0",
+  "validation_issues": {
+    "cameras": [
+      "Camera f01 missing homography matrix",
+      "Camera f02 missing homography matrix",
+      "Camera f03 missing homography matrix",
+      "Camera f04 missing homography matrix"
+    ]
+  },
+  "metadata": {}
+}
