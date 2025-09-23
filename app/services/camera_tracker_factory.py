@@ -9,7 +9,7 @@ import uuid
 import torch
 import numpy as np # For dummy warmup data
 
-from app.models.trackers import BotSortTracker
+from app.models.trackers import ByteTrackTracker
 from app.models.base_models import AbstractTracker
 from app.core.config import settings
 
@@ -38,7 +38,7 @@ class CameraTrackerFactory:
 
     async def preload_prototype_tracker(self):
         """
-        Creates and loads a 'prototype' BotSortTracker.
+        Creates and loads a 'prototype' tracker (configured via settings.TRACKER_TYPE).
         The primary purpose is to ensure that any shared models it uses (like ReID)
         are loaded into memory/GPU during application startup.
         The prototype itself isn't typically used for actual tracking tasks.
@@ -47,16 +47,15 @@ class CameraTrackerFactory:
             logger.info("Prototype tracker (and its ReID model) already preloaded.")
             return
 
-        logger.info("Preloading prototype BotSortTracker to ensure ReID model is loaded...")
+        logger.info("Preloading prototype ByteTrack tracker...")
         try:
-            # Create a temporary BotSortTracker instance
-            # Its __init__ reads settings for ReID weights path, device preference, etc.
-            prototype_tracker = BotSortTracker()
+            # Create a temporary tracker instance for warmup
+            prototype_tracker = ByteTrackTracker()
             await prototype_tracker.load_model() # This loads the ReID model.
             await prototype_tracker.warmup() # Warm up the loaded prototype
             
             self._prototype_tracker_loaded = True
-            logger.info("Prototype BotSortTracker and its ReID model preloaded and warmed up successfully.")
+            logger.info("Prototype ByteTrack tracker preloaded and warmed up successfully.")
             # The prototype_tracker instance can be discarded here if its only role was preloading.
             # PyTorch/BoxMOT should keep the ReID model weights in cache/memory if loaded correctly.
         except Exception as e:
@@ -82,9 +81,8 @@ class CameraTrackerFactory:
         """
         cache_key = (task_id, camera_id)
         if cache_key not in self._tracker_instances:
-            logger.info(f"Creating new BotSortTracker for task '{task_id}', camera '{camera_id}'.")
-            
-            tracker = BotSortTracker()
+            logger.info(f"Creating new ByteTrack tracker for task '{task_id}', camera '{camera_id}'.")
+            tracker = ByteTrackTracker()
             
             try:
                 # The tracker's load_model method should handle device placement
@@ -92,10 +90,10 @@ class CameraTrackerFactory:
                 await tracker.load_model()
                 # No separate warmup here for task-specific trackers unless desired for absolute first frame.
                 # The prototype warmup should cover general JIT.
-                logger.info(f"BotSortTracker model loaded successfully for task '{task_id}', camera '{camera_id}'.")
+                logger.info(f"ByteTrack tracker model loaded successfully for task '{task_id}', camera '{camera_id}'.")
             except Exception as e:
                 logger.error(
-                    f"Failed to load model for BotSortTracker (task '{task_id}', camera '{camera_id}'): {e}",
+                    f"Failed to load model for ByteTrack tracker (task '{task_id}', camera '{camera_id}'): {e}",
                     exc_info=True
                 )
                 raise # Re-raise to signal failure to the caller

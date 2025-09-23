@@ -3,73 +3,77 @@ from typing import Optional, List, Dict, Tuple # Added Tuple
 import numpy as np
 import torch
 import asyncio
-from pathlib import Path
+ 
 
 try:
-    # Import the specific tracker class directly
-    from boxmot.trackers.botsort.botsort import BotSort
+    # Import specific tracker class directly (ByteTrack)
+    from boxmot.trackers.bytetrack.bytetrack import ByteTrack
     from boxmot.trackers.basetracker import BaseTracker as BoxMOTBaseTracker
     BOXMOT_AVAILABLE = True
 except ImportError as e:
     logging.critical(f"Failed to import BoxMOT components. Tracking unavailable. Error: {e}")
     BOXMOT_AVAILABLE = False
-    BotSort = None # Define as None if import fails
+    ByteTrack = None  # Define as None if import fails
     BoxMOTBaseTracker = type(None)
 
 from .base_models import AbstractTracker
 from app.core.config import settings
-from app.utils.device_utils import get_boxmot_device_string
 
 logger = logging.getLogger(__name__)
 
-class BotSortTracker(AbstractTracker):
+"""
+ByteTrack tracker implementation (BoxMOT).
+"""
+
+
+class ByteTrackTracker(AbstractTracker):
     """
-    Implementation of the BotSort tracker using the BoxMOT library.
+    Implementation of the ByteTrack tracker using the BoxMOT library.
     """
     def __init__(self):
-        if not BOXMOT_AVAILABLE or BotSort is None: # Check if BotSort itself was imported
-            raise ImportError("BoxMOT library or BotSort class is required but not available.")
+        if not BOXMOT_AVAILABLE or ByteTrack is None:  # Check if ByteTrack itself was imported
+            raise ImportError("BoxMOT library or ByteTrack class is required but not available.")
 
-        self.tracker_instance: Optional[BotSort] = None # Type hint with BotSort
+        self.tracker_instance: Optional[ByteTrack] = None  # Type hint with ByteTrack
         self.device: Optional[torch.device] = None
-        self.reid_model_path: Path = settings.resolved_reid_weights_path
-        self.use_half: bool = settings.TRACKER_HALF_PRECISION
+        # ByteTrack is motion-only; no ReID weights. Keep per-class behavior from settings.
         self.per_class: bool = settings.TRACKER_PER_CLASS
-        self._model_loaded_flag: bool = False # Added flag
+        # Optional: use app target FPS for ByteTrack frame_rate parameter
+        self.frame_rate: int = getattr(settings, "TARGET_FPS", 30) or 30
+        # Other ByteTrack params use library defaults (min_conf, track_thresh, match_thresh, track_buffer)
+        self._model_loaded_flag: bool = False
 
-        logger.info(f"BotSortTracker configured. ReID Weights: {self.reid_model_path}, Half: {self.use_half}, PerClass: {self.per_class}")
+        logger.info(
+            f"ByteTrackTracker configured. PerClass: {self.per_class}, FrameRate: {self.frame_rate}"
+        )
 
     async def load_model(self):
         """
-        Loads and initializes the BotSort tracker, including its ReID model.
+        Loads and initializes the ByteTrack tracker.
         """
-        if self._model_loaded_flag and self.tracker_instance is not None: # Check flag
-            logger.info("BotSort tracker already loaded.")
+        if self._model_loaded_flag and self.tracker_instance is not None:
+            logger.info("ByteTrack tracker already loaded.")
             return
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Loading BotSort tracker on device: {self.device}...")
-
-        boxmot_device_str = get_boxmot_device_string(self.device)
-        effective_half = self.use_half and self.device.type == 'cuda'
+        logger.info(f"Loading ByteTrack tracker on device: {self.device}...")
 
         try:
+            # Instantiate with per_class and frame_rate; others use defaults
             self.tracker_instance = await asyncio.to_thread(
-                BotSort,
-                reid_weights=self.reid_model_path,
-                device=boxmot_device_str,
-                half=effective_half,
-                per_class=self.per_class
+                ByteTrack,
+                per_class=self.per_class,
+                frame_rate=int(self.frame_rate),
             )
-            self._model_loaded_flag = True # Set flag
-            logger.info(f"BotSort tracker instance created with ReID model '{self.reid_model_path}'.")
+            self._model_loaded_flag = True
+            logger.info("ByteTrack tracker instance created.")
         except TypeError as te:
-            logger.exception(f"TypeError loading BotSort tracker. Check constructor arguments: {te}")
+            logger.exception(f"TypeError loading ByteTrack tracker. Check constructor arguments: {te}")
             self.tracker_instance = None
             self._model_loaded_flag = False
             raise
         except Exception as e:
-            logger.exception(f"Error loading BotSort tracker: {e}")
+            logger.exception(f"Error loading ByteTrack tracker: {e}")
             self.tracker_instance = None
             self._model_loaded_flag = False
             raise
@@ -80,19 +84,17 @@ class BotSortTracker(AbstractTracker):
         Should be called after load_model().
         """
         if not self._model_loaded_flag or not self.tracker_instance:
-            logger.warning("BotSort tracker not loaded. Cannot perform warmup.")
+            logger.warning("ByteTrack tracker not loaded. Cannot perform warmup.")
             return
-        
-        logger.info(f"Warming up BotSortTracker on device {self.device}...")
+
+        logger.info(f"Warming up ByteTrackTracker on device {self.device}...")
         try:
             dummy_frame = np.uint8(np.random.rand(*dummy_image_shape) * 255)
-            dummy_dets = np.empty((0, 6), dtype=np.float32) # [x1, y1, x2, y2, conf, cls]
-            # The update method expects detections and the image
-            _ = await self.update(dummy_dets, dummy_frame) # Use existing update for warmup
-            logger.info("BotSortTracker warmup successful.")
+            dummy_dets = np.empty((0, 6), dtype=np.float32)  # [x1, y1, x2, y2, conf, cls]
+            _ = await self.update(dummy_dets, dummy_frame)
+            logger.info("ByteTrackTracker warmup successful.")
         except Exception as e:
-            logger.error(f"BotSortTracker warmup failed: {e}", exc_info=True)
-
+            logger.error(f"ByteTrackTracker warmup failed: {e}", exc_info=True)
 
     async def update(self, detections: np.ndarray, image: np.ndarray) -> np.ndarray:
         """
@@ -104,17 +106,19 @@ class BotSortTracker(AbstractTracker):
 
         Returns:
             A NumPy array representing tracked objects, typically in a format like
-            [x1, y1, x2, y2, track_id, conf, cls_id, global_id (optional), ...].
+            [x1, y1, x2, y2, track_id, conf, cls_id, det_ind].
         """
-        if not self._model_loaded_flag or self.tracker_instance is None: # Check flag
-            raise RuntimeError("BotSort tracker not loaded. Call load_model() first.")
+        if not self._model_loaded_flag or self.tracker_instance is None:
+            raise RuntimeError("ByteTrack tracker not loaded. Call load_model() first.")
 
         detections_for_update = detections
         if detections.ndim != 2 or detections.shape[1] != 6:
             if detections.size == 0:
-                 detections_for_update = np.empty((0, 6))
+                detections_for_update = np.empty((0, 6))
             else:
-                logger.error(f"Invalid detections shape: {detections.shape}. Expected (N, 6) for tracker update.")
+                logger.error(
+                    f"Invalid detections shape: {detections.shape}. Expected (N, 6) for tracker update."
+                )
                 return np.empty((0, 8))
 
         if image is None or image.size == 0:
@@ -125,7 +129,7 @@ class BotSortTracker(AbstractTracker):
             tracked_output_np = await asyncio.to_thread(
                 self.tracker_instance.update,
                 detections_for_update,
-                image
+                image,
             )
 
             if tracked_output_np is None or not isinstance(tracked_output_np, np.ndarray):
@@ -133,27 +137,30 @@ class BotSortTracker(AbstractTracker):
             if tracked_output_np.size == 0:
                 return np.empty((0, 8))
             if tracked_output_np.ndim != 2 or tracked_output_np.shape[1] < 5:
-                 logger.warning(f"Tracker output has an unexpected shape: {tracked_output_np.shape}. Expected at least 5 columns.")
-                 return np.empty((0, 8))
+                logger.warning(
+                    f"Tracker output has an unexpected shape: {tracked_output_np.shape}. Expected at least 5 columns."
+                )
+                return np.empty((0, 8))
 
             return tracked_output_np
         except Exception as e:
-            logger.exception(f"Error during BotSort tracker update: {e}")
+            logger.exception(f"Error during ByteTrack tracker update: {e}")
             return np.empty((0, 8))
 
     async def reset(self):
         """Resets the tracker's state (e.g., for a new video sequence)."""
-        if self.tracker_instance and hasattr(self.tracker_instance, 'reset'):
+        if self.tracker_instance and hasattr(self.tracker_instance, "reset"):
             try:
                 await asyncio.to_thread(self.tracker_instance.reset)
-                logger.info("BotSort tracker state reset.")
+                logger.info("ByteTrack tracker state reset.")
             except Exception as e:
-                logger.error(f"Error resetting BotSort tracker: {e}")
+                logger.error(f"Error resetting ByteTrack tracker: {e}")
         elif self.tracker_instance:
-            logger.warning("BotSort tracker instance does not have a 'reset' method. Re-initializing for reset.")
-            self._model_loaded_flag = False # Reset flag
+            logger.warning(
+                "ByteTrack tracker instance does not have a 'reset' method. Re-initializing for reset."
+            )
+            self._model_loaded_flag = False
             self.tracker_instance = None
-            await self.load_model() # Reload to get a fresh state
-            # Consider if warmup is needed again after reset/reload.
+            await self.load_model()
         else:
-            logger.warning("BotSort tracker instance not available to reset.")
+            logger.warning("ByteTrack tracker instance not available to reset.")

@@ -270,7 +270,7 @@ class DetectionVideoService(RawVideoService):
             return False
 
     async def process_frame_with_tracking_and_reid(self, frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[str, Any]:
-        """Process frame with detection, then integrate tracking (BotSort) and optional ReID association.
+        """Process frame with detection, then integrate tracking and optional ReID association.
 
         - Runs existing detection + spatial intelligence pipeline
         - If tracking is enabled and a tracker is available for the camera, updates tracks
@@ -280,7 +280,7 @@ class DetectionVideoService(RawVideoService):
         # Step 1: Run detection pipeline (includes spatial intelligence)
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
 
-        # Step 2: Tracking integration (BotSort via tracker factory)
+        # Step 2: Tracking integration (via tracker factory)
         tracks: List[Dict[str, Any]] = []
         try:
             if settings.TRACKING_ENABLED and getattr(settings, 'ENABLE_INTRA_CAMERA_TRACKING', True) and camera_id in self.camera_trackers:

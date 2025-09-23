@@ -29,7 +29,7 @@ async def start_processing_task_endpoint(
     This involves:
     1.  Downloading the first sub-video for each camera in the environment.
     2.  Extracting frames from these videos.
-    3.  Running the detection, tracking (BotSort), and Re-ID (CLIP) pipeline.
+    3.  Running the detection, tracking (configured BoxMOT tracker), and Re-ID (CLIP) pipeline.
     4.  Sending tracking results via WebSocket.
 
     The process runs entirely in the background. Use the returned URLs to monitor

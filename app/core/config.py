@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     RTDETR_INPUT_SIZE: int = 640
     DETECTION_ANNOTATION_ENABLED: bool = True
     DETECTION_SAVE_ORIGINAL_FRAMES: bool = True
-    TRACKER_TYPE: str = "botsort"
+    TRACKER_TYPE: str = "bytetrack"
     WEIGHTS_DIR: str = "./weights" 
     REID_WEIGHTS_PATH: str = "clip_market1501.pt"
     TRACKER_HALF_PRECISION: bool = False

@@ -445,9 +445,9 @@ class HealthChecker:
             message = "AI models loaded and ready"
             details = {
                 "detector": "RT-DETR",
-                "tracker": "BotSort", 
+                "tracker": "ByteTrack",
                 "reid_model": "CLIP",
-                "model_warmup_completed": True
+                "model_warmup_completed": True,
             }
             
         except Exception as e:
