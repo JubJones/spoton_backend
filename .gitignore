@@ -139,3 +139,5 @@ cython_debug/
 # model weight
 *.pt
 *.pth
+\n+# Runtime artifacts (websocket-received frames)
+ws_received_images/

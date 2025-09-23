@@ -12,7 +12,7 @@ Handles:
 import asyncio
 import logging
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional, Tuple, Union
+from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
 from collections import defaultdict, deque
 import statistics
@@ -23,7 +23,6 @@ from sklearn.preprocessing import StandardScaler
 from app.infrastructure.database.integrated_database_service import integrated_db_service
 from app.infrastructure.cache.tracking_cache import tracking_cache
 from app.domains.mapping.entities.coordinate import Coordinate
-from app.domains.mapping.entities.trajectory import Trajectory
 from app.shared.types import CameraID
 
 logger = logging.getLogger(__name__)

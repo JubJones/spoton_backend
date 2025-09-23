@@ -1,6 +1,6 @@
 """
 Service for processing a batch of frames from multiple cameras simultaneously.
-This involves detection, per-camera tracking, handoff trigger detection, map projection, and cross-camera Re-ID.
+This involves detection, per-camera tracking, handoff trigger detection, and map projection.
 """
 import asyncio
 import logging
@@ -16,12 +16,11 @@ import cv2
 from app.models.base_models import AbstractDetector
 from app.shared.types import (
     CameraID, TrackKey, GlobalID, FeatureVector, FrameBatch, RawDetection,
-    TrackedObjectData, BoundingBoxXYXY, TrackID, QuadrantName, # MODIFIED: QuadrantName
+    TrackedObjectData, BoundingBoxXYXY, TrackID,
     HandoffTriggerInfo, ExitRuleModel, CameraHandoffDetailConfig,
     QUADRANT_REGIONS_TEMPLATE # MODIFIED: DIRECTION_TO_QUADRANTS_MAP removed
 )
 from app.services.camera_tracker_factory import CameraTrackerFactory
-from app.services.reid_components import ReIDStateManager
 from app.services.notification_service import NotificationService
 from app.services.homography_service import HomographyService 
 from app.core.config import settings
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 class MultiCameraFrameProcessor:
     """
     Orchestrates processing for a batch of frames, one from each camera,
-    performing detection, per-camera tracking, handoff detection, map projection, and global Re-ID.
+    performing detection, per-camera tracking, handoff detection, and map projection.
     Relies on pre-loaded detector and homography matrices.
     """
 
@@ -203,7 +202,7 @@ class MultiCameraFrameProcessor:
         self,
         task_id: uuid.UUID,
         environment_id: str,
-        reid_manager: ReIDStateManager,
+        assoc_manager: object,
         frame_batch: FrameBatch,
         processed_frame_count: int 
     ) -> Dict[CameraID, List[TrackedObjectData]]:
@@ -282,27 +281,27 @@ class MultiCameraFrameProcessor:
             except Exception as e:
                 logger.error(f"[Task {task_id}][{cam_id}] Error during tracking, parsing or handoff check: {e}", exc_info=True)
         
-        features_for_reid_input: Dict[TrackKey, FeatureVector] = {
+        features_for_assoc_input: Dict[TrackKey, FeatureVector] = {
             tk: feat for tk, (_, feat) in aggregated_parsed_track_data_this_batch.items() if feat is not None
         }
-        active_triggers_map_for_reid: Dict[TrackKey, HandoffTriggerInfo] = {
+        active_triggers_map_for_assoc: Dict[TrackKey, HandoffTriggerInfo] = {
             trigger.source_track_key: trigger for trigger in all_handoff_triggers_this_batch
         }
 
-        if features_for_reid_input or active_track_keys_this_batch_set: 
-            await reid_manager.associate_features_and_update_state(
-                features_for_reid_input, 
+        if features_for_assoc_input or active_track_keys_this_batch_set: 
+            await assoc_manager.associate_features_and_update_state(
+                features_for_assoc_input, 
                 active_track_keys_this_batch_set, 
-                active_triggers_map_for_reid,
+                active_triggers_map_for_assoc,
                 processed_frame_count 
             )
         else:
-            logger.debug(f"[Task {task_id}] MFProc: No features or active tracks for ReID for frame count {processed_frame_count}.")
+            logger.debug(f"[Task {task_id}] MFProc: No features or active tracks for association for frame count {processed_frame_count}.")
 
         final_batch_results: Dict[CameraID, List[TrackedObjectData]] = defaultdict(list)
         for track_key, (bbox_xyxy, original_feature) in aggregated_parsed_track_data_this_batch.items():
             cam_id_active, track_id_active = track_key
-            gid_assigned: Optional[GlobalID] = reid_manager.track_to_global_id.get(track_key)
+            gid_assigned: Optional[GlobalID] = assoc_manager.track_to_global_id.get(track_key)
             
             map_coords_output: Optional[List[float]] = None
             homography_matrix_current_cam = self.homography_service.get_homography_matrix(environment_id, cam_id_active)
@@ -326,7 +325,7 @@ class MultiCameraFrameProcessor:
             f"[Task {task_id}] MFProc: Batch for frame count {processed_frame_count} finished in "
             f"{(asyncio.get_event_loop().time() - batch_start_time):.3f}s. "
             f"Active tracks: {len(active_track_keys_this_batch_set)}. "
-            f"Features for ReID: {len(features_for_reid_input)}. "
+            f"Features for association: {len(features_for_assoc_input)}. "
             f"Handoff Triggers: {len(all_handoff_triggers_this_batch)}."
         )
         return dict(final_batch_results) 

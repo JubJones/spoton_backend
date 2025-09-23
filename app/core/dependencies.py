@@ -18,7 +18,6 @@ from app.core.config import settings
 # )
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
-from app.orchestration.pipeline_orchestrator import orchestrator, PipelineOrchestrator
 from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
@@ -177,11 +176,7 @@ def get_multi_camera_frame_processor(
         device=device
     )
 
-@lru_cache()
-def get_pipeline_orchestrator() -> PipelineOrchestrator:
-    """Dependency provider for PipelineOrchestrator."""
-    logger.debug("Initializing PipelineOrchestrator instance (or returning cached).")
-    return PipelineOrchestrator()
+# Note: Legacy PipelineOrchestrator removed with Re-ID pipeline deprecation.
 
 # --- Export Services ---
 

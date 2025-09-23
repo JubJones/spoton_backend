@@ -165,12 +165,9 @@ async def start_detection_processing_task_endpoint(
         
         # Apply per-request feature flags (backward compatible: only override if provided)
         original_tracking = getattr(settings, 'TRACKING_ENABLED', True)
-        original_reid = getattr(settings, 'REID_ENABLED', True)
         try:
             if params.enable_tracking is not None:
                 settings.TRACKING_ENABLED = bool(params.enable_tracking)
-            if params.enable_reid is not None:
-                settings.REID_ENABLED = bool(params.enable_reid)
         except Exception:
             pass
 
@@ -200,7 +197,6 @@ async def start_detection_processing_task_endpoint(
         # Restore global settings to avoid affecting other requests
         try:
             settings.TRACKING_ENABLED = original_tracking
-            settings.REID_ENABLED = original_reid
         except Exception:
             pass
         return response

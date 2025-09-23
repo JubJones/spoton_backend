@@ -36,7 +36,7 @@ class ByteTrackTracker(AbstractTracker):
 
         self.tracker_instance: Optional[ByteTrack] = None  # Type hint with ByteTrack
         self.device: Optional[torch.device] = None
-        # ByteTrack is motion-only; no ReID weights. Keep per-class behavior from settings.
+        # ByteTrack is motion-only; no identity model weights. Keep per-class behavior from settings.
         self.per_class: bool = settings.TRACKER_PER_CLASS
         # Optional: use app target FPS for ByteTrack frame_rate parameter
         self.frame_rate: int = getattr(settings, "TARGET_FPS", 30) or 30

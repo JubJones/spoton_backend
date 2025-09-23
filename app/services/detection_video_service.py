@@ -31,7 +31,6 @@ from app.services.homography_service import HomographyService
 from app.services.handoff_detection_service import HandoffDetectionService
 from app.services.trail_management_service import TrailManagementService
 from app.services.camera_tracker_factory import CameraTrackerFactory
-from app.domains.reid.services.reid_service import ReIDService
 
 logger = logging.getLogger(__name__)
 
@@ -84,35 +83,19 @@ class DetectionVideoService(RawVideoService):
         self.detection_times: List[float] = []
         self.annotation_times: List[float] = []
         
-        # --- Core Integration Architecture: Tracking & ReID scaffolding ---
+        # --- Core Integration Architecture: Tracking scaffolding ---
         # Per-camera trackers are managed via a factory. We keep references by camera_id.
         self.camera_trackers: Dict[str, Any] = {}
         self.tracker_factory: Optional[CameraTrackerFactory] = None
 
-        # ReID service instance and basic state stores
-        self.reid_service: Optional[ReIDService] = None
-        self.track_last_reid_frame: Dict[Tuple[str, int], int] = {}
-
-        # Global identity registry scaffolding
-        self.reid_gallery: Dict[str, np.ndarray] = {}
-        self.lost_track_gallery: Dict[str, Tuple[np.ndarray, int]] = {}
-        self.track_to_global_id: Dict[Tuple[str, int], str] = {}
-        self.global_id_last_seen_cam: Dict[str, str] = {}
-        self.global_id_last_seen_frame: Dict[str, int] = {}
-        self.next_global_id: int = 1
-
         # Enhanced statistics
         self.tracking_stats = {
             "total_tracks_created": 0,
-            "total_reid_matches": 0,
             "cross_camera_handoffs": 0,
-            "average_track_length": 0.0,
-            "reid_accuracy_estimate": 0.0
+            "average_track_length": 0.0
         }
 
-        # Frontend event deduplication cache
-        self._reported_reid_events: Set[Tuple[str, str, int]] = set()
-        self._last_emitted_global_for_track: Dict[Tuple[str, int], str] = {}
+        # Frontend event cache
 
         logger.info("DetectionVideoService initialized (Phase 4: Spatial Intelligence)")
     
@@ -167,12 +150,12 @@ class DetectionVideoService(RawVideoService):
             # Start trail cleanup background task
             await self._start_trail_cleanup_task()
 
-            # Core Integration: Optionally initialize tracking/ReID scaffolding (feature-flagged)
+            # Core Integration: Optionally initialize tracking scaffolding
             try:
                 if settings.TRACKING_ENABLED:
                     await self.initialize_tracking_services(environment_id)
             except Exception as e:
-                logger.warning(f"TRACKING/REID init skipped or failed (non-blocking): {e}")
+                logger.warning(f"TRACKING init skipped or failed (non-blocking): {e}")
             
             logger.info("✅ DETECTION SERVICE INIT: Detection and spatial intelligence services initialized successfully")
             return True
@@ -228,7 +211,7 @@ class DetectionVideoService(RawVideoService):
 
     # --- Core Integration Architecture Methods (scaffolding) ---
     async def initialize_tracking_services(self, environment_id: str) -> bool:
-        """Initialize per-camera trackers via factory and prepare ReID service. No behavior change if disabled."""
+        """Initialize per-camera trackers via factory."""
         try:
             # Lazily create tracker factory using compute device heuristics from BoxMOT
             if self.tracker_factory is None:
@@ -249,33 +232,18 @@ class DetectionVideoService(RawVideoService):
                 except Exception as e:
                     logger.warning(f"Failed to initialize tracker for camera {camera_id}: {e}")
 
-            # Initialize ReID service if enabled
-            if settings.REID_ENABLED:
-                self.reid_service = ReIDService(
-                    model_type=settings.REID_MODEL_TYPE,
-                    similarity_threshold=settings.REID_SIMILARITY_THRESHOLD,
-                    enable_gpu=True,
-                    batch_size=getattr(settings, 'REID_BATCH_SIZE', 16)
-                )
-                try:
-                    await self.reid_service.initialize_model()
-                except Exception as e:
-                    logger.warning(f"ReID model initialization failed (non-blocking): {e}")
-                    self.reid_service = None
-
-            logger.info(f"Tracking/ReID scaffolding prepared for environment {environment_id} (trackers: {len(self.camera_trackers)}, reid: {self.reid_service is not None})")
+            logger.info(f"Tracking scaffolding prepared for environment {environment_id} (trackers: {len(self.camera_trackers)})")
             return True
         except Exception as e:
             logger.warning(f"initialize_tracking_services encountered an issue (non-blocking): {e}")
             return False
 
-    async def process_frame_with_tracking_and_reid(self, frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[str, Any]:
-        """Process frame with detection, then integrate tracking and optional ReID association.
+    async def process_frame_with_tracking(self, frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[str, Any]:
+        """Process frame with detection, then integrate tracking and spatial intelligence.
 
         - Runs existing detection + spatial intelligence pipeline
         - If tracking is enabled and a tracker is available for the camera, updates tracks
         - Enhances track data with map coordinates and short trajectories
-        - If ReID is enabled and model loaded, performs selective feature extraction and gallery matching
         """
         # Step 1: Run detection pipeline (includes spatial intelligence)
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
@@ -296,24 +264,6 @@ class DetectionVideoService(RawVideoService):
             logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
             tracks = []
 
-        # Step 3: ReID feature extraction and cross-camera association (gallery matching)
-        try:
-            if tracks and settings.REID_ENABLED and getattr(settings, 'ENABLE_CROSS_CAMERA_REID', True) and self.reid_service is not None:
-                extracted = await self.extract_reid_features_selective(tracks, frame, camera_id, frame_number)
-                assignments = await self.perform_cross_camera_reid(extracted, camera_id, frame_number)
-                # Apply assignments to track objects
-                for track in tracks:
-                    key = (camera_id, track.get("track_id"))
-                    if key in assignments:
-                        assign_data = assignments[key]
-                        track["global_id"] = assign_data["global_id"]
-                        track["reid_confidence"] = assign_data.get("confidence")
-                        # Record last seen
-                        self.global_id_last_seen_cam[assign_data["global_id"]] = camera_id
-                        self.global_id_last_seen_frame[assign_data["global_id"]] = frame_number
-        except Exception as e:
-            logger.warning(f"ReID association skipped due to error: {e}")
-
         # Step 3: Attach tracks to detection data for downstream consumers
         detection_data["tracks"] = tracks
         
@@ -325,12 +275,11 @@ class DetectionVideoService(RawVideoService):
             pass
         return detection_data
 
-    def get_tracking_and_reid_stats(self) -> Dict[str, Any]:
-        """Return current tracking/ReID stats without affecting existing API."""
+    def get_tracking_stats(self) -> Dict[str, Any]:
+        """Return current tracking stats without affecting existing API."""
         return {
             **self.tracking_stats,
-            "trackers_initialized": len(self.camera_trackers),
-            "reid_initialized": self.reid_service is not None
+            "trackers_initialized": len(self.camera_trackers)
         }
     
     async def process_frame_with_detection(self, frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[str, Any]:
@@ -561,8 +510,8 @@ class DetectionVideoService(RawVideoService):
                         if ret:
                             camera_frames[camera_id] = frame
                             
-                            # Process frame with enhanced flow stub (detection -> tracking/reid pipeline placeholder)
-                            detection_data = await self.process_frame_with_tracking_and_reid(
+                            # Process frame with enhanced flow stub (detection -> tracking pipeline)
+                            detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
                             camera_detections[camera_id] = detection_data
@@ -748,7 +697,6 @@ class DetectionVideoService(RawVideoService):
                     "tracking_data": {
                         "track_count": len(detection_data.get("tracks", []))
                     } if detection_data.get("tracks") is not None else None,
-                    "reid_data": None,      # Placeholder: Cross-camera re-identification data (future)
                     # Phase 4: Populated homography and mapping data
                     "homography_data": homography_data,
                     "mapping_coordinates": mapping_coordinates if mapping_coordinates else None
@@ -773,7 +721,7 @@ class DetectionVideoService(RawVideoService):
             return False
 
     async def _emit_frontend_events(self, task_id: Optional[uuid.UUID], camera_id: str, frame_number: int, tracks: List[Dict[str, Any]]):
-        """Emit auxiliary WebSocket events for frontend: trajectories, reid matches, and stats."""
+        """Emit auxiliary WebSocket events for frontend: trajectories and tracking stats."""
         # 1) Emit person_trajectory_update
         try:
             trajectory_payload = {
@@ -795,32 +743,7 @@ class DetectionVideoService(RawVideoService):
         except Exception:
             pass
 
-        # 2) Emit reid_match_event for new assignments
-        try:
-            for t in tracks:
-                gid = t.get("global_id")
-                if gid:
-                    key = (camera_id, gid, frame_number)
-                    if key not in self._reported_reid_events:
-                        event_payload = {
-                            "type": MessageType.TRACKING_UPDATE.value,
-                            "message_type": "reid_match_event",
-                            "camera_id": camera_id,
-                            "global_frame_index": frame_number,
-                            "event": {
-                                "track_id": t.get("track_id"),
-                                "global_id": gid,
-                                "confidence": t.get("reid_confidence"),
-                                "last_seen_camera": t.get("last_seen_camera")
-                            }
-                        }
-                        if task_id is not None:
-                            await binary_websocket_manager.send_json_message(str(task_id), event_payload, MessageType.TRACKING_UPDATE)
-                        self._reported_reid_events.add(key)
-        except Exception:
-            pass
-
-        # 3) Emit tracking_statistics snapshot occasionally
+        # 2) Emit tracking_statistics snapshot occasionally
         try:
             if frame_number % 30 == 0:  # every ~1-2 seconds depending on FPS
                 stats_payload = {
@@ -828,153 +751,12 @@ class DetectionVideoService(RawVideoService):
                     "message_type": "tracking_statistics",
                     "camera_id": camera_id,
                     "global_frame_index": frame_number,
-                    "stats": self.get_tracking_and_reid_stats()
+                    "stats": self.get_tracking_stats()
                 }
                 if task_id is not None:
                     await binary_websocket_manager.send_json_message(str(task_id), stats_payload, MessageType.TRACKING_UPDATE)
         except Exception:
             pass
-
-    async def extract_reid_features_selective(self, tracks: List[Dict[str, Any]], frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[Tuple[str, int], np.ndarray]:
-        """Selective ReID feature extraction for tracks that need refresh.
-
-        Returns mapping: (camera_id, track_id) -> L2-normalized feature vector (np.ndarray).
-        """
-        needs_extraction: List[Dict[str, Any]] = []
-        for tr in tracks:
-            track_id = tr.get("track_id")
-            key = (camera_id, track_id)
-            last = self.track_last_reid_frame.get(key, -10**9)
-            if key not in self.track_to_global_id or (frame_number - last) >= getattr(settings, 'REID_REFRESH_INTERVAL_FRAMES', 10):
-                needs_extraction.append(tr)
-
-        if not needs_extraction or self.reid_service is None:
-            return {}
-
-        # Prepare crops
-        crops: List[np.ndarray] = []
-        keys: List[Tuple[str, int]] = []
-        h, w = frame.shape[:2]
-        for tr in needs_extraction:
-            x1, y1, x2, y2 = tr.get("bbox_xyxy", [0, 0, 0, 0])
-            x1i = max(0, min(int(x1), w - 1))
-            y1i = max(0, min(int(y1), h - 1))
-            x2i = max(0, min(int(x2), w))
-            y2i = max(0, min(int(y2), h))
-            if x2i > x1i and y2i > y1i:
-                crop = frame[y1i:y2i, x1i:x2i].copy()
-                crops.append(crop)
-                keys.append((camera_id, tr.get("track_id")))
-
-        if not crops:
-            return {}
-
-        # Extract features via underlying model for efficiency
-        try:
-            feature_vecs = await self.reid_service.model.extract_features_batch(crops)  # returns List[FeatureVector]
-        except Exception as e:
-            logger.warning(f"Feature extraction failed: {e}")
-            return {}
-
-        out: Dict[Tuple[str, int], np.ndarray] = {}
-        for key, fv in zip(keys, feature_vecs):
-            vec = np.array(fv.vector if hasattr(fv, 'vector') else fv.features, dtype=np.float32)
-            # Ensure L2 normalization
-            norm = np.linalg.norm(vec)
-            if norm > 1e-6:
-                vec = vec / norm
-            out[key] = vec
-            self.track_last_reid_frame[key] = frame_number
-        return out
-
-    async def perform_cross_camera_reid(self, extracted_features: Dict[Tuple[str, int], np.ndarray], camera_id: str, frame_number: int) -> Dict[Tuple[str, int], Dict[str, Any]]:
-        """Match track features against gallery to assign/propagate global IDs.
-
-        Returns mapping to {global_id, confidence}.
-        """
-        assignments: Dict[Tuple[str, int], Dict[str, Any]] = {}
-        if not extracted_features:
-            return assignments
-
-        threshold = getattr(settings, 'REID_SIMILARITY_THRESHOLD', 0.65)
-        alpha = getattr(settings, 'REID_GALLERY_EMA_ALPHA', 0.9)
-
-        # Prepare gallery arrays for efficient comparison
-        gallery_ids = list(self.reid_gallery.keys())
-        gallery_matrix = None
-        if gallery_ids:
-            try:
-                gallery_matrix = np.stack([self.reid_gallery[g] for g in gallery_ids], axis=0)
-            except Exception:
-                gallery_matrix = None
-
-        for key, feat in extracted_features.items():
-            best_gid = None
-            best_sim = -1.0
-
-            # Find best match in gallery (skip own-camera current assignment preference later)
-            if gallery_matrix is not None and gallery_matrix.size > 0:
-                # Compute cosine sim: since both L2-normalized, dot product
-                sims = np.dot(gallery_matrix, feat)
-                idx = int(np.argmax(sims))
-                best_sim = float(sims[idx])
-                best_gid = gallery_ids[idx]
-
-            # Decide assignment
-            if best_gid is not None and best_sim >= threshold:
-                global_id = best_gid
-                self.tracking_stats["total_reid_matches"] += 1
-            else:
-                # Create new global id
-                global_id = f"person_{self.next_global_id}"
-                self.next_global_id += 1
-                best_sim = 1.0  # Confidence for self-initialization
-
-            # Update registries
-            self.track_to_global_id[key] = global_id
-            self.global_id_last_seen_cam[global_id] = camera_id
-            self.global_id_last_seen_frame[global_id] = frame_number
-            # EMA update gallery
-            self._update_gallery_with_ema(global_id, feat, alpha)
-
-            assignments[key] = {"global_id": global_id, "confidence": best_sim}
-
-        # Bound gallery size
-        max_gallery = getattr(settings, 'REID_MAX_GALLERY_SIZE', 1000)
-        if len(self.reid_gallery) > max_gallery:
-            # Drop oldest by last seen
-            try:
-                sorted_ids = sorted(self.global_id_last_seen_frame.items(), key=lambda kv: kv[1])
-                to_drop = len(self.reid_gallery) - max_gallery
-                for gid, _ in sorted_ids[:to_drop]:
-                    if gid in self.reid_gallery:
-                        del self.reid_gallery[gid]
-            except Exception:
-                pass
-
-        return assignments
-
-    def _update_gallery_with_ema(self, global_id: str, new_feature: np.ndarray, alpha: float) -> None:
-        """Update gallery using Exponential Moving Average and re-normalize."""
-        if global_id in self.reid_gallery:
-            prev = self.reid_gallery[global_id]
-            updated = alpha * prev + (1.0 - alpha) * new_feature
-            # Re-normalize
-            norm = np.linalg.norm(updated)
-            if norm > 1e-6:
-                updated = updated / norm
-            self.reid_gallery[global_id] = updated
-        else:
-            self.reid_gallery[global_id] = new_feature
-
-    async def update_global_person_registry(self, detections: List[Dict[str, Any]], camera_id: str) -> Dict[str, Any]:
-        """Minimal registry update hook (currently handled during ReID assignment)."""
-        summary = {
-            "gallery_size": len(self.reid_gallery),
-            "active_globals": len(self.track_to_global_id),
-            "last_seen_camera": dict(self.global_id_last_seen_cam)
-        }
-        return summary
 
     def _convert_detections_to_boxmot_format(self, detections: List[Dict[str, Any]]) -> np.ndarray:
         """Convert detection dicts to BoxMOT format array [x1, y1, x2, y2, conf, cls]."""
@@ -1014,7 +796,7 @@ class DetectionVideoService(RawVideoService):
                 class_id = int(row[6]) if row.shape[0] > 6 else 0
                 track = {
                     "track_id": track_id,
-                    "global_id": None,  # Placeholder to be populated by ReID association later
+                    "global_id": None,
                     "bbox_xyxy": [x1, y1, x2, y2],
                     "confidence": confidence,
                     "class_id": class_id,
@@ -1024,7 +806,7 @@ class DetectionVideoService(RawVideoService):
                     # Tracker-provided metadata (placeholders if unavailable)
                     "age": None,
                     "status": "active",
-                    # ReID placeholders
+                    # Identity placeholders
                     "reid_confidence": None,
                     "last_seen_camera": camera_id,
                     "is_focused": False
@@ -1073,7 +855,7 @@ class DetectionVideoService(RawVideoService):
         Simplified detection processing pipeline (detection-only).
         
         Focuses only on person detection with RT-DETR, sends results via WebSocket
-        with static null values for future pipeline features (tracking, re-ID, homography).
+        with static null values for future pipeline features (homography-only details).
         """
         pipeline_start = time.time()
         
@@ -1156,8 +938,8 @@ class DetectionVideoService(RawVideoService):
                     if cap and cap.isOpened():
                         ret, frame = cap.read()
                         if ret:
-                            # Run enhanced flow stub on frame (routes to detection for now)
-                            detection_data = await self.process_frame_with_tracking_and_reid(
+                            # Run enhanced flow stub on frame (routes to detection + tracking)
+                            detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
                             
@@ -1244,8 +1026,8 @@ class DetectionVideoService(RawVideoService):
                     if cap and cap.isOpened():
                         ret, frame = cap.read()
                         if ret:
-                            # Detect + (future) Track/ReID + Annotate + Stream in real-time (stubbed)
-                            detection_data = await self.process_frame_with_tracking_and_reid(
+                            # Detect + Track + Annotate + Stream in real-time (stubbed)
+                            detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
                             
@@ -1347,15 +1129,7 @@ class DetectionVideoService(RawVideoService):
         return stats
     
     def _get_environment_for_camera(self, camera_id: str) -> Optional[str]:
-        """
-        Get environment ID for a given camera ID by looking up VIDEO_SETS configuration.
-        
-        Args:
-            camera_id: Camera identifier (e.g., 'c09')
-            
-        Returns:
-            Environment ID (e.g., 'campus', 'factory') or None if not found
-        """
+        # Get environment ID for a given camera ID by looking up VIDEO_SETS configuration.
         try:
             for video_set in settings.VIDEO_SETS:
                 if video_set.cam_id == camera_id:

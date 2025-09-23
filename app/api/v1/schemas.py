@@ -10,7 +10,6 @@ class ProcessingTaskStartRequest(BaseModel):
     environment_id: str = Field(..., description="Identifier for the environment (e.g., 'campus', 'factory') to process.")
     # Optional feature flags (backward-compatible): if omitted, service-level defaults are used
     enable_tracking: Optional[bool] = Field(None, description="Enable intra-camera tracking for this task (overrides global setting if provided).")
-    enable_reid: Optional[bool] = Field(None, description="Enable cross-camera ReID for this task (overrides global setting if provided).")
 
 # --- Response Schemas ---
 
@@ -34,7 +33,7 @@ class TaskStatusResponse(BaseModel):
 class TrackedPersonData(BaseModel):
     """Data for a single tracked person in a frame for WebSocket output."""
     track_id: int
-    global_id: Optional[str] = Field(None, description="Globally unique ID assigned by Re-ID (null if not identified).")
+    global_id: Optional[str] = Field(None, description="Globally unique ID (null if not assigned).")
     bbox_xyxy: List[float] = Field(..., description="Bounding box in image coordinates [x1, y1, x2, y2]")
     confidence: Optional[float] = Field(None, description="Detection confidence score.")
     class_id: Optional[int] = Field(None, description="Class ID of the detection (e.g., 1 for person).")

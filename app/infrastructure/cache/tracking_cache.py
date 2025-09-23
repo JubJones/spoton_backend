@@ -3,7 +3,6 @@ Redis-based caching service for real-time tracking state management.
 
 Handles:
 - Person tracking state caching
-- ReID embedding caching
 - Session state management
 - Multi-camera tracking state
 """
@@ -22,8 +21,7 @@ from redis.asyncio import Redis as AsyncRedis
 
 from app.infrastructure.cache.redis_client import get_redis_async
 from app.shared.types import CameraID
-from app.domains.reid.entities.person_identity import PersonIdentity
-from app.domains.reid.entities.feature_vector import FeatureVector
+from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
 
@@ -62,7 +60,6 @@ class TrackingCache:
     
     Features:
     - Person tracking state caching
-    - ReID embedding caching with TTL
     - Session state management
     - Multi-camera tracking coordination
     """
@@ -117,10 +114,10 @@ class TrackingCache:
     # Person State Management
     async def cache_person_state(
         self,
-        person_identity: PersonIdentity,
+        person_identity: Any,
         camera_id: CameraID,
         position: Optional[Coordinate] = None,
-        trajectory: Optional[Trajectory] = None
+        trajectory: Optional[Trajectory] = None,
     ) -> bool:
         """Cache person tracking state."""
         try:
@@ -128,20 +125,42 @@ class TrackingCache:
                 await self.initialize()
             
             # Convert to cached state format
+            # Support either object with attrs or dict-like
+            gid = getattr(person_identity, 'global_id', None)
+            if gid is None and isinstance(person_identity, dict):
+                gid = person_identity.get('global_id')
+            confidence = getattr(person_identity, 'confidence', 0.0)
+            if isinstance(person_identity, dict):
+                confidence = person_identity.get('confidence', confidence)
+            track_id = getattr(person_identity, 'track_id', None)
+            if isinstance(person_identity, dict):
+                track_id = person_identity.get('track_id', track_id)
+            fv = getattr(person_identity, 'feature_vector', None)
+            if isinstance(person_identity, dict):
+                fv = person_identity.get('feature_vector', fv)
+            fv_vec = None
+            if fv is not None:
+                # Support object with vector attr or dict with 'vector'
+                fv_vec = getattr(fv, 'vector', None)
+                if fv_vec is None and isinstance(fv, dict):
+                    fv_vec = fv.get('vector')
+                if isinstance(fv_vec, np.ndarray):
+                    fv_vec = fv_vec.tolist()
+
             cached_state = CachedPersonState(
-                global_id=person_identity.global_id,
+                global_id=str(gid) if gid is not None else "",
                 last_seen_camera=str(camera_id),
                 last_seen_time=datetime.now(timezone.utc),
                 current_position=position.to_dict() if position else None,
-                confidence=person_identity.confidence,
-                track_id=person_identity.track_id,
-                embedding=person_identity.feature_vector.vector.tolist() if person_identity.feature_vector else None,
-                trajectory_points=trajectory.to_dict()['points'] if trajectory else [],
-                is_active=person_identity.is_active
+                confidence=float(confidence),
+                track_id=str(track_id) if track_id is not None else None,
+                embedding=fv_vec,
+                trajectory_points=(trajectory.to_dict()['points'] if trajectory else []),
+                is_active=bool(getattr(person_identity, 'is_active', True))
             )
             
             # Cache with TTL
-            key = f"{self.person_key_prefix}:{person_identity.global_id}"
+            key = f"{self.person_key_prefix}:{cached_state.global_id}"
             await self.redis.setex(
                 key,
                 self.person_state_ttl,
@@ -149,10 +168,10 @@ class TrackingCache:
             )
             
             # Update camera-specific index
-            await self._update_camera_person_index(camera_id, person_identity.global_id)
+            await self._update_camera_person_index(camera_id, cached_state.global_id)
             
             self.cache_stats["writes"] += 1
-            logger.debug(f"Cached person state for {person_identity.global_id}")
+            logger.debug(f"Cached person state for {cached_state.global_id}")
             
             return True
             
@@ -265,25 +284,38 @@ class TrackingCache:
             logger.error(f"Error deactivating person: {e}")
             return False
     
-    # ReID Embedding Management
+    # Embedding Management
     async def cache_embedding(
         self,
         person_id: str,
-        feature_vector: FeatureVector,
-        camera_id: CameraID
+        feature_vector: Any,
+        camera_id: CameraID,
     ) -> bool:
-        """Cache ReID embedding with metadata."""
+        """Cache embedding with metadata."""
         try:
             if not self.redis:
                 await self.initialize()
             
+            # Support object or dict feature vector
+            vec = getattr(feature_vector, 'vector', None)
+            if vec is None and isinstance(feature_vector, dict):
+                vec = feature_vector.get('vector')
+            if isinstance(vec, np.ndarray):
+                vec = vec.tolist()
+            confidence = getattr(feature_vector, 'confidence', None)
+            if isinstance(feature_vector, dict):
+                confidence = feature_vector.get('confidence', confidence)
+            model_version = getattr(feature_vector, 'model_version', None)
+            if isinstance(feature_vector, dict):
+                model_version = feature_vector.get('model_version', model_version)
+
             embedding_data = {
                 "person_id": person_id,
-                "vector": feature_vector.vector.tolist(),
+                "vector": vec,
                 "camera_id": str(camera_id),
                 "timestamp": datetime.now(timezone.utc).isoformat(),
-                "confidence": feature_vector.confidence,
-                "model_version": feature_vector.model_version
+                "confidence": confidence,
+                "model_version": model_version,
             }
             
             key = f"{self.embedding_key_prefix}:{person_id}:{camera_id}"

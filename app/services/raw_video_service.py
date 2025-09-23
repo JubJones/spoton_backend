@@ -3,7 +3,7 @@ Raw video streaming service - streams video frames without AI processing.
 
 Provides:
 - Raw video frame streaming from multiple cameras
-- No AI processing (detection, tracking, re-identification)
+    - No AI processing (no detection/tracking/id association)
 - Direct frame-to-WebSocket streaming
 - Background task management for raw video streaming
 """
@@ -19,7 +19,6 @@ import numpy as np
 import cv2
 
 from app.core.config import settings
-from app.infrastructure.cache.redis_client import redis_client
 from app.services.video_data_manager_service import VideoDataManagerService
 from app.utils.asset_downloader import AssetDownloader
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType

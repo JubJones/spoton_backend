@@ -7,7 +7,7 @@ and operational insights for production optimization.
 
 Features:
 - Real-time performance metrics collection
-- Pipeline component monitoring (Detection, Re-ID, Homography, Handoff)
+- Pipeline component monitoring (Detection, Homography, Handoff)
 - Resource utilization tracking (CPU, GPU, Memory)
 - Quality metrics and SLA monitoring
 - Alert generation and threshold management

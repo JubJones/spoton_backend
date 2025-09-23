@@ -446,7 +446,6 @@ class HealthChecker:
             details = {
                 "detector": "RT-DETR",
                 "tracker": "ByteTrack",
-                "reid_model": "CLIP",
                 "model_warmup_completed": True,
             }
             

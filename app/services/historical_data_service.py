@@ -13,19 +13,18 @@ Comprehensive service for managing historical tracking data including:
 import asyncio
 import logging
 import time
-from typing import Dict, List, Optional, Any, Tuple, Union
+from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 import json
 import gzip
-import pickle
 from pathlib import Path
 
 from app.infrastructure.cache.tracking_cache import TrackingCache
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.domains.detection.entities.detection import Detection
-from app.domains.reid.entities.person_identity import PersonIdentity
+from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,7 @@ class HistoricalDataPoint:
     camera_id: str
     detection: Detection
     coordinates: Optional[Coordinate] = None
-    person_identity: Optional[PersonIdentity] = None
+    person_identity: Optional[Any] = None
     environment_id: str = "default"
     session_id: Optional[str] = None
     
@@ -62,11 +61,14 @@ class HistoricalDataPoint:
                 'y': self.coordinates.y,
                 'confidence': getattr(self.coordinates, 'confidence', 1.0)
             } if self.coordinates else None,
-            'person_identity': {
-                'person_id': self.person_identity.person_id,
-                'confidence': self.person_identity.confidence,
-                'global_id': getattr(self.person_identity, 'global_id', None)
-            } if self.person_identity else None
+            'person_identity': (
+                {
+                    'person_id': getattr(self.person_identity, 'person_id', None) if not isinstance(self.person_identity, dict) else self.person_identity.get('person_id'),
+                    'confidence': getattr(self.person_identity, 'confidence', None) if not isinstance(self.person_identity, dict) else self.person_identity.get('confidence'),
+                    'global_id': getattr(self.person_identity, 'global_id', None) if not isinstance(self.person_identity, dict) else self.person_identity.get('global_id'),
+                }
+                if self.person_identity is not None else None
+            )
         }
     
     @classmethod
@@ -89,15 +91,8 @@ class HistoricalDataPoint:
                 y=coord_data['y']
             )
         
-        # Reconstruct person identity
-        person_identity = None
-        if data.get('person_identity'):
-            identity_data = data['person_identity']
-            person_identity = PersonIdentity(
-                person_id=identity_data['person_id'],
-                confidence=identity_data['confidence'],
-                feature_vector=None  # Not stored in historical data
-            )
+        # Reconstruct person identity (store dict only; ReID entity removed)
+        person_identity = data.get('person_identity') or None
         
         return cls(
             timestamp=datetime.fromisoformat(data['timestamp']),
@@ -293,7 +288,7 @@ class HistoricalDataService:
         camera_id: str,
         detection: Detection,
         coordinates: Optional[Coordinate] = None,
-        person_identity: Optional[PersonIdentity] = None,
+        person_identity: Optional[Any] = None,
         environment_id: str = "default",
         session_id: Optional[str] = None
     ):
@@ -516,11 +511,11 @@ class HistoricalDataService:
         # Create PersonIdentity object if available
         person_identity = None
         if record.get('person_id') and record.get('identity_confidence'):
-            person_identity = PersonIdentity(
-                person_id=record['person_id'],
-                confidence=record['identity_confidence'],
-                feature_vector=None
-            )
+            person_identity = {
+                'person_id': record['person_id'],
+                'confidence': record['identity_confidence'],
+                'global_id': record.get('global_person_id')
+            }
         
         return HistoricalDataPoint(
             timestamp=record['timestamp'],

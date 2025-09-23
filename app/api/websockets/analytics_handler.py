@@ -89,7 +89,7 @@ class AnalyticsHandler:
         """Get current analytics data for a task."""
         try:
             # TODO: Integrate with actual tracking system for real metrics
-            # This would pull data from the pipeline orchestrator, reid service, etc.
+            # Legacy identity pipeline integrations removed; using placeholders.
             
             # For now, generate placeholder analytics data
             current_time = datetime.utcnow()
@@ -112,7 +112,6 @@ class AnalyticsHandler:
                 "performance_metrics": {
                     "average_detection_confidence": 0.89,
                     "tracking_accuracy": 0.92,
-                    "reid_success_rate": 0.78,
                     "frame_processing_latency": 83.2,  # milliseconds
                     "camera_handoff_success": 0.85
                 },
@@ -140,8 +139,7 @@ class AnalyticsHandler:
                 # System health
                 "system_health": {
                     "detector_status": "healthy",
-                    "tracker_status": "healthy", 
-                    "reid_service_status": "healthy",
+                    "tracker_status": "healthy",
                     "database_status": "healthy",
                     "gpu_utilization": 0.34,
                     "gpu_memory_usage": 0.52

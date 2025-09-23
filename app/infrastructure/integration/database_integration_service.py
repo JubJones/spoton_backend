@@ -16,8 +16,7 @@ from contextlib import asynccontextmanager
 from app.infrastructure.database.integrated_database_service import integrated_db_service
 from app.infrastructure.cache.tracking_cache import tracking_cache
 from app.domains.detection.entities.detection import Detection, BoundingBox
-from app.domains.reid.entities.person_identity import PersonIdentity
-from app.domains.reid.entities.feature_vector import FeatureVector
+from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
 from app.shared.types import CameraID
@@ -140,14 +139,14 @@ class DatabaseIntegrationService:
             self.service_stats['failed_operations'] += 1
             return []
     
-    # ReID Domain Integration
+    # Identity Domain Integration
     async def store_person_identity(
         self,
-        person_identity: PersonIdentity,
+        person_identity: Any,
         camera_id: CameraID,
         position: Optional[Coordinate] = None,
         trajectory: Optional[Trajectory] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> bool:
         """Store person identity data in the database."""
         try:
@@ -163,19 +162,20 @@ class DatabaseIntegrationService:
             )
             
             # Cache embedding if available
-            if success and person_identity.feature_vector:
+            fv = getattr(person_identity, 'feature_vector', None)
+            if success and fv:
                 await tracking_cache.cache_embedding(
-                    person_id=person_identity.global_id,
-                    feature_vector=person_identity.feature_vector,
+                    person_id=getattr(person_identity, 'global_id', None) if not isinstance(person_identity, dict) else person_identity.get('global_id'),
+                    feature_vector=fv,
                     camera_id=camera_id
                 )
             
             if success:
                 self.service_stats['successful_operations'] += 1
-                logger.debug(f"Stored person identity {person_identity.global_id}")
+                logger.debug(f"Stored person identity {getattr(person_identity, 'global_id', None)}")
             else:
                 self.service_stats['failed_operations'] += 1
-                logger.warning(f"Failed to store person identity {person_identity.global_id}")
+                logger.warning(f"Failed to store person identity {getattr(person_identity, 'global_id', None)}")
             
             return success
             

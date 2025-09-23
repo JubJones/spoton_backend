@@ -59,7 +59,7 @@ async def lifespan(app_instance: FastAPI):
         app_instance.state.compute_device = device
         logger.info(f"Compute device set to: {device}")
 
-        # Preload tracker factory (loads ReID model prototype)
+        # Preload tracker factory (ByteTrack prototype)
         tracker_factory = CameraTrackerFactory(device=device)
         try:
             await tracker_factory.preload_prototype_tracker()
@@ -146,7 +146,7 @@ async def health_check(request: Request):
     status_report = {
         "status": "healthy",
         "detector_model_loaded": bool(detector_ready),
-        "prototype_tracker_loaded (reid_model)": bool(tracker_factory_ready),
+        "prototype_tracker_loaded": bool(tracker_factory_ready),
         "homography_matrices_precomputed": bool(homography_ready)
     }
     if not all([detector_ready, tracker_factory_ready, homography_ready]):

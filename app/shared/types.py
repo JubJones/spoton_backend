@@ -2,7 +2,7 @@
 """
 Module for shared type aliases and data structures used across the application.
 """
-from typing import Dict, Any, Tuple, Optional, List, NewType, NamedTuple, Set, Callable
+from typing import Dict, Tuple, Optional, List, NewType, NamedTuple, Callable
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -39,14 +39,7 @@ class TrackedObjectData(BaseModel):
     class Config:
         arbitrary_types_allowed = True
 
-# Example for a message payload, can be refined
-class FrameProcessingUpdatePayload(BaseModel):
-    """Payload for WebSocket tracking updates."""
-    task_id: str
-    camera_id: CameraID
-    frame_path: str # Path of the frame being reported
-    timestamp_utc: str # ISO format timestamp
-    tracked_objects: List[TrackedObjectData]
+# Removed unused FrameProcessingUpdatePayload model
 
 
 # --- Handoff Logic Types (Inspired by POC) ---

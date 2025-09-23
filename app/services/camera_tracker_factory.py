@@ -19,7 +19,7 @@ class CameraTrackerFactory:
     """
     Manages instances of trackers, providing a unique tracker for each camera
     within a given processing task.
-    Can also preload a prototype tracker to warm up shared ReID models.
+    Can also preload a prototype tracker to warm up model code paths.
     """
 
     def __init__(self, device: torch.device):
@@ -39,27 +39,25 @@ class CameraTrackerFactory:
     async def preload_prototype_tracker(self):
         """
         Creates and loads a 'prototype' tracker (configured via settings.TRACKER_TYPE).
-        The primary purpose is to ensure that any shared models it uses (like ReID)
-        are loaded into memory/GPU during application startup.
+        The primary purpose is to ensure relevant code paths are warmed up during startup.
         The prototype itself isn't typically used for actual tracking tasks.
         """
         if self._prototype_tracker_loaded:
-            logger.info("Prototype tracker (and its ReID model) already preloaded.")
+            logger.info("Prototype tracker already preloaded.")
             return
 
         logger.info("Preloading prototype ByteTrack tracker...")
         try:
             # Create a temporary tracker instance for warmup
             prototype_tracker = ByteTrackTracker()
-            await prototype_tracker.load_model() # This loads the ReID model.
+            await prototype_tracker.load_model()
             await prototype_tracker.warmup() # Warm up the loaded prototype
             
             self._prototype_tracker_loaded = True
             logger.info("Prototype ByteTrack tracker preloaded and warmed up successfully.")
             # The prototype_tracker instance can be discarded here if its only role was preloading.
-            # PyTorch/BoxMOT should keep the ReID model weights in cache/memory if loaded correctly.
         except Exception as e:
-            logger.error(f"Failed to preload prototype tracker (ReID model): {e}", exc_info=True)
+            logger.error(f"Failed to preload prototype tracker: {e}", exc_info=True)
             # Depending on severity, could raise to halt startup or just log.
             # For now, just log, subsequent get_tracker calls will try to load individually.
             self._prototype_tracker_loaded = False # Explicitly mark as not successful
@@ -69,8 +67,7 @@ class CameraTrackerFactory:
         """
         Provides a tracker instance for the specified camera and task.
         If an instance for this combination doesn't exist, it creates,
-        loads, and caches one. Relies on ReID model being preloaded if
-        preload_prototype_tracker was successful.
+        loads, and caches one.
 
         Args:
             task_id: The unique identifier for the processing task.
@@ -85,8 +82,7 @@ class CameraTrackerFactory:
             tracker = ByteTrackTracker()
             
             try:
-                # The tracker's load_model method should handle device placement
-                # and ReID model loading. If prototype loading worked, this might be faster.
+                # The tracker's load_model method should handle device placement.
                 await tracker.load_model()
                 # No separate warmup here for task-specific trackers unless desired for absolute first frame.
                 # The prototype warmup should cover general JIT.

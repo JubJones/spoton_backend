@@ -17,7 +17,7 @@ import time
 
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
 from app.infrastructure.gpu import get_gpu_manager
-from app.orchestration.pipeline_orchestrator import orchestrator
+# Legacy orchestrator removed with Re-ID deprecation
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -159,26 +159,13 @@ class StatusHandler:
                     }
             
             # Collect pipeline information
-            pipeline_info = {}
-            if orchestrator:
-                try:
-                    pipeline_stats = orchestrator.get_pipeline_stats()
-                    pipeline_info = {
-                        "pipeline_active": orchestrator.is_initialized(),
-                        "active_tasks": len(orchestrator.get_active_tasks()),
-                        "total_frames_processed": pipeline_stats.get("total_frames_processed", 0),
-                        "processing_fps": self._calculate_processing_fps(pipeline_stats),
-                        "average_processing_time": pipeline_stats.get("average_processing_time", 0.0)
-                    }
-                except Exception as e:
-                    logger.warning(f"Error collecting pipeline info: {e}")
-                    pipeline_info = {
-                        "pipeline_active": False,
-                        "active_tasks": 0,
-                        "total_frames_processed": 0,
-                        "processing_fps": 0.0,
-                        "average_processing_time": 0.0
-                    }
+            pipeline_info = {
+                "pipeline_active": False,
+                "active_tasks": 0,
+                "total_frames_processed": 0,
+                "processing_fps": 0.0,
+                "average_processing_time": 0.0,
+            }
             
             # Collect connection information
             connection_info = {
@@ -352,8 +339,7 @@ class StatusHandler:
             if self.gpu_manager and not self.gpu_manager.is_available():
                 return "degraded"
             
-            if not orchestrator.is_initialized():
-                return "down"
+            # Pipeline orchestrator removed; base status on resource checks only
             
             # Check resource usage
             if self.cached_status:

@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
-from app.domains.reid.entities.person_identity import PersonIdentity
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
 from app.shared.types import CameraID, TrackID, GlobalID
@@ -78,11 +77,11 @@ class TrackingHandler:
         logger.info("TrackingHandler initialized")
     
     async def send_tracking_update(
-        self, 
-        task_id: str, 
-        person_identity: PersonIdentity,
+        self,
+        task_id: str,
+        person_identity: Any,
         current_position: Optional[Coordinate] = None,
-        trajectory: Optional[Trajectory] = None
+        trajectory: Optional[Trajectory] = None,
     ) -> bool:
         """
         Send tracking update for a person.
@@ -100,21 +99,22 @@ class TrackingHandler:
             update_start = time.time()
             
             # Check throttling
-            person_key = f"{task_id}_{person_identity.global_id}"
+            gid = getattr(person_identity, 'global_id', None)
+            if gid is None and isinstance(person_identity, dict):
+                gid = person_identity.get('global_id')
+            person_key = f"{task_id}_{gid}"
             if not self._should_send_update(person_key):
                 return True  # Skip this update
             
             # Create tracking update
-            tracking_update = self._create_tracking_update(
-                person_identity, current_position, trajectory
-            )
+            tracking_update = self._create_tracking_update(person_identity, current_position, trajectory)
             
             # Create message
             message = {
                 "type": MessageType.TRACKING_UPDATE.value,
                 "task_id": task_id,
-                "person_id": int(person_identity.global_id.replace("person_", "")),
-                "global_id": person_identity.global_id,
+                "person_id": int(str(gid).replace("person_", "")) if gid is not None else 0,
+                "global_id": gid,
                 "camera_transitions": [
                     {
                         "source_camera": trans.source_camera,
@@ -170,10 +170,10 @@ class TrackingHandler:
                 update_latency = time.time() - update_start
                 self._update_tracking_stats(update_latency)
                 
-                logger.debug(f"Sent tracking update for person {person_identity.global_id}")
+                logger.debug(f"Sent tracking update for person {gid}")
             else:
                 self.tracking_stats["failed_updates"] += 1
-                logger.warning(f"Failed to send tracking update for person {person_identity.global_id}")
+                logger.warning(f"Failed to send tracking update for person {gid}")
             
             return success
             
@@ -300,17 +300,19 @@ class TrackingHandler:
             return False
     
     def _create_tracking_update(
-        self, 
-        person_identity: PersonIdentity,
+        self,
+        person_identity: Any,
         current_position: Optional[Coordinate] = None,
-        trajectory: Optional[Trajectory] = None
+        trajectory: Optional[Trajectory] = None,
     ) -> TrackingUpdate:
         """Create tracking update from person identity."""
         try:
             # Extract camera transitions
             camera_transitions = []
             if hasattr(person_identity, 'camera_transitions'):
-                camera_transitions = person_identity.camera_transitions
+                camera_transitions = getattr(person_identity, 'camera_transitions')
+            elif isinstance(person_identity, dict):
+                camera_transitions = person_identity.get('camera_transitions', [])
             
             # Extract trajectory path
             trajectory_path = []
@@ -318,22 +320,25 @@ class TrackingHandler:
                 trajectory_path = trajectory.path_points
             
             # Create tracking update
+            gid = getattr(person_identity, 'global_id', None)
+            if gid is None and isinstance(person_identity, dict):
+                gid = person_identity.get('global_id')
             return TrackingUpdate(
-                person_id=int(person_identity.global_id.replace("person_", "")),
-                global_id=person_identity.global_id,
+                person_id=int(str(gid).replace("person_", "")) if gid is not None else 0,
+                global_id=gid,
                 camera_transitions=camera_transitions,
                 current_position=current_position,
                 trajectory_path=trajectory_path,
-                last_seen=person_identity.last_seen or datetime.now(timezone.utc),
-                confidence=person_identity.identity_confidence,
-                cameras_seen=list(person_identity.cameras_seen)
+                last_seen=(getattr(person_identity, 'last_seen', None) or datetime.now(timezone.utc)),
+                confidence=float(getattr(person_identity, 'identity_confidence', 0.0)) if not isinstance(person_identity, dict) else float(person_identity.get('identity_confidence', 0.0)),
+                cameras_seen=list(getattr(person_identity, 'cameras_seen', [])) if not isinstance(person_identity, dict) else list(person_identity.get('cameras_seen', []))
             )
             
         except Exception as e:
             logger.error(f"Error creating tracking update: {e}")
             return TrackingUpdate(
                 person_id=0,
-                global_id=person_identity.global_id,
+                global_id=gid,
                 camera_transitions=[],
                 current_position=current_position,
                 trajectory_path=[],

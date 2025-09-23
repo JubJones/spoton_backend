@@ -42,9 +42,7 @@ dependencies = [
     "setuptools>=60.0.0",
     "cython>=0.29.0,<0.30.0", # Often a build dep for others like faiss
     "pip>=23.0,<25.0",
-    "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS (default)
-    "transformers>=4.36.0,<4.37.0", # For CLIP model support (includes CLIP models)
-    "accelerate>=0.24.0,<0.25.0", # For GPU acceleration
+    # (Removed: faiss/transformers/accelerate for Re-ID/CLIP)
     "scipy>=1.11.0,<1.12.0", # Required for advanced similarity calculations
     "ultralytics>=8.0.0,<8.1.0", # YOLOv8 implementation
     "PyJWT>=2.8.0,<3.0.0", # JWT token handling for authentication
@@ -68,7 +66,6 @@ dev = [
     "ruff>=0.4.2,<0.5.0",
 ]
 gpu = [
-    "faiss-gpu>=1.7.4,<1.8.0", # GPU version of FAISS (requires CUDA)
     "torch==2.2.1+cu121", # PyTorch with CUDA 12.1 support
     "torchvision==0.17.1+cu121", # TorchVision with CUDA 12.1 support
     "torchaudio==2.2.1+cu121", # TorchAudio with CUDA 12.1 support

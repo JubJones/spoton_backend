@@ -41,7 +41,7 @@ class TrackedObject:
                  confidence: Optional[float] = None,
                  class_id: Optional[Any] = None,
                  global_id: Optional[int] = None, # Added Global ID
-                 feature_embedding: Optional[np.ndarray] = None, # Can be populated by tracker/reid
+                 feature_embedding: Optional[np.ndarray] = None, # Can be populated by tracker
                  state: Optional[str] = None, # e.g., 'active', 'lost' (if tracker provides)
                  age: Optional[int] = None): # Number of frames tracked (if tracker provides)
         self.track_id = track_id # Changed from temporary_track_id for clarity
@@ -85,8 +85,7 @@ class AbstractTracker(ABC):
     @abstractmethod
     async def load_model(self):
         """
-        Loads and initializes the tracker, potentially including ReID models.
-        Should handle device placement.
+        Loads and initializes the tracker. Should handle device placement.
         """
         pass
 

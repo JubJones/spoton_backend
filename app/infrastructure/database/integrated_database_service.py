@@ -18,8 +18,7 @@ from contextlib import asynccontextmanager
 from app.infrastructure.cache.tracking_cache import tracking_cache, CachedPersonState
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.infrastructure.database.base import get_db, check_database_connection
-from app.domains.reid.entities.person_identity import PersonIdentity
-from app.domains.reid.entities.feature_vector import FeatureVector
+from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
 from app.shared.types import CameraID
@@ -114,23 +113,19 @@ class IntegratedDatabaseService:
     # Person State Management
     async def store_person_state(
         self,
-        person_identity: PersonIdentity,
+        person_identity: Any,
         camera_id: CameraID,
         position: Optional[Coordinate] = None,
         trajectory: Optional[Trajectory] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> bool:
         """Store person state in both Redis and TimescaleDB."""
         try:
             # Store in Redis for real-time access
-            cache_success = await tracking_cache.cache_person_state(
-                person_identity, camera_id, position, trajectory
-            )
+            cache_success = await tracking_cache.cache_person_state(person_identity, camera_id, position, trajectory)
             
             # Store in TimescaleDB for persistence
-            db_success = await self._store_person_state_db(
-                person_identity, camera_id, position, trajectory, session_id
-            )
+            db_success = await self._store_person_state_db(person_identity, camera_id, position, trajectory, session_id)
             
             if cache_success:
                 self.sync_stats.redis_writes += 1
@@ -550,43 +545,58 @@ class IntegratedDatabaseService:
     
     async def _store_person_state_db(
         self,
-        person_identity: PersonIdentity,
+        person_identity: Any,
         camera_id: CameraID,
         position: Optional[Coordinate] = None,
         trajectory: Optional[Trajectory] = None,
-        session_id: Optional[str] = None
+        session_id: Optional[str] = None,
     ) -> bool:
         """Store person state in database."""
         try:
             async with self.get_repository() as repo:
                 # Check if person identity exists
-                existing_identity = await repo.get_person_identity(person_identity.global_id)
+                gid = getattr(person_identity, 'global_id', None)
+                if gid is None and isinstance(person_identity, dict):
+                    gid = person_identity.get('global_id')
+                existing_identity = await repo.get_person_identity(gid)
                 
                 if existing_identity:
                     # Update existing identity
                     success = await repo.update_person_identity(
-                        global_person_id=person_identity.global_id,
+                        global_person_id=gid,
                         last_seen_camera=str(camera_id),
                         last_seen_at=datetime.now(timezone.utc),
-                        new_embedding=person_identity.feature_vector.vector.tolist() if person_identity.feature_vector else None,
-                        confidence=person_identity.confidence
+                        new_embedding=(
+                            (getattr(getattr(person_identity, 'feature_vector', None), 'vector', None) or (person_identity.get('feature_vector', {}) if isinstance(person_identity, dict) else {})).get('vector').tolist()
+                            if isinstance(getattr(person_identity, 'feature_vector', None), dict) and getattr(person_identity['feature_vector'], 'vector', None) is not None else (
+                                getattr(getattr(person_identity, 'feature_vector', None), 'vector', None).tolist()
+                                if getattr(getattr(person_identity, 'feature_vector', None), 'vector', None) is not None else None
+                            )
+                        ),
+                        confidence=float(getattr(person_identity, 'confidence', 0.0)) if not isinstance(person_identity, dict) else float(person_identity.get('confidence', 0.0)),
                     )
                 else:
                     # Create new identity
                     identity = await repo.create_person_identity(
-                        global_person_id=person_identity.global_id,
+                        global_person_id=gid,
                         environment_id="default",  # You'd get this from context
                         first_seen_camera=str(camera_id),
                         first_seen_at=datetime.now(timezone.utc),
-                        primary_embedding=person_identity.feature_vector.vector.tolist() if person_identity.feature_vector else None,
-                        confidence=person_identity.confidence
+                        primary_embedding=(
+                            (getattr(getattr(person_identity, 'feature_vector', None), 'vector', None) or (person_identity.get('feature_vector', {}) if isinstance(person_identity, dict) else {})).get('vector').tolist()
+                            if isinstance(getattr(person_identity, 'feature_vector', None), dict) and getattr(person_identity['feature_vector'], 'vector', None) is not None else (
+                                getattr(getattr(person_identity, 'feature_vector', None), 'vector', None).tolist()
+                                if getattr(getattr(person_identity, 'feature_vector', None), 'vector', None) is not None else None
+                            )
+                        ),
+                        confidence=float(getattr(person_identity, 'confidence', 0.0)) if not isinstance(person_identity, dict) else float(person_identity.get('confidence', 0.0)),
                     )
                     success = identity is not None
                 
                 # Store tracking event
                 if success:
                     await repo.create_tracking_event(
-                        global_person_id=person_identity.global_id,
+                        global_person_id=gid,
                         camera_id=str(camera_id),
                         environment_id="default",
                         event_type="detection",
@@ -594,9 +604,9 @@ class IntegratedDatabaseService:
                         position_y=position.y if position else None,
                         world_x=position.world_x if position else None,
                         world_y=position.world_y if position else None,
-                        detection_confidence=person_identity.confidence,
-                        reid_confidence=person_identity.feature_vector.confidence if person_identity.feature_vector else None,
-                        track_id=person_identity.track_id,
+                        detection_confidence=(float(getattr(person_identity, 'confidence', 0.0)) if not isinstance(person_identity, dict) else float(person_identity.get('confidence', 0.0))),
+                        reid_confidence=None,
+                        track_id=(getattr(person_identity, 'track_id', None) if not isinstance(person_identity, dict) else person_identity.get('track_id')),
                         session_id=session_id
                     )
                 

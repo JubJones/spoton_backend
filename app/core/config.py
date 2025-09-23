@@ -99,42 +99,26 @@ class Settings(BaseSettings):
     DETECTION_SAVE_ORIGINAL_FRAMES: bool = True
     TRACKER_TYPE: str = "bytetrack"
     WEIGHTS_DIR: str = "./weights" 
-    REID_WEIGHTS_PATH: str = "clip_market1501.pt"
     TRACKER_HALF_PRECISION: bool = False
     TRACKER_PER_CLASS: bool = False
-    REID_MODEL_TYPE: str = "clip" 
-    REID_MODEL_HALF_PRECISION: bool = False
+    # (Re-ID model settings removed)
 
-    # --- Core Integration Architecture: Feature Flags & Tracking/ReID Config ---
+    # --- Core Integration Architecture: Feature Flags ---
     TRACKING_ENABLED: bool = True
-    REID_ENABLED: bool = True
-    CROSS_CAMERA_REID_ENABLED: bool = True
     TRAJECTORY_SMOOTHING_ENABLED: bool = True
     # Migration strategy feature flags (phased rollout)
     ENABLE_INTRA_CAMERA_TRACKING: bool = True
-    ENABLE_CROSS_CAMERA_REID: bool = True
     ENABLE_TRAJECTORY_TRACKING: bool = True
     ENABLE_ENHANCED_VISUALIZATION: bool = True
     # Tracking parameters
     TRACK_BUFFER_SIZE: int = 30
     TRACK_CONFIDENCE_THRESHOLD: float = 0.5
     
-    REID_BATCH_SIZE: int = 16
-    REID_MAX_GALLERY_SIZE: int = 1000
+    # (Re-ID batch/gallery settings removed)
     HANDOFF_ZONE_THRESHOLD: float = 0.2
     TRACKER_CONFIG_PATH: Optional[str] = None
 
-    REID_SIMILARITY_METHOD: str = Field(default="faiss_l2", description="Re-ID similarity method: 'cosine', 'l2_derived', 'l2_explicit', 'inner_product', 'faiss_ip', 'faiss_l2'.")
-    REID_SIMILARITY_THRESHOLD: float = Field(default=0.65, description="Threshold for cosine or inner product similarity (higher is better).")
-    REID_L2_DISTANCE_THRESHOLD: Optional[float] = Field(default=None, description="Explicit threshold for L2 distance (lower is better). If None, derived from REID_SIMILARITY_THRESHOLD for L2 methods.")
-    
-    REID_GALLERY_EMA_ALPHA: float = 0.9
-    REID_REFRESH_INTERVAL_FRAMES: int = 10
-    REID_LOST_TRACK_BUFFER_FRAMES: int = 200
-    # Alias for spec naming compatibility
-    MAX_REID_MATCH_DISTANCE: float = 0.4
-    REID_MAIN_GALLERY_PRUNE_INTERVAL_FRAMES: int = 500
-    REID_MAIN_GALLERY_PRUNE_THRESHOLD_FRAMES: int = REID_LOST_TRACK_BUFFER_FRAMES * 2
+    # (Re-ID similarity settings removed)
 
     TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 90
@@ -143,14 +127,7 @@ class Settings(BaseSettings):
     EXPORT_BASE_DIR: str = "./exports"
     EXPORT_EXPIRY_HOURS: int = 24
 
-    # --- Computed property for L2 threshold if not explicit ---
-    @property
-    def derived_l2_distance_threshold(self) -> float:
-        """
-        Calculates an L2 distance threshold equivalent to the cosine similarity threshold
-        for L2-normalized vectors. Formula: d = sqrt(2 * (1 - s_cos)).
-        """
-        return math.sqrt(max(0, 2 * (1 - self.REID_SIMILARITY_THRESHOLD)))
+    # (Re-ID derived thresholds removed)
 
     model_config = { # Pydantic V2 uses model_config instead of Config class
         "extra": "ignore",
@@ -158,11 +135,7 @@ class Settings(BaseSettings):
         "env_file_encoding": "utf-8"
     }
 
-    @property
-    def resolved_reid_weights_path(self) -> Path:
-        weights_dir_in_container = Path(self.WEIGHTS_DIR) 
-        reid_weights_file_path = weights_dir_in_container / self.REID_WEIGHTS_PATH
-        return reid_weights_file_path.resolve()
+    # (Re-ID weights path removed)
     
     @property
     def resolved_homography_base_path(self) -> Path:

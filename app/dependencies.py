@@ -17,7 +17,16 @@ from app.core.config import settings
 # )
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
-from app.services.pipeline_orchestrator import PipelineOrchestratorService
+# Legacy pipeline orchestrator removed with Re-ID deprecation.
+class PipelineOrchestratorService:
+    def __init__(self, *args, **kwargs):
+        pass
+    async def initialize_task(self, *args, **kwargs):
+        raise NotImplementedError("Pipeline orchestrator has been removed.")
+    async def run_processing_pipeline(self, *args, **kwargs):
+        raise NotImplementedError("Pipeline orchestrator has been removed.")
+    async def get_task_status(self, *args, **kwargs):
+        return None
 from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
@@ -117,11 +126,6 @@ def get_pipeline_orchestrator(
     tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
     notification_service: NotificationService = Depends(get_notification_service)
 ) -> PipelineOrchestratorService:
-    """Dependency provider for PipelineOrchestratorService."""
-    logger.debug("Initializing PipelineOrchestratorService instance (or returning cached).")
-    return PipelineOrchestratorService(
-        video_data_manager=video_data_manager,
-        multi_camera_processor=multi_camera_processor,
-        tracker_factory=tracker_factory,
-        notification_service=notification_service
-    )
+    """Deprecated: Pipeline orchestrator removed; this returns a stub."""
+    logger.debug("PipelineOrchestratorService requested but has been removed.")
+    return PipelineOrchestratorService()

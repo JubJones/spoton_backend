@@ -208,7 +208,7 @@ class PersonIdentity(Base):
     confidence = Column(Float, nullable=True)
     
     # Feature data
-    primary_embedding = Column(JSONB, nullable=True)  # Primary ReID embedding
+    primary_embedding = Column(JSONB, nullable=True)  # Primary embedding
     embedding_history = Column(JSONB, nullable=True)  # Historical embeddings
     
     # Statistics

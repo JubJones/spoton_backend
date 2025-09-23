@@ -37,7 +37,6 @@ class ErrorSeverity(Enum):
 class ComponentType(Enum):
     """System component types for targeted error handling."""
     DETECTION = "detection"
-    REID = "reid"
     HOMOGRAPHY = "homography"
     HANDOFF = "handoff"
     SPATIAL_INTELLIGENCE = "spatial_intelligence"
@@ -241,7 +240,6 @@ class ProductionErrorHandler:
         """Register component-specific recovery strategies."""
         self.recovery_strategies = {
             ComponentType.DETECTION: self._recover_detection_error,
-            ComponentType.REID: self._recover_reid_error,
             ComponentType.HOMOGRAPHY: self._recover_homography_error,
             ComponentType.HANDOFF: self._recover_handoff_error,
             ComponentType.SPATIAL_INTELLIGENCE: self._recover_spatial_intelligence_error,
@@ -251,7 +249,6 @@ class ProductionErrorHandler:
         
         self.fallback_handlers = {
             ComponentType.DETECTION: self._fallback_detection,
-            ComponentType.REID: self._fallback_reid,
             ComponentType.HOMOGRAPHY: self._fallback_homography,
             ComponentType.HANDOFF: self._fallback_handoff,
             ComponentType.SPATIAL_INTELLIGENCE: self._fallback_spatial_intelligence,
@@ -287,35 +284,7 @@ class ProductionErrorHandler:
             logger.error(f"Error in detection recovery: {e}")
             return None
     
-    async def _recover_reid_error(self, error: Exception, context: ErrorContext, *args, **kwargs) -> Any:
-        """Recovery strategy for re-identification errors."""
-        try:
-            if "feature" in str(error).lower():
-                # Feature extraction error - use fallback features
-                logger.info("Feature extraction error, using fallback features")
-                return {
-                    'global_id': -1,  # Indicates re-ID failure
-                    'reid_confidence': 0.0,
-                    'feature_vector': None,
-                    'error': str(error),
-                    'fallback_used': True
-                }
-            
-            elif "similarity" in str(error).lower():
-                # Similarity computation error - assign new ID
-                logger.info("Similarity computation error, assigning new ID")
-                return {
-                    'global_id': hash(str(time.time())) % 10000,  # Generate pseudo-random ID
-                    'reid_confidence': 0.0,
-                    'association_type': 'new_fallback',
-                    'error': str(error)
-                }
-            
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error in re-ID recovery: {e}")
-            return None
+    # (Re-ID recovery removed)
     
     async def _recover_homography_error(self, error: Exception, context: ErrorContext, *args, **kwargs) -> Any:
         """Recovery strategy for homography errors."""
@@ -410,14 +379,7 @@ class ProductionErrorHandler:
             "fallback_used": True
         }
     
-    async def _fallback_reid(self, context: ErrorContext, *args, **kwargs) -> Dict[str, Any]:
-        """Fallback handler for re-ID failures."""
-        return {
-            "global_id": -1,
-            "reid_confidence": 0.0,
-            "error": "Re-ID service unavailable",
-            "fallback_used": True
-        }
+    # (Re-ID fallback removed)
     
     async def _fallback_homography(self, context: ErrorContext, *args, **kwargs) -> Dict[str, Any]:
         """Fallback handler for homography failures."""

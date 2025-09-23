@@ -6,7 +6,7 @@ import os
 import asyncio
 from pathlib import Path
 import logging
-from typing import List, Dict, Optional, Tuple, AsyncGenerator
+from typing import List, Dict, Optional, Tuple
 import uuid
 from datetime import datetime, timezone
 from collections import defaultdict
@@ -32,7 +32,6 @@ class BatchedFrameProvider:
         task_id: uuid.UUID,
         video_paths_map: Dict[CameraID, Path], # CameraID -> Path to local video file
         target_fps: int,
-        jpeg_quality: int, # Not used for frame providing, but kept for consistency if saving
         loop_videos: bool = False # Whether to loop videos if they end
     ):
         self.task_id = task_id
@@ -280,7 +279,6 @@ class VideoDataManagerService:
             task_id=task_id,
             video_paths_map=local_video_paths_map,
             target_fps=settings.TARGET_FPS,
-            jpeg_quality=settings.FRAME_JPEG_QUALITY,
             loop_videos=loop_videos
         )
 
