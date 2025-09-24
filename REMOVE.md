@@ -3,8 +3,8 @@ Currently Active HTTP/REST Endpoints
   Core System Endpoints (Live)
 
   1. GET /health - System health check
-  2. POST /api/v1/processing-tasks/start - Start processing task
-  3. GET /api/v1/processing-tasks/{taskId}/status - Get task status
+  2. POST /api/v1/detection-processing-tasks/start - Start detection task
+  3. GET /api/v1/detection-processing-tasks/{taskId}/status - Get task status
   4. GET /api/v1/analytics/real-time/metrics - Real-time metrics
   5. GET /api/v1/analytics/real-time/active-persons - Active persons data
   6. GET /api/v1/environments/{environmentId}/validate - Environment validation
@@ -44,5 +44,5 @@ Currently Active HTTP/REST Endpoints
   Key Finding
 
   The frontend has TWO PARALLEL API PATTERNS:
-  1. Standard endpoints (/api/v1/processing-tasks/*) - Used by hooks
+  1. Standard endpoints (/api/v1/detection-processing-tasks/*) - Used by hooks
   2. Raw endpoints (/api/v1/raw-processing-tasks/*) - Used by GroupViewPage

@@ -51,11 +51,15 @@ class HomographyService:
         self.ransac_threshold = 5.0  # Maximum allowed reprojection error
         self._warned_cameras: set = set()  # Track warned cameras to avoid spam
         
-        # Load Phase 4 JSON homography data
-        self.load_json_homography_data()
-        
-        # Load NPZ homography data (legacy format)
-        self.load_npz_homography_data()
+        # Load homography data per configured source preference
+        source_pref = str(getattr(self._settings, 'HOMOGRAPHY_SOURCE', 'auto')).lower()
+        if source_pref == 'json':
+            self.load_json_homography_data()
+        elif source_pref == 'npz':
+            self.load_npz_homography_data()
+        else:  # 'auto' (default) → JSON first, then NPZ to fill gaps
+            self.load_json_homography_data()
+            self.load_npz_homography_data()
         
         logger.info("HomographyService initialized with Phase 4 enhancements.")
 

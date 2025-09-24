@@ -80,7 +80,8 @@ ws.onmessage = (event) => {
 const health = await fetch('/health').then(r => r.json());
 const isReady = health.status === 'healthy' &&
                 health.detector_model_loaded &&
-                health['prototype_tracker_loaded (reid_model)'];
+                health.prototype_tracker_loaded &&
+                health.homography_matrices_precomputed;
 ```
 
 ### 2. Environment Discovery

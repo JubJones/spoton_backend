@@ -9,6 +9,7 @@ Provides:
 """
 
 import asyncio
+from pathlib import Path
 import uuid
 from uuid import UUID
 from typing import Dict, Any, Optional, List
@@ -332,6 +333,20 @@ class RawVideoService:
                 for camera_id, frame in camera_frames.items():
                     # Convert frame to base64
                     frame_base64 = await frame_handler.create_frame_base64(frame, quality=85)
+                    # Optional on-disk frame cache (sampled)
+                    try:
+                        if getattr(settings, 'STORE_EXTRACTED_FRAMES', False):
+                            sample_rate = int(getattr(settings, 'FRAME_CACHE_SAMPLE_RATE', 0))
+                            if sample_rate and frame_index % sample_rate == 0:
+                                from base64 import b64decode
+                                cache_dir = Path(getattr(settings, 'FRAME_CACHE_DIR', './extracted_frames')) / str(task_id) / str(camera_id)
+                                cache_dir.mkdir(parents=True, exist_ok=True)
+                                out_path = cache_dir / f"frame_{frame_index:06d}.jpg"
+                                # Strip potential data URL prefix
+                                b64_str = frame_base64.split(',', 1)[-1]
+                                await asyncio.to_thread(out_path.write_bytes, b64decode(b64_str))
+                    except Exception:
+                        pass
                     
                     # Create individual camera message
                     camera_message = {

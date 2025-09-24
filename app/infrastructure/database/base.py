@@ -10,30 +10,56 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Create database engine with optimized settings for TimescaleDB
-engine = create_engine(
-    settings.DATABASE_URL or f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}",
-    poolclass=QueuePool,
-    pool_size=20,
-    max_overflow=30,
-    pool_pre_ping=True,
-    pool_recycle=3600,
-    echo=settings.DEBUG,
-    # TimescaleDB optimizations
-    connect_args={
-        "options": "-c timezone=utc",
-        "application_name": "spoton_backend"
-    }
-)
+_ENGINE = None
+_SESSION_LOCAL = None
 
-# Create session factory
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+def _build_sync_db_url() -> str:
+    return settings.DATABASE_URL or (
+        f"postgresql://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}"
+        f"@{settings.POSTGRES_SERVER}:{settings.POSTGRES_PORT}/{settings.POSTGRES_DB}"
+    )
+
+def get_engine():
+    """Lazily create and return the SQLAlchemy engine if DB is enabled."""
+    global _ENGINE
+    if not settings.DB_ENABLED:
+        logger.info("Database disabled by configuration (DB_ENABLED=false).")
+        return None
+    if _ENGINE is None:
+        _ENGINE = create_engine(
+            _build_sync_db_url(),
+            poolclass=QueuePool,
+            pool_size=int(getattr(settings, 'DB_POOL_SIZE', 20)),
+            max_overflow=int(getattr(settings, 'DB_MAX_OVERFLOW', 30)),
+            pool_pre_ping=bool(getattr(settings, 'DB_POOL_PRE_PING', True)),
+            pool_recycle=int(getattr(settings, 'DB_POOL_RECYCLE', 3600)),
+            echo=settings.DEBUG,
+            connect_args={
+                "options": "-c timezone=utc",
+                "application_name": "spoton_backend"
+            }
+        )
+    return _ENGINE
+
+def get_session_factory():
+    """Lazily create session factory if DB enabled."""
+    global _SESSION_LOCAL
+    engine = get_engine()
+    if engine is None:
+        return None
+    if _SESSION_LOCAL is None:
+        _SESSION_LOCAL = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    return _SESSION_LOCAL
 
 # Create declarative base
 Base = declarative_base()
 
 def get_db():
-    """Dependency to get database session."""
+    """Dependency to get database session (raises if DB disabled)."""
+    SessionLocal = get_session_factory()
+    if SessionLocal is None:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database disabled")
     db = SessionLocal()
     try:
         yield db
@@ -50,6 +76,10 @@ async def create_tables():
         )
         
         # Create tables
+        engine = get_engine()
+        if engine is None:
+            logger.info("DB setup skipped (DB disabled)")
+            return
         Base.metadata.create_all(bind=engine)
         
         # Create TimescaleDB hypertables
@@ -64,6 +94,10 @@ async def create_tables():
 async def create_hypertables():
     """Create TimescaleDB hypertables for time-series data."""
     try:
+        engine = get_engine()
+        if engine is None:
+            logger.info("Hypertables creation skipped (DB disabled)")
+            return
         with engine.connect() as conn:
             # Create hypertables for time-series tables
             hypertable_queries = [
@@ -92,6 +126,10 @@ async def create_hypertables():
 async def create_indexes():
     """Create additional database indexes for performance."""
     try:
+        engine = get_engine()
+        if engine is None:
+            logger.info("Index creation skipped (DB disabled)")
+            return
         with engine.connect() as conn:
             # Additional indexes for performance
             index_queries = [
@@ -140,6 +178,9 @@ async def setup_database():
 def check_database_connection():
     """Check database connection health."""
     try:
+        engine = get_engine()
+        if engine is None:
+            return False
         with engine.connect() as conn:
             result = conn.execute(text("SELECT 1"))
             return result.scalar() == 1

@@ -6,6 +6,9 @@ import asyncio
 from pathlib import Path
 import logging
 from typing import Optional
+from botocore.config import Config as BotoConfig
+from boto3.s3.transfer import TransferConfig
+from app.core.config import settings
 
 import boto3 # For S3 communication
 from botocore.exceptions import ClientError, NoCredentialsError, PartialCredentialsError
@@ -47,11 +50,25 @@ class AssetDownloader:
             return # Do not initialize client if bucket name is missing
 
         try:
+            boto_cfg = BotoConfig(
+                retries={"max_attempts": settings.S3_MAX_ATTEMPTS, "mode": "standard"},
+                connect_timeout=settings.S3_CONNECT_TIMEOUT,
+                read_timeout=settings.S3_READ_TIMEOUT,
+                max_pool_connections=20,
+            )
             self.s3_client = boto3.client(
                 's3',
                 endpoint_url=self.s3_endpoint_url,
                 aws_access_key_id=self.aws_access_key_id,
-                aws_secret_access_key=self.aws_secret_access_key
+                aws_secret_access_key=self.aws_secret_access_key,
+                config=boto_cfg
+            )
+            # Multipart transfer config
+            self.transfer_config = TransferConfig(
+                multipart_threshold=settings.S3_MULTIPART_THRESHOLD_MB * 1024 * 1024,
+                max_concurrency=settings.S3_MAX_TRANSFER_CONCURRENCY,
+                multipart_chunksize=8 * 1024 * 1024,
+                use_threads=True,
             )
             # Optional: Add a connection test here if desired, e.g., list_objects_v2 with MaxKeys=0
             logger.info(
@@ -103,17 +120,47 @@ class AssetDownloader:
         )
 
         try:
+            # ETag-based cache check
+            etag = None
+            try:
+                head_obj = await asyncio.to_thread(
+                    self.s3_client.head_object, Bucket=self.s3_bucket_name, Key=remote_s3_key
+                )
+                etag = head_obj.get('ETag', '').strip('"')
+            except Exception as e:
+                logger.debug(f"HEAD failed for {remote_s3_key}: {e}")
+
+            if os.path.exists(local_destination_path) and etag:
+                etag_path = f"{local_destination_path}.etag"
+                try:
+                    if os.path.exists(etag_path):
+                        with open(etag_path, 'r') as ef:
+                            cached_etag = ef.read().strip()
+                        if cached_etag == etag:
+                            logger.info(f"Cache hit for {remote_s3_key} (etag match). Skipping download.")
+                            return True
+                except Exception:
+                    pass
+
             # boto3 client methods are blocking, so run in a separate thread
             await asyncio.to_thread(
                 self.s3_client.download_file,
                 Bucket=self.s3_bucket_name,
                 Key=remote_s3_key,
-                Filename=local_destination_path
+                Filename=local_destination_path,
+                Config=getattr(self, 'transfer_config', None)
             )
             logger.info(
                 f"Successfully downloaded '{remote_s3_key}' from bucket "
                 f"'{self.s3_bucket_name}' to '{local_destination_path}'"
             )
+            # Write ETag cache
+            if etag:
+                try:
+                    with open(f"{local_destination_path}.etag", 'w') as ef:
+                        ef.write(etag)
+                except Exception:
+                    pass
             return True
         except (NoCredentialsError, PartialCredentialsError) as e:
             logger.error(

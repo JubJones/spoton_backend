@@ -1,4 +1,11 @@
-version: '3.8'
+ 
+
+x-backend-healthcheck: &backend-healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:3847/health"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
 
 services:
   backend:
@@ -10,9 +17,12 @@ services:
     image: spoton_backend_image:${PYTORCH_VARIANT_BUILD:-cpu} # Tag image based on variant
     container_name: spoton_backend_service
     ports:
-      - "8000:8000"
+      - "3847:3847"
     volumes:
       - ./app:/app/app # Mount local code for development; remove for production-like build
+      - ./data:/app/data
+      - ./homography_data:/app/homography_data
+      - ./weights:/app/weights
     env_file:
       - .env
     environment:
@@ -27,16 +37,20 @@ services:
     #         - driver: nvidia
     #           count: all # 1 or 'all' to pass all GPUs
     #           capabilities: [gpu] # 'gpu' is equivalent to 'utility,compute'
-    depends_on:
-      redis:
-        condition: service_healthy
-      timescaledb:
-        condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload # --reload for dev
+    # No hard dependency on Redis; enable with `--profile infra` when needed
+    command: uvicorn app.main:app --host 0.0.0.0 --port 3847 --reload # --reload for dev
+    healthcheck: *backend-healthcheck
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: 2g
 
   redis:
     image: redis:7.2.4-alpine # Updated to a recent stable version
     container_name: spoton_redis
+    profiles: ["infra"]
     ports:
       - "6379:6379"
     volumes:
@@ -47,10 +61,13 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    mem_limit: 512m
 
   timescaledb:
     image: timescale/timescaledb:latest-pg17
     container_name: spoton_timescaledb
+    profiles: ["infra"]
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432" # Allow host port override via .env
     volumes:
@@ -64,6 +81,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    mem_limit: 1g
 
 volumes:
   redis_data:

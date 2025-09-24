@@ -208,6 +208,16 @@ class VideoDataManagerService:
             return {}
 
         download_coroutines = []
+        # Bounded concurrency for downloads
+        max_conc = max(1, int(getattr(settings, 'MAX_DOWNLOAD_CONCURRENCY', 3)))
+        sem = asyncio.Semaphore(max_conc)
+
+        async def _bounded_download(remote_key: str, dest_path: Path):
+            async with sem:
+                return await self.asset_downloader.download_file_from_dagshub(
+                    remote_s3_key=remote_key,
+                    local_destination_path=str(dest_path)
+                )
         video_metadata_for_download = []
 
         for cam_config in cameras_in_env:
@@ -233,12 +243,7 @@ class VideoDataManagerService:
 
             if not local_video_path.exists():
                 logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
-                download_coroutines.append(
-                    self.asset_downloader.download_file_from_dagshub(
-                        remote_s3_key=remote_video_key,
-                        local_destination_path=str(local_video_path)
-                    )
-                )
+                download_coroutines.append(_bounded_download(remote_video_key, local_video_path))
             else:
                 logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
                 async def _mock_download_success(): return True

@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 import logging
 from pathlib import Path
 from typing import Callable # For ASGIApp type hint
+import asyncio
 
 from app.core.config import settings
 from app.core.security_config import configure_security_middleware, get_cors_config
@@ -54,6 +55,8 @@ async def lifespan(app_instance: FastAPI):
         import torch
         from app.services.camera_tracker_factory import CameraTrackerFactory
         from app.services.homography_service import HomographyService
+        from app.services.trail_management_service import TrailManagementService
+        from app.services.detection_video_service import detection_video_service
         # Select compute device (CPU by default in CPU images)
         device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
         app_instance.state.compute_device = device
@@ -61,19 +64,69 @@ async def lifespan(app_instance: FastAPI):
 
         # Preload tracker factory (ByteTrack prototype)
         tracker_factory = CameraTrackerFactory(device=device)
-        try:
-            await tracker_factory.preload_prototype_tracker()
-        except Exception as e:
-            logger.warning(f"Tracker prototype preload failed (non-fatal): {e}")
+        if settings.PRELOAD_TRACKER_FACTORY:
+            try:
+                await tracker_factory.preload_prototype_tracker()
+            except Exception as e:
+                logger.warning(f"Tracker prototype preload failed (non-fatal): {e}")
         app_instance.state.tracker_factory = tracker_factory
 
         # Preload homography matrices
         homography_service = HomographyService(settings)
+        if settings.PRELOAD_HOMOGRAPHY:
+            try:
+                await homography_service.preload_all_homography_matrices()
+            except Exception as e:
+                logger.warning(f"Homography preload failed (non-fatal): {e}")
+        # Startup validation hints for homography and weights
         try:
-            await homography_service.preload_all_homography_matrices()
+            homography_base = settings.resolved_homography_base_path
+            if not homography_base.exists():
+                logger.warning(
+                    f"Homography base directory not found: {homography_base}. "
+                    f"Mount or create 'homography_data/' with NPZ/JSON calibration files."
+                )
+            else:
+                json_count = len(list(homography_base.glob("*_homography.json")))
+                npz_count = len(list(homography_base.glob("homography_points_*.npz")))
+                logger.info(
+                    f"Homography directory ready: {homography_base} (json={json_count}, npz={npz_count})."
+                )
+            weights_dir = Path(settings.WEIGHTS_DIR).resolve()
+            if not weights_dir.exists():
+                logger.warning(
+                    f"Weights directory not found: {weights_dir}. Ensure model weights are available or mounted."
+                )
+            else:
+                logger.info(f"Weights directory present: {weights_dir}")
         except Exception as e:
-            logger.warning(f"Homography preload failed (non-fatal): {e}")
+            logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
+
+        # Global trail management service and cleanup loop
+        trail_service = TrailManagementService(trail_length=settings.TRAIL_LENGTH)
+        app_instance.state.trail_service = trail_service
+        app_instance.state._trail_cleanup_task = None
+        if settings.START_TRAIL_CLEANUP:
+            async def _trail_cleanup_loop():
+                while True:
+                    try:
+                        await trail_service.cleanup_old_trails(max_age_seconds=settings.TRAIL_MAX_AGE_SECONDS)
+                        await asyncio.sleep(settings.TRAIL_CLEANUP_INTERVAL_SECONDS)
+                    except Exception as e:
+                        logger.warning(f"Trail cleanup loop error: {e}")
+                        await asyncio.sleep(max(30, settings.TRAIL_CLEANUP_INTERVAL_SECONDS))
+            app_instance.state._trail_cleanup_task = asyncio.create_task(_trail_cleanup_loop())
+            logger.info("Started global trail cleanup background task")
+
+        # Inject preloaded services into detection video service singleton
+        try:
+            detection_video_service.tracker_factory = tracker_factory
+            detection_video_service.homography_service = homography_service
+            detection_video_service.trail_service = trail_service
+            logger.info("Injected preloaded services into detection video service")
+        except Exception as e:
+            logger.debug(f"Could not inject services into detection video service: {e}")
 
         # Detector is initialized on-demand by services; keep None for now
         app_instance.state.detector = None
@@ -84,7 +137,13 @@ async def lifespan(app_instance: FastAPI):
         yield
     finally:
         logger.info("Application shutdown sequence initiated...")
-        # Place for graceful shutdown/cleanup if needed
+        # Graceful shutdown: cancel background tasks
+        try:
+            cleanup_task = getattr(app_instance.state, '_trail_cleanup_task', None)
+            if cleanup_task:
+                cleanup_task.cancel()
+        except Exception:
+            pass
 
 app = FastAPI(
     title=settings.APP_NAME,

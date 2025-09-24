@@ -4,7 +4,7 @@ This guide provides frontend developers with the necessary steps and information
 
 ## 0. Prerequisites
 
-*   The SpotOn backend server is running and accessible (e.g., at `http://localhost:8000`).
+*   The SpotOn backend server is running and accessible (e.g., at `http://localhost:3847`).
 *   You have a basic understanding of REST APIs and WebSockets.
 *   Your frontend application is capable of:
     *   Making HTTP GET and POST requests.
@@ -18,13 +18,13 @@ This guide provides frontend developers with the necessary steps and information
 Before initiating any processing task or attempting to connect to WebSockets, it's **essential** to ensure the backend is fully initialized and ready.
 
 *   **Action:** Continuously poll the backend's `/health` REST endpoint.
-    *   **Endpoint:** `GET {BACKEND_BASE_URL}/health` (e.g., `http://localhost:8000/health`)
+    *   **Endpoint:** `GET {BACKEND_BASE_URL}/health` (e.g., `http://localhost:3847/health`)
     *   **Expected Success Response (200 OK):**
         ```json
         {
           "status": "healthy",
           "detector_model_loaded": true,
-          "prototype_tracker_loaded (reid_model)": true,
+          "prototype_tracker_loaded": true,
           "homography_matrices_precomputed": true
         }
         ```
@@ -42,14 +42,14 @@ Before initiating any processing task or attempting to connect to WebSockets, it
 Once the backend is healthy, the user can select an environment to analyze.
 
 *   **Action:** Send a POST request to start a processing task.
-    *   **Endpoint:** `POST {BACKEND_BASE_URL}/api/v1/processing-tasks/start`
+    *   **Endpoint:** `POST {BACKEND_BASE_URL}/api/v1/detection-processing-tasks/start`
     *   **Request Body (JSON):** `{"environment_id": "campus"}`
     *   **Expected Success Response (202 Accepted):**
         ```json
         {
           "task_id": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
           "message": "Processing task initiated.",
-          "status_url": "/api/v1/processing-tasks/{task_id}/status",
+          "status_url": "/api/v1/detection-processing-tasks/{task_id}/status",
           "websocket_url": "/ws/tracking/{task_id}"
         }
         ```
@@ -59,7 +59,7 @@ Once the backend is healthy, the user can select an environment to analyze.
 
 Connect to the backend to receive real-time updates.
 
-*   **Action:** Open a WebSocket connection to the URL from the previous step (e.g., `ws://localhost:8000/ws/tracking/{task_id}`).
+*   **Action:** Open a WebSocket connection to the URL from the previous step (e.g., `ws://localhost:3847/ws/tracking/{task_id}`).
 *   **Frontend Logic:**
     1.  Attempt WebSocket connection.
     2.  **Error Handling:** If connection fails (e.g., backend still initializing WebSockets), re-check `/health` and implement retry logic with backoff.
@@ -163,7 +163,7 @@ This message type is no longer sent by the backend for frontend video synchroniz
 ## Summary of Frontend Responsibilities
 
 1.  **Health Check:** Poll `/health` before anything else.
-2.  **Initiate Task:** `POST` to `/api/v1/processing-tasks/start`.
+2.  **Initiate Task:** `POST` to `/api/v1/detection-processing-tasks/start`.
 3.  **Connect WebSocket:** Establish and maintain the WebSocket connection.
 4.  **Handle `tracking_update`:**
     *   For each camera:

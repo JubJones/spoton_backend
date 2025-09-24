@@ -12,6 +12,7 @@ Features:
 """
 
 import asyncio
+from pathlib import Path
 import uuid
 import time
 import logging
@@ -47,7 +48,7 @@ class DetectionVideoService(RawVideoService):
     - Inherits all raw video capabilities from parent class
     """
     
-    def __init__(self):
+    def __init__(self, *, homography_service: Optional[HomographyService] = None, tracker_factory: Optional[CameraTrackerFactory] = None, trail_service: Optional[TrailManagementService] = None):
         super().__init__()
         
         # RT-DETR detector instance (Phase 1)
@@ -61,11 +62,11 @@ class DetectionVideoService(RawVideoService):
         self.annotator = DetectionAnnotator()
         
         # Phase 4: Spatial intelligence services
-        self.homography_service: Optional[HomographyService] = None
+        self.homography_service: Optional[HomographyService] = homography_service
         self.handoff_service: Optional[HandoffDetectionService] = None
         
         # Trail management service for 2D mapping feature
-        self.trail_service = TrailManagementService(trail_length=3)
+        self.trail_service = trail_service or TrailManagementService(trail_length=getattr(settings, 'TRAIL_LENGTH', 3))
         
         # Detection statistics (enhanced for Phase 2)
         self.detection_stats = {
@@ -86,7 +87,7 @@ class DetectionVideoService(RawVideoService):
         # --- Core Integration Architecture: Tracking scaffolding ---
         # Per-camera trackers are managed via a factory. We keep references by camera_id.
         self.camera_trackers: Dict[str, Any] = {}
-        self.tracker_factory: Optional[CameraTrackerFactory] = None
+        self.tracker_factory: Optional[CameraTrackerFactory] = tracker_factory
 
         # Enhanced statistics
         self.tracking_stats = {
@@ -99,7 +100,7 @@ class DetectionVideoService(RawVideoService):
 
         logger.info("DetectionVideoService initialized (Phase 4: Spatial Intelligence)")
     
-    async def initialize_detection_services(self, environment_id: str = "default") -> bool:
+    async def initialize_detection_services(self, environment_id: str = "default", task_id: Optional[uuid.UUID] = None) -> bool:
         """Initialize detection services including RT-DETR model loading and spatial intelligence services."""
         try:
             logger.info(f"🚀 DETECTION SERVICE INIT: Starting detection service initialization for environment: {environment_id}")
@@ -130,12 +131,17 @@ class DetectionVideoService(RawVideoService):
             # Maintain backward-compatible single-detector reference for existing methods
             self.detector = self.detectors_by_env.get(environment_id)
             
-            # Phase 4: Initialize spatial intelligence services
+            # Phase 4: Initialize spatial intelligence services (via DI if available)
             logger.info("🗺️ DETECTION SERVICE INIT: Initializing spatial intelligence services...")
-            
-            # Initialize HomographyService
-            self.homography_service = HomographyService(settings)
-            await self.homography_service.preload_all_homography_matrices()
+            if self.homography_service is None:
+                try:
+                    # Fallback to local instance (degraded mode)
+                    self.homography_service = HomographyService(settings)
+                    if getattr(settings, 'PRELOAD_HOMOGRAPHY', True):
+                        await self.homography_service.preload_all_homography_matrices()
+                    logger.warning("HomographyService was not injected; created local instance.")
+                except Exception as e:
+                    logger.warning(f"HomographyService initialization failed: {e}")
             
             # Initialize HandoffDetectionService
             self.handoff_service = HandoffDetectionService()
@@ -147,13 +153,12 @@ class DetectionVideoService(RawVideoService):
             logger.info(f"🗺️ SPATIAL INTELLIGENCE: Homography matrices loaded: {homography_validation}")
             logger.info(f"🗺️ SPATIAL INTELLIGENCE: Handoff configuration valid: {all(handoff_validation.values())}")
             
-            # Start trail cleanup background task
-            await self._start_trail_cleanup_task()
+            # Trail cleanup runs globally (app startup); do not start per-task here
 
             # Core Integration: Optionally initialize tracking scaffolding
             try:
-                if settings.TRACKING_ENABLED:
-                    await self.initialize_tracking_services(environment_id)
+                if settings.TRACKING_ENABLED and task_id is not None:
+                    await self.initialize_tracking_services(task_id, environment_id)
             except Exception as e:
                 logger.warning(f"TRACKING init skipped or failed (non-blocking): {e}")
             
@@ -170,9 +175,8 @@ class DetectionVideoService(RawVideoService):
         Resolution order per environment:
         1) Settings override (RTDETR_MODEL_PATH_CAMPUS / RTDETR_MODEL_PATH_FACTORY)
         2) External base dir (EXTERNAL_WEIGHTS_BASE_DIR) with '<env>.pt'
-        3) Known absolute fallback for local dev: '/Users/ksetdhavanic/Documents/PS/spoton_ml/weights/<env>.pt'
-        4) Local weights directory './weights/<env>.pt'
-        5) Global default: settings.RTDETR_MODEL_PATH
+        3) Local weights directory './weights/<env>.pt'
+        4) Global default: settings.RTDETR_MODEL_PATH
         """
         try:
             import os
@@ -193,24 +197,18 @@ class DetectionVideoService(RawVideoService):
                 if os.path.isfile(candidate):
                     return candidate
 
-            # 3) Known absolute fallback (user-provided location)
-            absolute_base = "/Users/ksetdhavanic/Documents/PS/spoton_ml/weights"
-            candidate = os.path.join(absolute_base, f"{env_key}.pt")
-            if os.path.isfile(candidate):
-                return candidate
-
-            # 4) Local weights dir
+            # 3) Local weights dir
             candidate = os.path.join("weights", f"{env_key}.pt")
             if os.path.isfile(candidate):
                 return candidate
 
-            # 5) Global default
+            # 4) Global default
             return settings.RTDETR_MODEL_PATH
         except Exception:
             return settings.RTDETR_MODEL_PATH
 
     # --- Core Integration Architecture Methods (scaffolding) ---
-    async def initialize_tracking_services(self, environment_id: str) -> bool:
+    async def initialize_tracking_services(self, task_id: uuid.UUID, environment_id: str) -> bool:
         """Initialize per-camera trackers via factory."""
         try:
             # Lazily create tracker factory using compute device heuristics from BoxMOT
@@ -223,11 +221,11 @@ class DetectionVideoService(RawVideoService):
             # Determine cameras for environment from config
             camera_ids = [vc.cam_id for vc in settings.VIDEO_SETS if vc.env_id == environment_id]
 
-            # Create trackers for each camera
+            # Create trackers for each camera (keyed by the real task_id)
             self.camera_trackers = {}
             for camera_id in camera_ids:
                 try:
-                    tracker = await self.tracker_factory.get_tracker(task_id=uuid.uuid4(), camera_id=camera_id)
+                    tracker = await self.tracker_factory.get_tracker(task_id=task_id, camera_id=camera_id)
                     self.camera_trackers[camera_id] = tracker
                 except Exception as e:
                     logger.warning(f"Failed to initialize tracker for camera {camera_id}: {e}")
@@ -251,7 +249,7 @@ class DetectionVideoService(RawVideoService):
         # Step 2: Tracking integration (via tracker factory)
         tracks: List[Dict[str, Any]] = []
         try:
-            if settings.TRACKING_ENABLED and getattr(settings, 'ENABLE_INTRA_CAMERA_TRACKING', True) and camera_id in self.camera_trackers:
+            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
                 tracker = self.camera_trackers.get(camera_id)
                 # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
                 np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
@@ -428,7 +426,7 @@ class DetectionVideoService(RawVideoService):
             
             # Step 1: Initialize detection services
             logger.info(f"🧠 DETECTION PIPELINE: Step 1/4 - Initializing detection services for task {task_id}")
-            services_initialized = await self.initialize_detection_services(environment_id)
+            services_initialized = await self.initialize_detection_services(environment_id, task_id)
             if not services_initialized:
                 raise RuntimeError("Failed to initialize detection services")
             
@@ -703,6 +701,20 @@ class DetectionVideoService(RawVideoService):
                 }
             }
             
+            # Optional on-disk frame cache (sampled) for annotated frames
+            try:
+                if getattr(settings, 'STORE_EXTRACTED_FRAMES', False):
+                    sample_rate = int(getattr(settings, 'FRAME_CACHE_SAMPLE_RATE', 0))
+                    if sample_rate and frame_number % sample_rate == 0:
+                        from base64 import b64decode
+                        cache_dir = Path(getattr(settings, 'FRAME_CACHE_DIR', './extracted_frames')) / str(task_id) / str(camera_id)
+                        cache_dir.mkdir(parents=True, exist_ok=True)
+                        out_path = cache_dir / f"frame_{frame_number:06d}.jpg"
+                        b64_str = frame_overlay["annotated_b64"].split(',', 1)[-1]
+                        await asyncio.to_thread(out_path.write_bytes, b64decode(b64_str))
+            except Exception:
+                pass
+
             # Send via WebSocket
             success = await binary_websocket_manager.send_json_message(
                 str(task_id), detection_message, MessageType.TRACKING_UPDATE
@@ -902,6 +914,12 @@ class DetectionVideoService(RawVideoService):
                 self.active_tasks.remove(task_id)
             if environment_id in self.environment_tasks:
                 del self.environment_tasks[environment_id]
+            # Explicit tracker teardown for this task
+            try:
+                if self.tracker_factory:
+                    await self.tracker_factory.clear_trackers_for_task(task_id)
+            except Exception:
+                pass
     
     async def _process_frames_simple_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """

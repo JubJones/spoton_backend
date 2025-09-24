@@ -145,56 +145,65 @@ class MultiCameraFrameProcessor:
 
         processed_track_ids_this_cam_frame = set()
 
+        # Pre-extract bbox and track arrays for vectorized ops
+        if tracked_dets_np is None or tracked_dets_np.size == 0:
+            return triggers_found
+        valid_rows = tracked_dets_np[:, 0:5]
+        x1_arr = valid_rows[:, 0].astype(float)
+        y1_arr = valid_rows[:, 1].astype(float)
+        x2_arr = valid_rows[:, 2].astype(float)
+        y2_arr = valid_rows[:, 3].astype(float)
+        track_id_vals = valid_rows[:, 4]
+
+        # Filter valid tracks
+        finite_mask = np.isfinite(track_id_vals) & (track_id_vals >= 0)
+        # Positive area mask
+        pos_area_mask = (x2_arr > x1_arr) & (y2_arr > y1_arr)
+        base_mask = finite_mask & pos_area_mask
+
         for rule in exit_rules:
-            source_quadrant_name = rule.source_exit_quadrant # MODIFIED: Use specific quadrant from rule
+            source_quadrant_name = rule.source_exit_quadrant
             quadrant_template_func = QUADRANT_REGIONS_TEMPLATE.get(source_quadrant_name)
-            
             if not quadrant_template_func:
                 logger.warning(f"[Task {task_id}][{camera_id}] Rule specifies unknown source_exit_quadrant '{source_quadrant_name}'. Skipping rule.")
                 continue
 
-            qx1, qy1, qx2, qy2 = quadrant_template_func(W, H) # Calculate coords for the single source exit quadrant
+            qx1, qy1, qx2, qy2 = quadrant_template_func(W, H)
 
-            for track_data_row in tracked_dets_np:
-                if len(track_data_row) < 5: continue 
+            # Vectorized intersection with quadrant
+            inter_x1 = np.maximum(x1_arr, float(qx1))
+            inter_y1 = np.maximum(y1_arr, float(qy1))
+            inter_x2 = np.minimum(x2_arr, float(qx2))
+            inter_y2 = np.minimum(y2_arr, float(qy2))
+            inter_w = np.maximum(0.0, inter_x2 - inter_x1)
+            inter_h = np.maximum(0.0, inter_y2 - inter_y1)
+            inter_area = inter_w * inter_h
+            bbox_area = (x2_arr - x1_arr) * (y2_arr - y1_arr)
+
+            overlap_ratio = np.divide(inter_area, bbox_area, out=np.zeros_like(inter_area), where=bbox_area > 1e-5)
+            mask = base_mask & (overlap_ratio >= min_overlap_ratio)
+
+            indices = np.where(mask)[0]
+            for idx in indices:
+                tid_val = track_id_vals[idx]
                 try:
-                    track_id_val = track_data_row[4]
-                    if not np.isfinite(track_id_val) or track_id_val < 0: continue
-                    track_id_int = TrackID(int(track_id_val))
-
+                    track_id_int = TrackID(int(tid_val))
                     if track_id_int in processed_track_ids_this_cam_frame:
                         continue
-
-                    bbox_xyxy_list = BoundingBoxXYXY(list(map(float, track_data_row[0:4])))
-                    x1, y1, x2, y2 = bbox_xyxy_list
-                    bbox_w, bbox_h = x2 - x1, y2 - y1
-                    if bbox_w <= 0 or bbox_h <= 0: continue 
-                    bbox_area = float(bbox_w * bbox_h)
-
-                    # Calculate intersection area of the bbox with the single source exit quadrant
-                    inter_x1, inter_y1 = max(x1, float(qx1)), max(y1, float(qy1))
-                    inter_x2, inter_y2 = min(x2, float(qx2)), min(y2, float(qy2))
-                    inter_w = max(0.0, inter_x2 - inter_x1) 
-                    inter_h = max(0.0, inter_y2 - inter_y1) 
-                    intersection_area_with_quadrant = float(inter_w * inter_h) # MODIFIED: Not total, just with this rule's quadrant
-                    
-                    if bbox_area > 1e-5 and (intersection_area_with_quadrant / bbox_area) >= min_overlap_ratio:
-                        source_track_key: TrackKey = (camera_id, track_id_int)
-                        trigger_info = HandoffTriggerInfo(
-                            source_track_key=source_track_key, rule=rule, source_bbox=bbox_xyxy_list
-                        )
-                        triggers_found.append(trigger_info)
-                        processed_track_ids_this_cam_frame.add(track_id_int) 
-                        logger.info(
-                            f"[Task {task_id}][{camera_id}] HANDOFF TRIGGER: Track {source_track_key} "
-                            f"exiting quadrant '{rule.source_exit_quadrant}' -> Cam '{rule.target_cam_id}' " # MODIFIED: Log quadrant
-                            f"Area '{rule.target_entry_area}'. Overlap: {intersection_area_with_quadrant/bbox_area:.2f}"
-                        )
-                        break 
-                except (ValueError, IndexError, TypeError) as e:
-                    logger.warning(
-                        f"[Task {task_id}][{camera_id}] Error processing track for handoff: {track_data_row}. Error: {e}", exc_info=False
+                    bbox_xyxy_list = BoundingBoxXYXY([x1_arr[idx], y1_arr[idx], x2_arr[idx], y2_arr[idx]])
+                    source_track_key: TrackKey = (camera_id, track_id_int)
+                    trigger_info = HandoffTriggerInfo(
+                        source_track_key=source_track_key, rule=rule, source_bbox=bbox_xyxy_list
                     )
+                    triggers_found.append(trigger_info)
+                    processed_track_ids_this_cam_frame.add(track_id_int)
+                    logger.info(
+                        f"[Task {task_id}][{camera_id}] HANDOFF TRIGGER: Track {source_track_key} "
+                        f"exiting quadrant '{rule.source_exit_quadrant}' -> Cam '{rule.target_cam_id}' "
+                        f"Area '{rule.target_entry_area}'. Overlap: {float(overlap_ratio[idx]):.2f}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[Task {task_id}][{camera_id}] Error processing vectorized handoff idx {idx}: {e}", exc_info=False)
         return triggers_found
 
 

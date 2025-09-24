@@ -15,6 +15,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass
 
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
+from app.core.config import settings
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
 from app.shared.types import CameraID, TrackID, GlobalID
@@ -73,6 +74,9 @@ class TrackingHandler:
         # Update throttling
         self.update_throttle_ms = 100  # Minimum time between updates
         self.last_update_times: Dict[str, float] = {}
+        # Pruning controls to avoid unbounded growth
+        self.max_persons_kept = 1000
+        self.prune_after_seconds = 60.0
         
         logger.info("TrackingHandler initialized")
     
@@ -109,6 +113,10 @@ class TrackingHandler:
             # Create tracking update
             tracking_update = self._create_tracking_update(person_identity, current_position, trajectory)
             
+            # Cap trajectory path length for payload size
+            traj_limit = int(getattr(settings, 'WS_TRACKING_TRAJECTORY_POINTS_LIMIT', 50))
+            capped_traj = tracking_update.trajectory_path[-traj_limit:] if tracking_update.trajectory_path else []
+
             # Create message
             message = {
                 "type": MessageType.TRACKING_UPDATE.value,
@@ -144,7 +152,7 @@ class TrackingHandler:
                         "timestamp": coord.timestamp.isoformat(),
                         "confidence": coord.confidence
                     }
-                    for coord in tracking_update.trajectory_path
+                    for coord in capped_traj
                 ],
                 "last_seen": tracking_update.last_seen.isoformat(),
                 "confidence": tracking_update.confidence,
@@ -408,7 +416,11 @@ class TrackingHandler:
             return []
     
     def get_tracking_stats(self) -> Dict[str, Any]:
-        """Get tracking statistics."""
+        """Get tracking statistics (prunes stale state)."""
+        try:
+            self._prune_stale_state()
+        except Exception:
+            pass
         return {
             **self.tracking_stats,
             "active_persons_count": len(self.active_persons),
@@ -417,6 +429,22 @@ class TrackingHandler:
                 "update_throttle_ms": self.update_throttle_ms
             }
         }
+
+    def _prune_stale_state(self):
+        """Remove persons with no updates for a while and cap total size."""
+        now = time.time()
+        # Remove entries older than threshold
+        stale_keys = [k for k, ts in self.last_update_times.items() if (now - ts) > self.prune_after_seconds]
+        for k in stale_keys:
+            self.last_update_times.pop(k, None)
+            self.active_persons.pop(k, None)
+        # Cap total size by removing oldest
+        if len(self.active_persons) > self.max_persons_kept:
+            ordered = sorted(self.last_update_times.items(), key=lambda kv: kv[1])
+            excess = len(self.active_persons) - self.max_persons_kept
+            for k, _ in ordered[:excess]:
+                self.last_update_times.pop(k, None)
+                self.active_persons.pop(k, None)
     
     def reset_stats(self):
         """Reset tracking statistics."""

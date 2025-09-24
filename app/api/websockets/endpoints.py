@@ -12,6 +12,7 @@ import asyncio
 import logging
 from typing import Dict, Any, Optional
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
+from starlette.responses import StreamingResponse, PlainTextResponse
 from fastapi.websockets import WebSocketState
 import json
 
@@ -48,7 +49,7 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
 
     try:
         # Connect to binary WebSocket manager
-        connected = await binary_websocket_manager.connect(websocket, task_id)
+        connected = await binary_websocket_manager.connect(websocket, task_id, channels=["tracking"]) 
 
         if not connected:
             logger.error(f"Failed to connect WebSocket for task_id: {task_id}")
@@ -80,7 +81,8 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
                             "message_compression"
                         ]
                     },
-                    MessageType.CONTROL_MESSAGE
+                    MessageType.CONTROL_MESSAGE,
+                    target_channel="tracking"
                 )
                 if success:
                     connection_message_sent = True
@@ -111,7 +113,7 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
                     # Parse client message
                     try:
                         message = json.loads(data)
-                        await handle_client_message(task_id, message)
+                        await handle_client_message(websocket, task_id, message)
                     except json.JSONDecodeError:
                         logger.warning(f"Invalid JSON received from client: {data}")
                         continue
@@ -160,7 +162,7 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
 
     try:
         # Connect to binary WebSocket manager
-        connected = await binary_websocket_manager.connect(websocket, task_id)
+        connected = await binary_websocket_manager.connect(websocket, task_id, channels=["frames"]) 
 
         if not connected:
             logger.error(f"Failed to connect frames WebSocket for task_id: {task_id}")
@@ -185,7 +187,8 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
                         "adaptive_quality": True,
                         "frame_sync": True
                     },
-                    MessageType.CONTROL_MESSAGE
+                    MessageType.CONTROL_MESSAGE,
+                    target_channel="frames"
                 )
                 if success:
                     break
@@ -212,7 +215,7 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
                     # Parse client message
                     try:
                         message = json.loads(data)
-                        await handle_frame_control_message(task_id, message)
+                        await handle_frame_control_message(websocket, task_id, message)
                     except json.JSONDecodeError:
                         logger.warning(f"Invalid JSON received from frames client: {data}")
                         continue
@@ -262,7 +265,7 @@ async def websocket_system_endpoint(websocket: WebSocket):
 
     try:
         # Connect to binary WebSocket manager
-        connected = await binary_websocket_manager.connect(websocket, system_task_id)
+        connected = await binary_websocket_manager.connect(websocket, system_task_id, channels=["system"]) 
 
         if not connected:
             logger.error("Failed to connect system WebSocket")
@@ -505,7 +508,7 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
         logger.info(f"WebSocket analytics connection closed for task_id: {task_id}")
 
 
-async def handle_client_message(task_id: str, message: Dict[str, Any]):
+async def handle_client_message(websocket: WebSocket, task_id: str, message: Dict[str, Any]):
     """Handle messages from tracking WebSocket clients."""
     try:
         message_type = message.get("type")
@@ -523,10 +526,12 @@ async def handle_client_message(task_id: str, message: Dict[str, Any]):
 
         elif message_type == "subscribe_tracking":
             # Subscribe to tracking updates
+            binary_websocket_manager.subscribe(task_id, websocket, "tracking")
             logger.info(f"Client subscribed to tracking updates for task_id: {task_id}")
 
         elif message_type == "unsubscribe_tracking":
             # Unsubscribe from tracking updates
+            binary_websocket_manager.unsubscribe(task_id, websocket, "tracking")
             logger.info(f"Client unsubscribed from tracking updates for task_id: {task_id}")
 
         elif message_type == "request_status":
@@ -549,7 +554,7 @@ async def handle_client_message(task_id: str, message: Dict[str, Any]):
         logger.error(f"Error handling client message: {e}")
 
 
-async def handle_frame_control_message(task_id: str, message: Dict[str, Any]):
+async def handle_frame_control_message(websocket: WebSocket, task_id: str, message: Dict[str, Any]):
     """Handle control messages from frame WebSocket clients."""
     try:
         message_type = message.get("type")
@@ -564,6 +569,19 @@ async def handle_frame_control_message(task_id: str, message: Dict[str, Any]):
             # Enable/disable compression
             enabled = message.get("enabled", True)
             logger.info(f"Setting compression to {enabled} for task_id: {task_id}")
+            # Toggle global compression setting
+            try:
+                binary_websocket_manager.enable_compression = bool(enabled)
+            except Exception:
+                pass
+
+        elif message_type == "set_max_fps":
+            fps = message.get("fps", 15)
+            try:
+                binary_websocket_manager.set_max_fps(websocket, float(fps))
+                logger.info(f"Set max FPS to {fps} for task_id: {task_id}")
+            except Exception:
+                logger.warning(f"Invalid FPS value: {fps}")
 
         elif message_type == "request_frame_stats":
             # Send frame statistics
@@ -662,4 +680,47 @@ async def websocket_stats():
 
     except Exception as e:
         logger.error(f"Error getting WebSocket statistics: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Server-Sent Events endpoint for status updates
+@router.get("/sse/status")
+async def sse_status():
+    async def event_generator():
+        while True:
+            try:
+                system_status = await status_handler.get_system_status()
+                stats = {
+                    "websocket_manager": binary_websocket_manager.get_performance_stats(),
+                    "frame_handler": frame_handler.get_encoding_stats(),
+                    "tracking_handler": tracking_handler.get_tracking_stats(),
+                    "system_status": system_status
+                }
+                payload = json.dumps(stats)
+                yield f"data: {payload}\n\n"
+                await asyncio.sleep(1.0)
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                # Avoid breaking the stream on transient errors
+                await asyncio.sleep(2.0)
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+# Minimal Prometheus-style metrics endpoint
+@router.get("/metrics")
+async def websocket_metrics():
+    try:
+        perf = binary_websocket_manager.get_performance_stats()
+        lines = []
+        lines.append(f"websocket_active_connections {perf.get('active_connections', 0)}")
+        lines.append(f"websocket_total_connections {perf.get('total_connections', 0)}")
+        lines.append(f"websocket_total_messages_sent {perf.get('total_messages_sent', 0)}")
+        lines.append(f"websocket_total_bytes_sent {perf.get('total_bytes_sent', 0)}")
+        lines.append(f"websocket_average_compression_ratio {perf.get('average_compression_ratio', 0.0)}")
+        body = "\n".join(lines) + "\n"
+        return PlainTextResponse(body, media_type="text/plain; version=0.0.4")
+    except Exception as e:
+        logger.error(f"Error generating metrics: {e}")
         raise HTTPException(status_code=500, detail=str(e))

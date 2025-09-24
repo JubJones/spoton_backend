@@ -14,7 +14,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        PYTORCH_VARIANT: cpu  # Force CPU-only PyTorch build
+        PYTORCH_VARIANT: cpu
     image: spoton_backend_image:cpu
     container_name: spoton_backend_cpu
     ports:
@@ -26,6 +26,7 @@ services:
       # Remove these volume mounts for production deployment
     env_file:
       - .env
+      - .env.cpu
     environment:
       - PYTHONUNBUFFERED=1
       - PYTORCH_VARIANT_BUILD=cpu
@@ -38,11 +39,7 @@ services:
       # Docker networking
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
-    depends_on:
-      redis:
-        condition: service_healthy
-      timescaledb:
-        condition: service_healthy
+    # No hard dependency on Redis; enable with `--profile infra` when needed
     # No GPU deployment section - CPU only
     command: uvicorn app.main:app --host 0.0.0.0 --port 3847
     healthcheck:
@@ -51,6 +48,12 @@ services:
       timeout: 10s
       retries: 3
       start_period: 60s  # Give more time for CPU model loading
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+    mem_limit: 2g
 
   redis:
     image: redis:7.2.4-alpine
@@ -65,6 +68,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    profiles: ["infra"]
     # CPU resource limits to prevent overwhelming
     deploy:
       resources:
@@ -90,6 +95,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
+    profiles: ["infra"]
     # CPU resource limits
     deploy:
       resources:
@@ -105,9 +112,9 @@ volumes:
   timescaledb_data:
     driver: local
 
-# CPU-optimized network configuration
-networks:
-  default:
-    driver: bridge
-    driver_opts:
-      com.docker.network.driver.mtu: 1500
+# CPU-optimized network configuration (optional)
+# networks:
+#   default:
+#     driver: bridge
+#     driver_opts:
+#       com.docker.network.driver.mtu: 1500

@@ -213,9 +213,13 @@ class TrackingCache:
                 camera_key = f"{self.camera_key_prefix}:{camera_id}"
                 person_ids = await self.redis.smembers(camera_key)
             else:
-                # Get all person keys
-                keys = await self.redis.keys(f"{self.person_key_prefix}:*")
-                person_ids = [key.split(':')[1] for key in keys]
+                # Iterate keys using SCAN to avoid blocking
+                person_ids = []
+                async for key in self.redis.scan_iter(match=f"{self.person_key_prefix}:*"):
+                    try:
+                        person_ids.append(key.decode('utf-8').split(':', 1)[1])
+                    except Exception:
+                        continue
             
             # Fetch all person states
             active_persons = []
@@ -344,7 +348,10 @@ class TrackingCache:
             if not self.redis:
                 await self.initialize()
             
-            keys = await self.redis.keys(f"{self.embedding_key_prefix}:{person_id}:*")
+            # Iterate keys using SCAN to avoid blocking
+            keys = []
+            async for key in self.redis.scan_iter(match=f"{self.embedding_key_prefix}:{person_id}:*"):
+                keys.append(key)
             embeddings = []
             
             for key in keys:
@@ -365,10 +372,8 @@ class TrackingCache:
             if not self.redis:
                 await self.initialize()
             
-            keys = await self.redis.keys(f"{self.embedding_key_prefix}:*:{camera_id}")
             embeddings = []
-            
-            for key in keys:
+            async for key in self.redis.scan_iter(match=f"{self.embedding_key_prefix}:*:{camera_id}"):
                 data = await self.redis.get(key)
                 if data:
                     embedding_data = json.loads(data)
@@ -542,7 +547,10 @@ class TrackingCache:
             if not self.redis:
                 await self.initialize()
             
-            keys = await self.redis.keys(f"{self.trajectory_key_prefix}:{person_id}:*")
+            # Iterate keys using SCAN to avoid blocking
+            keys = []
+            async for key in self.redis.scan_iter(match=f"{self.trajectory_key_prefix}:{person_id}:*"):
+                keys.append(key)
             trajectories = []
             
             for key in keys:
@@ -591,8 +599,10 @@ class TrackingCache:
             key_counts = {}
             for prefix in [self.person_key_prefix, self.embedding_key_prefix, 
                           self.session_key_prefix, self.trajectory_key_prefix]:
-                keys = await self.redis.keys(f"{prefix}:*")
-                key_counts[prefix] = len(keys)
+                count = 0
+                async for _ in self.redis.scan_iter(match=f"{prefix}:*"):
+                    count += 1
+                key_counts[prefix] = count
             
             return {
                 "cache_stats": self.cache_stats,
@@ -634,8 +644,7 @@ class TrackingCache:
     async def _remove_person_from_camera_indices(self, person_id: str):
         """Remove person from all camera indices."""
         try:
-            camera_keys = await self.redis.keys(f"{self.camera_key_prefix}:*")
-            for key in camera_keys:
+            async for key in self.redis.scan_iter(match=f"{self.camera_key_prefix}:*"):
                 await self.redis.srem(key, person_id)
         except Exception as e:
             logger.error(f"Error removing person from camera indices: {e}")
@@ -662,8 +671,7 @@ class TrackingCache:
     async def _remove_session_from_index(self, session_id: str):
         """Remove session from all indices."""
         try:
-            index_keys = await self.redis.keys("session_index:*")
-            for key in index_keys:
+            async for key in self.redis.scan_iter(match="session_index:*"):
                 await self.redis.srem(key, session_id)
         except Exception as e:
             logger.error(f"Error removing session from index: {e}")
@@ -672,8 +680,7 @@ class TrackingCache:
         """Clean up expired person states."""
         try:
             # This is handled by Redis TTL, but we can clean up indices
-            camera_keys = await self.redis.keys(f"{self.camera_key_prefix}:*")
-            for key in camera_keys:
+            async for key in self.redis.scan_iter(match=f"{self.camera_key_prefix}:*"):
                 # Get all persons in this camera
                 person_ids = await self.redis.smembers(key)
                 for person_id in person_ids:
@@ -687,8 +694,7 @@ class TrackingCache:
     async def _cleanup_expired_sessions(self):
         """Clean up expired session indices."""
         try:
-            index_keys = await self.redis.keys("session_index:*")
-            for key in index_keys:
+            async for key in self.redis.scan_iter(match="session_index:*"):
                 session_ids = await self.redis.smembers(key)
                 for session_id in session_ids:
                     session_key = f"{self.session_key_prefix}:{session_id}"
@@ -700,8 +706,7 @@ class TrackingCache:
     async def _cleanup_expired_embeddings(self):
         """Clean up expired embedding indices."""
         try:
-            index_keys = await self.redis.keys("embedding_index:*")
-            for key in index_keys:
+            async for key in self.redis.scan_iter(match="embedding_index:*"):
                 person_id = key.split(':')[1]
                 camera_ids = await self.redis.smembers(key)
                 for camera_id in camera_ids:

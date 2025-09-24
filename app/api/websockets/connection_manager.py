@@ -60,6 +60,11 @@ class BinaryWebSocketManager:
     def __init__(self):
         # Active connections grouped by task_id
         self.active_connections: Dict[str, List[WebSocket]] = {}
+        # Per-task, per-connection channel subscriptions
+        self.connection_channels: Dict[str, Dict[WebSocket, set]] = {}
+        # Per-connection last frame send timestamp and fps limits
+        self._last_frame_sent_at: Dict[int, float] = {}
+        self._max_fps_by_conn: Dict[int, float] = {}
         
         # Connection metrics tracking
         self.connection_metrics: Dict[str, ConnectionMetrics] = {}
@@ -81,6 +86,10 @@ class BinaryWebSocketManager:
         self.compression_threshold = 50 * 1024  # 50KB - only compress larger messages
         self.compression_level = 1  # Fast compression for real-time streaming
         
+        # Backpressure controls
+        self.send_timeout_seconds = 0.75
+        self.default_max_fps = 15.0
+        
         # Message batching settings
         self.enable_batching = True
         self.batch_size = 10
@@ -100,7 +109,7 @@ class BinaryWebSocketManager:
         
         logger.info("BinaryWebSocketManager initialized with binary frame support")
     
-    async def connect(self, websocket: WebSocket, task_id: str) -> bool:
+    async def connect(self, websocket: WebSocket, task_id: str, channels: Optional[List[str]] = None) -> bool:
         """
         Accept WebSocket connection and register it.
         
@@ -112,8 +121,7 @@ class BinaryWebSocketManager:
             True if connection successful, False otherwise
         """
         try:
-            logger.info(f"🔍 WS DEBUG: Accepting WebSocket connection for task_id: {task_id}")
-            logger.info(f"🔍 WS DEBUG: Current active_connections before connect: {list(self.active_connections.keys())}")
+            logger.debug(f"WS connect request task_id={task_id}; active={list(self.active_connections.keys())}")
             
             # Accept the WebSocket connection
             await websocket.accept()
@@ -136,8 +144,16 @@ class BinaryWebSocketManager:
             # Initialize connection tracking
             if task_id not in self.active_connections:
                 self.active_connections[task_id] = []
-            
+    
             self.active_connections[task_id].append(websocket)
+            # Initialize channel subscriptions
+            if task_id not in self.connection_channels:
+                self.connection_channels[task_id] = {}
+            chan_set = set(channels) if channels else {"tracking", "frames", "system"}
+            self.connection_channels[task_id][websocket] = chan_set
+            # Initialize rate limiting state
+            self._max_fps_by_conn[id(websocket)] = self.default_max_fps
+            self._last_frame_sent_at.setdefault(id(websocket), 0.0)
             
             # Initialize metrics
             connection_key = f"{task_id}_{id(websocket)}"
@@ -159,9 +175,7 @@ class BinaryWebSocketManager:
             self.performance_stats["total_connections"] += 1
             self.performance_stats["active_connections"] += 1
             
-            logger.info(f"✅ WS DEBUG: WebSocket connected successfully for task_id: {task_id}")
-            logger.info(f"🔍 WS DEBUG: Active connections after connect: {list(self.active_connections.keys())}")
-            logger.info(f"🔍 WS DEBUG: Connection count for task {task_id}: {len(self.active_connections[task_id])}")
+            logger.info(f"WebSocket connected for task_id: {task_id} (count={len(self.active_connections[task_id])})")
             
             # Deliver any buffered messages for this task
             await self._deliver_buffered_messages(task_id)
@@ -182,8 +196,7 @@ class BinaryWebSocketManager:
             task_id: Task identifier
         """
         try:
-            logger.info(f"🔍 WS DEBUG: Disconnecting WebSocket for task_id: {task_id}")
-            logger.info(f"🔍 WS DEBUG: Active connections before disconnect: {list(self.active_connections.keys())}")
+            logger.debug(f"WS disconnect task_id={task_id}; active={list(self.active_connections.keys())}")
             
             # Remove from active connections
             if task_id in self.active_connections:
@@ -212,6 +225,14 @@ class BinaryWebSocketManager:
             connection_key = f"{task_id}_{id(websocket)}"
             if connection_key in self.connection_metrics:
                 del self.connection_metrics[connection_key]
+            # Clean up channel and rate state
+            try:
+                if task_id in self.connection_channels and websocket in self.connection_channels[task_id]:
+                    del self.connection_channels[task_id][websocket]
+                del self._max_fps_by_conn[id(websocket)]
+                del self._last_frame_sent_at[id(websocket)]
+            except Exception:
+                pass
             
             # Update performance stats
             self.performance_stats["active_connections"] -= 1
@@ -273,13 +294,26 @@ class BinaryWebSocketManager:
             success_count = 0
             connections_to_remove = []
             
-            for websocket in self.active_connections[task_id]:
+            for websocket in list(self.active_connections[task_id]):
+                # Respect channel subscriptions
+                subs = self.connection_channels.get(task_id, {}).get(websocket, {"tracking", "frames", "system"})
+                if "frames" not in subs:
+                    continue
+                # Basic FPS rate limiting per connection
+                conn_id = id(websocket)
+                max_fps = self._max_fps_by_conn.get(conn_id, self.default_max_fps)
+                min_interval = 1.0 / max(1e-6, max_fps)
+                now = time.time()
+                last_sent = self._last_frame_sent_at.get(conn_id, 0.0)
+                if (now - last_sent) < min_interval:
+                    continue
                 try:
-                    await websocket.send_bytes(binary_message)
+                    await asyncio.wait_for(websocket.send_bytes(binary_message), timeout=self.send_timeout_seconds)
                     success_count += 1
-                    
+    
                     # Update metrics
                     self._update_connection_metrics(task_id, websocket, len(binary_message))
+                    self._last_frame_sent_at[conn_id] = time.time()
                     
                 except Exception as e:
                     logger.error(f"Failed to send binary frame to connection: {e}")
@@ -303,7 +337,8 @@ class BinaryWebSocketManager:
         self, 
         task_id: str, 
         message: Dict[str, Any],
-        message_type: MessageType = MessageType.TRACKING_UPDATE
+        message_type: MessageType = MessageType.TRACKING_UPDATE,
+        target_channel: Optional[str] = None
     ) -> bool:
         """
         Send JSON message with optional batching.
@@ -317,14 +352,13 @@ class BinaryWebSocketManager:
             True if sent successfully, False otherwise
         """
         try:
-            logger.info(f"🔍 WS DEBUG: send_json_message called for task_id: {task_id}, message_type: {message_type.value}")
-            logger.info(f"🔍 WS DEBUG: Current active_connections keys: {list(self.active_connections.keys())}")
+            logger.debug(f"WS send_json task_id={task_id}, type={message_type.value}")
             
             # Check if task has active connections
             if task_id not in self.active_connections or not self.active_connections[task_id]:
                 # Buffer tracking updates for later delivery when WebSocket connects
                 if message_type == MessageType.TRACKING_UPDATE:
-                    logger.info(f"📦 WS DEBUG: Buffering tracking update for task_id: {task_id} (no active connections)")
+                    logger.debug(f"WS buffer tracking update task_id={task_id} (no connections)")
                     await self._buffer_tracking_update(task_id, message)
                     return True  # Consider buffering as successful
                 else:
@@ -333,7 +367,7 @@ class BinaryWebSocketManager:
                     return False
             
             connection_count = len(self.active_connections[task_id])
-            logger.info(f"✅ WS DEBUG: Found {connection_count} active connections for task_id: {task_id}")
+            logger.debug(f"WS active connections for {task_id}: {connection_count}")
             
             # Add message type and timestamp
             message["type"] = message_type.value
@@ -341,7 +375,7 @@ class BinaryWebSocketManager:
             
             # Log message size for debugging
             message_size = len(json.dumps(message).encode('utf-8'))
-            logger.info(f"📏 WS DEBUG: Message size: {message_size} bytes ({message_size/1024:.1f} KB) for task_id: {task_id}")
+            logger.debug(f"WS message size={message_size} for task_id={task_id}")
             
             # Handle batching - Skip batching for tracking_update messages since they use per-camera messaging
             if self.enable_batching and message_type == MessageType.TRACKING_UPDATE:
@@ -351,7 +385,7 @@ class BinaryWebSocketManager:
             elif self.enable_batching and message_type != MessageType.TRACKING_UPDATE:
                 return await self._handle_batched_message(task_id, message)
             else:
-                return await self._send_immediate_message(task_id, message)
+                return await self._send_immediate_message(task_id, message, target_channel=target_channel)
             
         except Exception as e:
             logger.error(f"Error sending JSON message for task_id {task_id}: {e}")
@@ -427,7 +461,7 @@ class BinaryWebSocketManager:
             logger.error(f"Error sending batch for task_id {task_id}: {e}")
             return False
     
-    async def _send_immediate_message(self, task_id: str, message: Dict[str, Any]) -> bool:
+    async def _send_immediate_message(self, task_id: str, message: Dict[str, Any], target_channel: Optional[str] = None) -> bool:
         """Send message immediately to all connections with enhanced state validation."""
         try:
             # Check if task has active connections
@@ -482,14 +516,29 @@ class BinaryWebSocketManager:
             success_count = 0
             connections_to_remove = []
             
-            for websocket in self.active_connections[task_id]:
+            for websocket in list(self.active_connections[task_id]):
+                # Channel filtering
+                subs = self.connection_channels.get(task_id, {}).get(websocket, {"tracking", "frames", "system"})
+                inferred = None
+                if target_channel:
+                    inferred = target_channel
+                else:
+                    mtype = message.get("type")
+                    if mtype == MessageType.TRACKING_UPDATE.value or mtype == "tracking_update":
+                        inferred = "tracking"
+                    elif mtype == MessageType.SYSTEM_STATUS.value or mtype == "system_status" or mtype == "message_batch":
+                        inferred = "system"
+                    elif mtype == MessageType.FRAME_DATA.value or mtype == "frame_data":
+                        inferred = "frames"
+                if inferred and inferred not in subs:
+                    continue
                 try:
                     # Enhanced WebSocket state validation
                     if not await self._is_websocket_ready(websocket):
                         logger.debug(f"WebSocket not ready, marking for removal")
                         connections_to_remove.append(websocket)
                         continue
-                    
+    
                     # Send message with retry logic
                     if await self._send_with_retry(websocket, message_json):
                         success_count += 1
@@ -754,6 +803,30 @@ class BinaryWebSocketManager:
             
         except Exception as e:
             logger.error(f"Error during cleanup: {e}")
+
+    # ----- Subscription and per-connection settings -----
+    def subscribe(self, task_id: str, websocket: WebSocket, channel: str):
+        try:
+            if task_id not in self.connection_channels:
+                self.connection_channels[task_id] = {}
+            subs = self.connection_channels[task_id].setdefault(websocket, set())
+            subs.add(channel)
+        except Exception as e:
+            logger.debug(f"Subscribe error: {e}")
+
+    def unsubscribe(self, task_id: str, websocket: WebSocket, channel: str):
+        try:
+            subs = self.connection_channels.get(task_id, {}).get(websocket)
+            if subs and channel in subs:
+                subs.remove(channel)
+        except Exception as e:
+            logger.debug(f"Unsubscribe error: {e}")
+
+    def set_max_fps(self, websocket: WebSocket, fps: float):
+        try:
+            self._max_fps_by_conn[id(websocket)] = max(1.0, float(fps))
+        except Exception as e:
+            logger.debug(f"set_max_fps error: {e}")
 
 
 # Global manager instance

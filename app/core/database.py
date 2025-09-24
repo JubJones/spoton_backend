@@ -23,6 +23,14 @@ async def get_database_health() -> Dict[str, Any]:
         Dict containing database health metrics and status
     """
     try:
+        if not getattr(settings, 'DB_ENABLED', True):
+            return {
+                "connected": False,
+                "status": "disabled",
+                "message": "Database disabled by configuration",
+                "query_time_ms": 0,
+                "total_check_time_ms": 0
+            }
         health_start = time.time()
         
         # Get service health from database integration service

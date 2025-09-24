@@ -26,14 +26,29 @@ The SpotOn backend has reached **100% production readiness** with comprehensive 
 
 ### Start the System
 ```bash
-# CPU version (development)
-docker-compose -f docker-compose.cpu.yml up --build -d
+# Backend only (fastest for frontend integration)
+docker compose up -d backend
 
-# GPU version (production - requires NVIDIA GPU)
-docker-compose -f docker-compose.gpu.yml up --build -d
+# Full stack (backend + Redis + TimescaleDB)
+docker compose --profile infra up --build -d
 
-# Check if running
+# CPU stack (profiled compose)
+docker compose -f docker-compose.cpu.yml --profile infra up --build -d
+
+# GPU stack (requires NVIDIA GPU)
+docker compose -f docker-compose.gpu.yml --profile infra up --build -d
+
+# Health check
 curl http://localhost:3847/health
+```
+
+### Database Setup (optional)
+```bash
+# If DB is enabled and TimescaleDB is available, run migrations:
+python scripts/setup_db.py
+
+# DB-specific readiness probe
+curl http://localhost:3847/health/database
 ```
 
 ## API Endpoints
@@ -46,9 +61,9 @@ GET  /                                 # Welcome message
 
 ### Processing Control
 ```bash
-POST /api/v1/processing-tasks/start    # Start tracking session
-GET  /api/v1/processing-tasks/{id}     # Get task status
-POST /api/v1/processing-tasks/stop     # Stop tracking session
+POST /api/v1/detection-processing-tasks/start    # Start detection session
+GET  /api/v1/detection-processing-tasks/{id}/status  # Get task status
+DELETE /api/v1/detection-processing-tasks/{id}/stop  # Stop task
 ```
 
 ### Real-time Data
@@ -121,7 +136,7 @@ GET  /api/v1/auth/permissions/test             # Check permissions
 
 ### Start Tracking Session
 ```bash
-curl -X POST http://localhost:3847/api/v1/processing-tasks/start \
+curl -X POST http://localhost:3847/api/v1/detection-processing-tasks/start \
   -H "Content-Type: application/json" \
   -d '{
     "environment_id": "campus",

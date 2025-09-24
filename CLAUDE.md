@@ -38,7 +38,7 @@ docker-compose build --no-cache
 ### Running the Application
 ```bash
 # Local development (requires Redis/TimescaleDB running)
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn app.main:app --host 0.0.0.0 --port 3847 --reload
 
 # Docker (recommended)
 docker-compose up --build -d

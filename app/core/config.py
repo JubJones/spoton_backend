@@ -42,6 +42,17 @@ class Settings(BaseSettings):
     DAGSHUB_REPO_NAME: str = "spoton_ml"
     LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
     LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
+    # Phase 6: I/O and caching controls
+    MAX_DOWNLOAD_CONCURRENCY: int = Field(default=3, description="Max concurrent S3 downloads")
+    STORE_EXTRACTED_FRAMES: bool = Field(default=False, description="Store extracted/annotated frames to disk while streaming")
+    FRAME_CACHE_DIR: str = Field(default="./extracted_frames", description="Directory for on-disk frame cache")
+    FRAME_CACHE_SAMPLE_RATE: int = Field(default=0, description="Save every Nth frame (0 disables saving)")
+    # S3 transfer settings
+    S3_CONNECT_TIMEOUT: int = Field(default=10, description="S3 connect timeout (seconds)")
+    S3_READ_TIMEOUT: int = Field(default=60, description="S3 read timeout (seconds)")
+    S3_MAX_ATTEMPTS: int = Field(default=5, description="S3 max retries")
+    S3_MAX_TRANSFER_CONCURRENCY: int = Field(default=4, description="S3 multipart transfer concurrency")
+    S3_MULTIPART_THRESHOLD_MB: int = Field(default=16, description="S3 multipart threshold (MB)")
 
     VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
         VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="campus", cam_id="c09", num_sub_videos=4),
@@ -65,7 +76,8 @@ class Settings(BaseSettings):
         ("factory", "c05"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c02"), target_entry_area="upper_right"), ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c03"), target_entry_area="upper_right")], homography_matrix_path="homography_points_c05_scene_s47.npz"),
     }
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
-    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_points")
+    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
+    HOMOGRAPHY_SOURCE: str = Field(default="auto", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=lambda: [("c09", "c12"), ("c12", "c13"), ("c13", "c16"),("c01", "c03"),("c02", "c03"),("c03", "c05")])
 
     REDIS_HOST: str = "localhost"
@@ -78,6 +90,12 @@ class Settings(BaseSettings):
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "spotondb"
     DATABASE_URL: Optional[str] = None
+    # Database toggles and pool settings (Phase 7)
+    DB_ENABLED: bool = Field(default=True, description="Enable database integration (TimescaleDB)")
+    DB_POOL_SIZE: int = Field(default=20, description="SQLAlchemy QueuePool size")
+    DB_MAX_OVERFLOW: int = Field(default=30, description="SQLAlchemy QueuePool max_overflow")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="Seconds to recycle DB connections")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="Enable pool_pre_ping to detect stale connections")
 
     DETECTOR_TYPE: str = "rtdetr"
     PERSON_CLASS_ID: int = 1
@@ -122,6 +140,19 @@ class Settings(BaseSettings):
 
     TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 90
+
+    # Lazy initialization toggles to reduce cold start
+    PRELOAD_TRACKER_FACTORY: bool = Field(default=True, description="Preload prototype tracker at startup")
+    PRELOAD_HOMOGRAPHY: bool = Field(default=True, description="Preload homography matrices at startup")
+
+    # Trail management settings
+    START_TRAIL_CLEANUP: bool = Field(default=True, description="Start global trail cleanup background task")
+    TRAIL_CLEANUP_INTERVAL_SECONDS: int = Field(default=10, description="Interval between trail cleanup runs")
+    TRAIL_MAX_AGE_SECONDS: int = Field(default=30, description="Max age for trail points before cleanup")
+    TRAIL_LENGTH: int = Field(default=3, description="Number of points to retain per trail")
+
+    # WebSocket payload limits
+    WS_TRACKING_TRAJECTORY_POINTS_LIMIT: int = Field(default=50, description="Max trajectory points to include per person in WS payloads")
 
     # Export settings
     EXPORT_BASE_DIR: str = "./exports"

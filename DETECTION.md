@@ -260,7 +260,7 @@ REID_GALLERY_EMA_ALPHA = 0.1
 REID_LOST_TRACK_BUFFER_FRAMES = 100
 
 # Homography Configuration
-HOMOGRAPHY_POINTS_DIR = "homography_points/"
+HOMOGRAPHY_DATA_DIR = "homography_data/"
 ENABLE_BEV_MAP_PROJECTION = True
 HOMOGRAPHY_RANSAC_THRESHOLD = 5.0
 
@@ -1609,4 +1609,3 @@ async def health_check_detection():
 3. Add trajectory prediction for improved tracking
 4. Implement distributed processing for scalability
 5. Add analytics dashboard for performance monitoring
-

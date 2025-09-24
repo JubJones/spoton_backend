@@ -128,8 +128,15 @@ class RTDETRDetector(AbstractDetector):
             raise RuntimeError("Detector model not loaded. Call load_model() first.")
         
         try:
-            # Run inference
-            results = self.model(image, conf=self.confidence_threshold, verbose=False)
+            # Run inference without tracking gradients and offload to thread to avoid blocking event loop
+            import asyncio
+            import torch
+
+            def _infer():
+                with torch.inference_mode():
+                    return self.model(image, conf=self.confidence_threshold, verbose=False)
+
+            results = await asyncio.to_thread(_infer)
             
             # Process results
             detections_result: List[Detection] = []

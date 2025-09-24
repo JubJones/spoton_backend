@@ -213,7 +213,11 @@ class HealthChecker:
         try:
             db_health = await get_database_health()
             
-            if db_health.get("connected", False):
+            if db_health.get("status") == "disabled":
+                status = "degraded"
+                message = "Database disabled by configuration"
+                details = {"disabled": True}
+            elif db_health.get("connected", False):
                 status = "healthy"
                 message = "Database connection healthy"
                 details = {
@@ -638,6 +642,28 @@ async def readiness_probe():
             detail=f"Readiness check failed: {str(e)}"
         )
 
+
+@router.get("/database", response_model=Dict[str, Any])
+async def database_readiness():
+    """Database-specific readiness probe.
+
+    Returns 200 when DB is enabled and reachable, or when DB is disabled by config.
+    Returns 503 when DB is enabled but unreachable.
+    """
+    try:
+        if not getattr(settings, 'DB_ENABLED', True):
+            return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "disabled"})
+        db = await get_database_health()
+        if db.get("connected"):
+            return JSONResponse(status_code=status.HTTP_200_OK, content={"status": "healthy"})
+        # If not connected, return 503
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={
+            "status": db.get("status", "unhealthy"),
+            "error": db.get("error", "unreachable")
+        })
+    except Exception as e:
+        logger.error(f"Database readiness probe failed: {e}")
+        return JSONResponse(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, content={"status": "unhealthy", "error": str(e)})
 
 @router.get("/live", response_model=Dict[str, Any])
 async def liveness_probe():
