@@ -29,6 +29,7 @@ class MessageType(Enum):
     """WebSocket message types."""
     FRAME_DATA = "frame_data"
     TRACKING_UPDATE = "tracking_update"
+    STATUS_UPDATE = "status_update"
     SYSTEM_STATUS = "system_status"
     CONTROL_MESSAGE = "control_message"
     BINARY_FRAME = "binary_frame"
@@ -357,7 +358,7 @@ class BinaryWebSocketManager:
             # Check if task has active connections
             if task_id not in self.active_connections or not self.active_connections[task_id]:
                 # Buffer tracking updates for later delivery when WebSocket connects
-                if message_type == MessageType.TRACKING_UPDATE:
+                if message_type in (MessageType.TRACKING_UPDATE, MessageType.STATUS_UPDATE):
                     logger.debug(f"WS buffer tracking update task_id={task_id} (no connections)")
                     await self._buffer_tracking_update(task_id, message)
                     return True  # Consider buffering as successful
@@ -369,20 +370,20 @@ class BinaryWebSocketManager:
             connection_count = len(self.active_connections[task_id])
             logger.debug(f"WS active connections for {task_id}: {connection_count}")
             
-            # Add message type and timestamp
-            message["type"] = message_type.value
+            # Add message type and timestamp (preserve pre-set type if provided)
+            if "type" not in message:
+                message["type"] = message_type.value
             message["timestamp"] = datetime.now(timezone.utc).isoformat()
             
             # Log message size for debugging
             message_size = len(json.dumps(message).encode('utf-8'))
             logger.debug(f"WS message size={message_size} for task_id={task_id}")
             
-            # Handle batching - Skip batching for tracking_update messages since they use per-camera messaging
-            if self.enable_batching and message_type == MessageType.TRACKING_UPDATE:
-                # Tracking updates already use per-camera messaging to avoid oversized messages
-                # Send immediately to prevent re-batching individual camera messages
-                return await self._send_immediate_message(task_id, message)
-            elif self.enable_batching and message_type != MessageType.TRACKING_UPDATE:
+            # Handle batching - Skip batching for tracking/status updates to keep them responsive
+            if self.enable_batching and message_type in (MessageType.TRACKING_UPDATE, MessageType.STATUS_UPDATE):
+                # Send immediately to prevent batching latency for real-time updates
+                return await self._send_immediate_message(task_id, message, target_channel=target_channel)
+            elif self.enable_batching and message_type not in (MessageType.TRACKING_UPDATE, MessageType.STATUS_UPDATE):
                 return await self._handle_batched_message(task_id, message)
             else:
                 return await self._send_immediate_message(task_id, message, target_channel=target_channel)

@@ -23,6 +23,7 @@ services:
       - ./data:/app/data
       - ./homography_data:/app/homography_data
       - ./weights:/app/weights
+      - ./videos:/app/videos:ro
     env_file:
       - .env
     environment:

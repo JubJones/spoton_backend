@@ -430,7 +430,7 @@ class RawVideoService:
                 }
                 
                 await binary_websocket_manager.send_json_message(
-                    str(task_id), status_message, MessageType.STATUS_UPDATE
+                    str(task_id), status_message, MessageType.STATUS_UPDATE, target_channel="tracking"
                 )
                 
         except Exception as e:

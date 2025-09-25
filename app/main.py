@@ -13,6 +13,12 @@ from app.api.v1.endpoints import environments
 from app.api.v1.endpoints import analytics as analytics_endpoints
 from app.api.websockets import endpoints as ws_router
 from app.api import health as health_router
+from app.infrastructure.cache.tracking_cache import get_tracking_cache
+from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
+from app.services.environment_configuration_service import (
+    initialize_environment_configuration_service,
+    get_environment_configuration_service,
+)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -103,6 +109,28 @@ async def lifespan(app_instance: FastAPI):
             logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
 
+        # Initialize Environment Configuration Service so camera/env endpoints work
+        try:
+            # Best-effort DB session; service degrades when DB disabled
+            db_session = None
+            if getattr(settings, "DB_ENABLED", True):
+                try:
+                    from app.infrastructure.database.base import get_session_factory
+                    SessionLocal = get_session_factory()
+                    if SessionLocal is not None:
+                        db_session = SessionLocal()
+                except Exception as e:
+                    logger.warning(f"Could not create DB session for environment service (continuing without DB): {e}")
+
+            tracking_cache = get_tracking_cache()
+            tracking_repository = TrackingRepository(db_session) if db_session is not None else TrackingRepository(None)
+            initialize_environment_configuration_service(tracking_cache, tracking_repository)
+            env_svc = get_environment_configuration_service()
+            if env_svc:
+                logger.info("EnvironmentConfigurationService initialized")
+        except Exception as e:
+            logger.warning(f"Environment service initialization encountered issues (non-fatal): {e}")
+
         # Global trail management service and cleanup loop
         trail_service = TrailManagementService(trail_length=settings.TRAIL_LENGTH)
         app_instance.state.trail_service = trail_service
@@ -142,6 +170,13 @@ async def lifespan(app_instance: FastAPI):
             cleanup_task = getattr(app_instance.state, '_trail_cleanup_task', None)
             if cleanup_task:
                 cleanup_task.cancel()
+            # Close any DB session we might have opened for env service
+            try:
+                svc = get_environment_configuration_service()
+                if svc and getattr(svc, 'repository', None) is not None and getattr(svc.repository, 'db', None) is not None:
+                    svc.repository.db.close()
+            except Exception:
+                pass
         except Exception:
             pass
 

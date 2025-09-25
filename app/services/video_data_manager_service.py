@@ -180,8 +180,11 @@ class VideoDataManagerService:
         self, task_id: uuid.UUID, environment_id: str, sub_video_index: int
     ) -> Dict[CameraID, Path]:
         """
-        Downloads a specific sub-video (by index) for all relevant cameras
-        in the given environment for a specific task.
+        (LOCAL MODE) Resolve videos from a local directory instead of S3.
+
+        Previously: downloaded a specific sub-video (by index) for all relevant
+        cameras from S3. That implementation is preserved below as a commented
+        block for reference and can be reinstated later if needed.
 
         Args:
             task_id: The unique ID of the processing task.
@@ -191,14 +194,13 @@ class VideoDataManagerService:
         Returns:
             A dictionary mapping CameraID to the local Path of the downloaded sub-video.
         """
+        # --- Local mode implementation ---
         logger.info(
-            f"[Task {task_id}] Downloading sub_video index {sub_video_index} for env '{environment_id}'."
+            f"[Task {task_id}] (LOCAL MODE) Resolving sub_video index {sub_video_index} for env '{environment_id}'."
         )
         downloaded_video_paths: Dict[CameraID, Path] = {}
-        
-        task_specific_video_dir = self.local_video_dir_base / str(task_id)
-        task_specific_video_dir.mkdir(parents=True, exist_ok=True)
 
+        local_base = Path(getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', '/app/videos')).resolve()
         cameras_in_env = [
             vs_config for vs_config in self.video_sets_config if vs_config.env_id == environment_id
         ]
@@ -207,11 +209,96 @@ class VideoDataManagerService:
             logger.warning(f"[Task {task_id}] No camera configurations for environment: {environment_id}.")
             return {}
 
+        for cam_config in cameras_in_env:
+            if sub_video_index >= cam_config.num_sub_videos:
+                logger.warning(
+                    f"[Task {task_id}][{cam_config.cam_id}] Requested sub-video index {sub_video_index} is out of bounds (total: {cam_config.num_sub_videos}). Skipping."
+                )
+                continue
+
+            video_filename = cam_config.sub_video_filename_pattern.format(idx=sub_video_index + 1)
+            rel_dir = Path(cam_config.remote_base_key.strip('/'))
+            local_video_path = (local_base / rel_dir / video_filename).resolve()
+            # Also support directories where the 'video_' prefix is omitted (e.g., s14/c09 instead of video_s14/c09)
+            alt_rel_dir = None
+            try:
+                if rel_dir.parts and rel_dir.parts[0].startswith("video_"):
+                    alt_root = rel_dir.parts[0].replace("video_", "")
+                    alt_rel_dir = Path(alt_root, *rel_dir.parts[1:])
+            except Exception:
+                alt_rel_dir = None
+            alt_local_video_path = (local_base / alt_rel_dir / video_filename).resolve() if alt_rel_dir else None
+
+            # Fallbacks: common local layouts
+            fallback_path = (local_base / environment_id / cam_config.cam_id / video_filename).resolve()
+            alt_direct_file = (local_base / f"{cam_config.cam_id}.mp4").resolve()
+            alt_env_direct_file = (local_base / environment_id / f"{cam_config.cam_id}.mp4").resolve()
+            alt_cam_dir_first = None
+            alt_env_cam_dir_first = None
+
+            try:
+                cam_dir = (local_base / cam_config.cam_id)
+                if cam_dir.exists():
+                    mp4s = sorted(cam_dir.glob("*.mp4"))
+                    if mp4s:
+                        alt_cam_dir_first = mp4s[0].resolve()
+            except Exception:
+                pass
+
+            try:
+                env_cam_dir = (local_base / environment_id / cam_config.cam_id)
+                if env_cam_dir.exists():
+                    mp4s = sorted(env_cam_dir.glob("*.mp4"))
+                    if mp4s:
+                        alt_env_cam_dir_first = mp4s[0].resolve()
+            except Exception:
+                pass
+
+            chosen = None
+            for p in [local_video_path, alt_local_video_path, fallback_path, alt_direct_file, alt_env_direct_file, alt_cam_dir_first, alt_env_cam_dir_first]:
+                if p and Path(p).exists():
+                    chosen = Path(p)
+                    break
+
+            if not chosen:
+                # Last resort: search by camera id anywhere under local_base (first match)
+                try:
+                    matches = [m for m in local_base.rglob("*.mp4") if cam_config.cam_id in m.as_posix()]
+                    if matches:
+                        chosen = matches[0].resolve()
+                except Exception:
+                    pass
+
+            if chosen:
+                downloaded_video_paths[CameraID(cam_config.cam_id)] = chosen
+                logger.info(f"[Task {task_id}][{cam_config.cam_id}] Using local video: {chosen}")
+            else:
+                logger.error(
+                    f"[Task {task_id}][{cam_config.cam_id}] Local video not found in expected locations under {local_base}. "
+                    f"Tried: {local_video_path}, {fallback_path}, {alt_direct_file}, {alt_env_direct_file}, <dir scans>, <rglob>"
+                )
+
+        logger.info(
+            f"[Task {task_id}] (LOCAL MODE) Resolved {len(downloaded_video_paths)} local videos for sub-video index {sub_video_index}."
+        )
+        return downloaded_video_paths
+
+        """ Legacy S3 implementation (disabled)
+        logger.info(
+            f"[Task {task_id}] Downloading sub_video index {sub_video_index} for env '{environment_id}'."
+        )
+        downloaded_video_paths: Dict[CameraID, Path] = {}
+        task_specific_video_dir = self.local_video_dir_base / str(task_id)
+        task_specific_video_dir.mkdir(parents=True, exist_ok=True)
+        cameras_in_env = [
+            vs_config for vs_config in self.video_sets_config if vs_config.env_id == environment_id
+        ]
+        if not cameras_in_env:
+            logger.warning(f"[Task {task_id}] No camera configurations for environment: {environment_id}.")
+            return {}
         download_coroutines = []
-        # Bounded concurrency for downloads
         max_conc = max(1, int(getattr(settings, 'MAX_DOWNLOAD_CONCURRENCY', 3)))
         sem = asyncio.Semaphore(max_conc)
-
         async def _bounded_download(remote_key: str, dest_path: Path):
             async with sem:
                 return await self.asset_downloader.download_file_from_dagshub(
@@ -219,56 +306,44 @@ class VideoDataManagerService:
                     local_destination_path=str(dest_path)
                 )
         video_metadata_for_download = []
-
         for cam_config in cameras_in_env:
             if sub_video_index >= cam_config.num_sub_videos:
                 logger.warning(
-                    f"[Task {task_id}][{cam_config.cam_id}] Requested sub-video index {sub_video_index} "
-                    f"is out of bounds (total: {cam_config.num_sub_videos}). Skipping."
+                    f"[Task {task_id}][{cam_config.cam_id}] Requested sub-video index {sub_video_index} is out of bounds (total: {cam_config.num_sub_videos}). Skipping."
                 )
                 continue
-
             video_filename = cam_config.sub_video_filename_pattern.format(idx=sub_video_index + 1)
             remote_video_key = f"{cam_config.remote_base_key.strip('/')}/{video_filename}"
-            
             local_cam_video_download_dir = task_specific_video_dir / environment_id / cam_config.cam_id
             local_cam_video_download_dir.mkdir(parents=True, exist_ok=True)
             local_video_path = local_cam_video_download_dir / video_filename
-
             video_metadata_for_download.append({
                 "cam_id": CameraID(cam_config.cam_id),
                 "remote_key": remote_video_key,
                 "local_path": local_video_path
             })
-
             if not local_video_path.exists():
                 logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
                 download_coroutines.append(_bounded_download(remote_video_key, local_video_path))
             else:
                 logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
-                async def _mock_download_success(): return True
+                async def _mock_download_success():
+                    return True
                 download_coroutines.append(_mock_download_success())
-        
         if not download_coroutines:
             logger.info(f"[Task {task_id}] No videos to download for sub-video index {sub_video_index}, env '{environment_id}'.")
             return {}
-
         download_results = await asyncio.gather(*download_coroutines, return_exceptions=True)
-
         for i, meta in enumerate(video_metadata_for_download):
             cam_id, local_path = meta["cam_id"], meta["local_path"]
             result = download_results[i]
             if isinstance(result, Exception) or not result:
-                logger.error(
-                    f"[Task {task_id}][{cam_id}] Failed to download {meta['remote_key']}: {result}"
-                )
+                logger.error(f"[Task {task_id}][{cam_id}] Failed to download {meta['remote_key']}: {result}")
             else:
                 downloaded_video_paths[cam_id] = local_path
-        
-        logger.info(
-            f"[Task {task_id}] Downloaded {len(downloaded_video_paths)} videos for sub-video index {sub_video_index}."
-        )
+        logger.info(f"[Task {task_id}] Downloaded {len(downloaded_video_paths)} videos for sub-video index {sub_video_index}.")
         return downloaded_video_paths
+        """
 
     def get_batched_frame_provider(
         self,

@@ -41,6 +41,8 @@ class Settings(BaseSettings):
     DAGSHUB_REPO_OWNER: str = "Jwizzed"
     DAGSHUB_REPO_NAME: str = "spoton_ml"
     LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
+    # Base directory to read pre-downloaded/local videos from
+    LOCAL_VIDEOS_BASE_DIR: str = "/app/videos"
     LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
     # Phase 6: I/O and caching controls
     MAX_DOWNLOAD_CONCURRENCY: int = Field(default=3, description="Max concurrent S3 downloads")
