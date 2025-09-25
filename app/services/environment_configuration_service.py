@@ -15,6 +15,7 @@ import asyncio
 import logging
 import time
 import json
+import copy
 from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -25,6 +26,7 @@ from pathlib import Path
 from app.infrastructure.cache.tracking_cache import TrackingCache
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.domains.mapping.entities.coordinate import Coordinate, CoordinateSystem
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -1068,185 +1070,140 @@ class EnvironmentConfigurationService:
     
     async def _create_campus_environment(self):
         """Create default campus environment."""
-        try:
-            # Create cameras
-            cameras = {}
-            
-            camera_configs = [
-                ("c09", "Campus Entry Camera", (5.0, 2.0)),
-                ("c12", "Campus Main Area Camera", (25.0, 15.0)),
-                ("c13", "Campus Corridor Camera", (45.0, 10.0)),
-                ("c16", "Campus Exit Camera", (65.0, 2.0))
-            ]
-            
-            for cam_id, cam_name, (x, y) in camera_configs:
-                cameras[cam_id] = CameraConfiguration(
-                    camera_id=cam_id,
-                    name=cam_name,
-                    camera_type=CameraType.FIXED,
-                    position=self._create_coordinate(x=x, y=y),
-                    resolution=(1920, 1080),
-                    field_of_view=70.0,
-                    orientation=0.0,
-                    **self.default_camera_settings,
-                    last_calibrated=datetime.utcnow() - timedelta(days=1)
-                )
-            
-            # Create zones
-            zones = {}
-            
-            zone_configs = [
-                ("entrance", "Campus Entrance", ZoneType.ENTRANCE, [(0, 0), (10, 0), (10, 5), (0, 5)], 8),
-                ("main_area", "Campus Main Area", ZoneType.MAIN_AREA, [(10, 0), (60, 0), (60, 30), (10, 30)], 50),
-                ("corridor", "Campus Corridor", ZoneType.CORRIDOR, [(60, 5), (70, 5), (70, 15), (60, 15)], 15),
-                ("exit", "Campus Exit", ZoneType.EXIT, [(60, 0), (70, 0), (70, 5), (60, 5)], 8)
-            ]
-            
-            for zone_id, zone_name, zone_type, boundary, capacity in zone_configs:
-                zones[zone_id] = ZoneDefinition(
-                    zone_id=zone_id,
-                    name=zone_name,
-                    zone_type=zone_type,
-                    boundary_points=[self._create_coordinate(x=x, y=y) for x, y in boundary],
-                    capacity_limit=capacity,
-                    monitoring_enabled=True,
-                    occupancy_threshold=int(capacity * 0.8),
-                    description=f"Default {zone_name.lower()} zone for campus environment"
-                )
-            
-            # Create layout
-            layout = EnvironmentLayout(
-                layout_id="campus_layout",
-                name="Campus Layout",
-                bounds=(self._create_coordinate(x=0, y=0), self._create_coordinate(x=70, y=30)),
-                scale_meters_per_pixel=0.1,
-                reference_points=[
-                    (self._create_coordinate(x=0, y=0), "Origin point"),
-                    (self._create_coordinate(x=35, y=15), "Center point")
-                ]
-            )
-            
-            # Create environment
-            campus_env = EnvironmentConfiguration(
-                environment_id="campus",
-                name="Campus Environment",
-                environment_type=EnvironmentType.CAMPUS,
-                description="Default campus environment with multiple zones and cameras",
-                cameras=cameras,
-                zones=zones,
-                layout=layout,
-                timezone="UTC",
-                operating_hours={
-                    "monday": {"start": "06:00", "end": "22:00"},
-                    "tuesday": {"start": "06:00", "end": "22:00"},
-                    "wednesday": {"start": "06:00", "end": "22:00"},
-                    "thursday": {"start": "06:00", "end": "22:00"},
-                    "friday": {"start": "06:00", "end": "22:00"},
-                    "saturday": {"start": "08:00", "end": "18:00"},
-                    "sunday": {"start": "10:00", "end": "16:00"}
-                },
-                capacity_limits={"total": 100, "entrance": 8, "main_area": 50},
-                data_retention_days=180,  # Longer retention for campus
-                analytics_enabled=True
-            )
-            
-            self.environments["campus"] = campus_env
-            await self._save_environment_config(campus_env)
-            
-            logger.info("Created default campus environment")
-            
-        except Exception as e:
-            logger.error(f"Error creating campus environment: {e}")
-    
+        await self._create_environment_from_template("campus")
+
     async def _create_factory_environment(self):
         """Create default factory environment."""
+        await self._create_environment_from_template("factory")
+
+    async def _create_environment_from_template(self, env_id: str) -> None:
+        """Generic helper to build an environment from settings templates."""
+        template = copy.deepcopy(settings.ENVIRONMENT_TEMPLATES.get(env_id))
+        if not template:
+            logger.warning(f"No environment template found for '{env_id}', skipping default creation")
+            return
+
         try:
-            # Create cameras
-            cameras = {}
-            
-            camera_configs = [
-                ("f01", "Factory Line 1 Camera", (10.0, 5.0)),
-                ("f02", "Factory Line 2 Camera", (30.0, 5.0)),
-                ("f03", "Factory QC Camera", (50.0, 5.0)),
-                ("f04", "Factory Exit Camera", (70.0, 2.0))
-            ]
-            
-            for cam_id, cam_name, (x, y) in camera_configs:
+            cameras: Dict[str, CameraConfiguration] = {}
+            default_calibration_days = template.get("default_calibration_days", 1)
+
+            for cam_id, cam_cfg in template.get("cameras", {}).items():
+                position = cam_cfg.get("position", (0.0, 0.0))
+                resolution = tuple(cam_cfg.get("resolution", (1920, 1080)))
+                frame_rate = float(cam_cfg.get("frame_rate", self.default_camera_settings.get('frame_rate', 25.0)))
+                exposure_settings = copy.deepcopy(cam_cfg.get("exposure_settings", self.default_camera_settings.get('exposure_settings', {})))
+                focus_settings = copy.deepcopy(cam_cfg.get("focus_settings", self.default_camera_settings.get('focus_settings', {})))
+                last_calibrated_days = cam_cfg.get("last_calibrated_days_ago", default_calibration_days)
+                metadata = copy.deepcopy(cam_cfg.get("metadata", {}))
+                metadata.setdefault("remote_base_key", cam_cfg.get("remote_base_key"))
+                if cam_cfg.get("homography_matrix_path"):
+                    metadata.setdefault("homography_matrix_path", cam_cfg["homography_matrix_path"])
+
+                camera_type_raw = cam_cfg.get("camera_type", CameraType.FIXED.value)
+                camera_type = CameraType(camera_type_raw) if isinstance(camera_type_raw, str) else camera_type_raw
+
                 cameras[cam_id] = CameraConfiguration(
                     camera_id=cam_id,
-                    name=cam_name,
-                    camera_type=CameraType.FIXED,
-                    position=self._create_coordinate(x=x, y=y),
-                    resolution=(1920, 1080),
-                    field_of_view=60.0,
-                    orientation=0.0,
-                    **self.default_camera_settings,
-                    last_calibrated=datetime.utcnow() - timedelta(days=2)
+                    name=cam_cfg.get("display_name", cam_id),
+                    camera_type=camera_type,
+                    position=self._create_coordinate(x=position[0], y=position[1]),
+                    resolution=resolution,
+                    field_of_view=float(cam_cfg.get("field_of_view", 70.0)),
+                    orientation=float(cam_cfg.get("orientation", 0.0)),
+                    frame_rate=frame_rate,
+                    exposure_settings=exposure_settings,
+                    focus_settings=focus_settings,
+                    last_calibrated=datetime.utcnow() - timedelta(days=last_calibrated_days),
+                    calibration_accuracy=cam_cfg.get("calibration_accuracy"),
+                    metadata=metadata
                 )
-            
-            # Create zones
-            zones = {}
-            
-            zone_configs = [
-                ("production_line_1", "Production Line 1", ZoneType.MAIN_AREA, [(5, 0), (25, 0), (25, 10), (5, 10)], 12),
-                ("production_line_2", "Production Line 2", ZoneType.MAIN_AREA, [(25, 0), (45, 0), (45, 10), (25, 10)], 12),
-                ("quality_control", "Quality Control", ZoneType.RESTRICTED, [(45, 0), (65, 0), (65, 10), (45, 10)], 5),
-                ("factory_exit", "Factory Exit", ZoneType.EXIT, [(65, 0), (75, 0), (75, 5), (65, 5)], 6)
-            ]
-            
-            for zone_id, zone_name, zone_type, boundary, capacity in zone_configs:
-                zones[zone_id] = ZoneDefinition(
-                    zone_id=zone_id,
-                    name=zone_name,
-                    zone_type=zone_type,
-                    boundary_points=[self._create_coordinate(x=x, y=y) for x, y in boundary],
-                    capacity_limit=capacity,
-                    monitoring_enabled=True,
-                    occupancy_threshold=int(capacity * 0.9),  # Tighter control in factory
-                    description=f"Default {zone_name.lower()} zone for factory environment"
-                )
-            
-            # Create layout
-            layout = EnvironmentLayout(
-                layout_id="factory_layout",
-                name="Factory Floor Layout",
-                bounds=(self._create_coordinate(x=0, y=0), self._create_coordinate(x=75, y=10)),
-                scale_meters_per_pixel=0.1,
-                reference_points=[
-                    (self._create_coordinate(x=0, y=0), "Factory entrance"),
-                    (self._create_coordinate(x=37.5, y=5), "Factory center")
+
+            zones: Dict[str, ZoneDefinition] = {}
+            for zone_cfg in template.get("zones", []):
+                boundary_points = [
+                    self._create_coordinate(x=point[0], y=point[1])
+                    for point in zone_cfg.get("boundary_points", [])
                 ]
+                zone_type_raw = zone_cfg.get("zone_type", ZoneType.MAIN_AREA.value)
+                zone_type = ZoneType(zone_type_raw) if isinstance(zone_type_raw, str) else zone_type_raw
+
+                zones[zone_cfg["zone_id"]] = ZoneDefinition(
+                    zone_id=zone_cfg["zone_id"],
+                    name=zone_cfg.get("name", zone_cfg["zone_id"].title()),
+                    zone_type=zone_type,
+                    boundary_points=boundary_points,
+                    capacity_limit=zone_cfg.get("capacity_limit"),
+                    access_restrictions=zone_cfg.get("access_restrictions", []),
+                    monitoring_enabled=zone_cfg.get("monitoring_enabled", True),
+                    occupancy_threshold=zone_cfg.get("occupancy_threshold"),
+                    dwell_time_threshold=zone_cfg.get("dwell_time_threshold"),
+                    description=zone_cfg.get("description", ""),
+                    metadata=zone_cfg.get("metadata", {})
+                )
+
+            layout_cfg = template.get("layout") or {}
+            bounds_cfg = layout_cfg.get("bounds", {})
+            min_bound = bounds_cfg.get("min", (0, 0))
+            max_bound = bounds_cfg.get("max", (0, 0))
+
+            layout = EnvironmentLayout(
+                layout_id=layout_cfg.get("layout_id", f"{env_id}_layout"),
+                name=layout_cfg.get("name", f"{env_id.title()} Layout"),
+                bounds=(
+                    self._create_coordinate(x=min_bound[0], y=min_bound[1]),
+                    self._create_coordinate(x=max_bound[0], y=max_bound[1])
+                ),
+                scale_meters_per_pixel=float(layout_cfg.get("scale_meters_per_pixel", 1.0)),
+                reference_points=[
+                    (self._create_coordinate(x=ref["point"][0], y=ref["point"][1]), ref.get("description", ""))
+                    for ref in layout_cfg.get("reference_points", [])
+                ],
+                walls=[
+                    (
+                        self._create_coordinate(x=wall[0][0], y=wall[0][1]),
+                        self._create_coordinate(x=wall[1][0], y=wall[1][1])
+                    )
+                    for wall in layout_cfg.get("walls", [])
+                ],
+                doors=[
+                    (
+                        self._create_coordinate(x=door["point"][0], y=door["point"][1]),
+                        door.get("name", "")
+                    )
+                    for door in layout_cfg.get("doors", [])
+                ],
+                landmarks=[
+                    (
+                        self._create_coordinate(x=landmark["point"][0], y=landmark["point"][1]),
+                        landmark.get("description", "")
+                    )
+                    for landmark in layout_cfg.get("landmarks", [])
+                ],
+                floor_plan_image_path=layout_cfg.get("floor_plan_image_path"),
+                overlay_image_path=layout_cfg.get("overlay_image_path")
             )
-            
-            # Create environment
-            factory_env = EnvironmentConfiguration(
-                environment_id="factory",
-                name="Factory Environment",
-                environment_type=EnvironmentType.FACTORY,
-                description="Default factory environment with production lines and quality control",
+
+            environment = EnvironmentConfiguration(
+                environment_id=env_id,
+                name=template.get("name", f"{env_id.title()} Environment"),
+                environment_type=EnvironmentType(template.get("environment_type", env_id)),
+                description=template.get("description", ""),
                 cameras=cameras,
                 zones=zones,
                 layout=layout,
-                timezone="UTC",
-                operating_hours={
-                    "monday": {"start": "06:00", "end": "18:00"},
-                    "tuesday": {"start": "06:00", "end": "18:00"},
-                    "wednesday": {"start": "06:00", "end": "18:00"},
-                    "thursday": {"start": "06:00", "end": "18:00"},
-                    "friday": {"start": "06:00", "end": "18:00"}
-                },
-                capacity_limits={"total": 40, "production_line_1": 12, "production_line_2": 12},
-                data_retention_days=60,  # Shorter retention for factory
-                analytics_enabled=True
+                timezone=template.get("timezone", "UTC"),
+                operating_hours=template.get("operating_hours", {}),
+                capacity_limits=template.get("capacity_limits", {}),
+                data_retention_days=template.get("data_retention_days", 90),
+                analytics_enabled=template.get("analytics_enabled", True)
             )
-            
-            self.environments["factory"] = factory_env
-            await self._save_environment_config(factory_env)
-            
-            logger.info("Created default factory environment")
-            
+
+            self.environments[env_id] = environment
+            await self._save_environment_config(environment)
+            logger.info(f"Created default {env_id} environment from template")
+
         except Exception as e:
-            logger.error(f"Error creating factory environment: {e}")
+            logger.error(f"Error creating {env_id} environment: {e}", exc_info=True)
     
     # --- Utility Methods ---
     

@@ -111,32 +111,39 @@ class HandoffDetectionService:
             Dictionary mapping camera_id to list of handoff zones
         """
         try:
-            # Define zones based on Phase 4 specification
-            zones = {
-                "c09": [CameraZone("c09", 0.7, 1.0, 0.0, 1.0)],    # Right edge
-                "c12": [
-                    CameraZone("c12", 0.0, 0.3, 0.0, 1.0),         # Left edge
-                    CameraZone("c12", 0.7, 1.0, 0.0, 1.0)          # Right edge
-                ],
-                "c13": [
-                    CameraZone("c13", 0.0, 0.3, 0.0, 1.0),         # Left edge
-                    CameraZone("c13", 0.7, 1.0, 0.0, 1.0)          # Right edge
-                ],
-                "c16": [CameraZone("c16", 0.0, 0.3, 0.0, 1.0)]     # Left edge
-            }
-            
-            # Validate all zones
+            configured_zones = getattr(settings, "CAMERA_HANDOFF_ZONES", {})
+            zones: Dict[str, List[CameraZone]] = {}
             total_zones = 0
-            for camera_id, camera_zones in zones.items():
-                for zone in camera_zones:
-                    total_zones += 1
-                    logger.debug(f"Defined zone for {camera_id}: "
-                               f"x={zone.x_min:.1f}-{zone.x_max:.1f}, "
-                               f"y={zone.y_min:.1f}-{zone.y_max:.1f}")
-            
+
+            for camera_id, zone_configs in configured_zones.items():
+                camera_zone_defs: List[CameraZone] = []
+                for zone_cfg in zone_configs:
+                    try:
+                        camera_zone = CameraZone(
+                            camera_id=camera_id,
+                            x_min=float(zone_cfg.get("x_min", 0.0)),
+                            x_max=float(zone_cfg.get("x_max", 1.0)),
+                            y_min=float(zone_cfg.get("y_min", 0.0)),
+                            y_max=float(zone_cfg.get("y_max", 1.0))
+                        )
+                        camera_zone_defs.append(camera_zone)
+                        total_zones += 1
+                        logger.debug(
+                            f"Defined zone for {camera_id}: "
+                            f"x={camera_zone.x_min:.2f}-{camera_zone.x_max:.2f}, "
+                            f"y={camera_zone.y_min:.2f}-{camera_zone.y_max:.2f}"
+                        )
+                    except Exception as zone_error:
+                        logger.warning(
+                            f"Skipping invalid handoff zone config for camera {camera_id}: {zone_error}"
+                        )
+
+                if camera_zone_defs:
+                    zones[camera_id] = camera_zone_defs
+
             logger.info(f"Defined {total_zones} handoff zones across {len(zones)} cameras")
             return zones
-            
+
         except Exception as e:
             logger.error(f"Error defining camera zones: {e}")
             return {}

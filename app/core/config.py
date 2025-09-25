@@ -1,8 +1,9 @@
 from pydantic import BaseModel, Field, validator
 from pydantic_settings import BaseSettings
-from typing import List, Optional, Dict, Tuple, Set
+from typing import List, Optional, Dict, Tuple, Set, Any
 from pathlib import Path
 import math
+import copy
 
 from app.shared.types import CameraID, ExitRuleModel, QuadrantName, CameraHandoffDetailConfig
 
@@ -12,6 +13,446 @@ class VideoSetEnvironmentConfig(BaseModel):
     cam_id: str = Field(..., description="Camera ID (e.g., 'c01')")
     num_sub_videos: int = Field(..., gt=0, description="Total number of sub-videos available for this camera.")
     sub_video_filename_pattern: str = Field(default="sub_video_{idx:02d}.mp4", description="Filename pattern. '{idx:02d}' for index.")
+
+
+def _resolve_local_videos_base_dir() -> str:
+    """Prefer an existing local videos root if available."""
+    candidate_paths = [
+        Path("/app/videos"),
+        Path.cwd() / "videos",
+        Path(__file__).resolve().parents[2] / "videos",
+    ]
+    for path in candidate_paths:
+        if path.exists():
+            return str(path.resolve())
+    return str(candidate_paths[0])
+
+
+BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
+    "campus": {
+        "name": "Campus Environment",
+        "environment_type": "campus",
+        "description": "Default campus environment with multiple zones and cameras",
+        "timezone": "UTC",
+        "operating_hours": {
+            "monday": {"start": "06:00", "end": "22:00"},
+            "tuesday": {"start": "06:00", "end": "22:00"},
+            "wednesday": {"start": "06:00", "end": "22:00"},
+            "thursday": {"start": "06:00", "end": "22:00"},
+            "friday": {"start": "06:00", "end": "22:00"},
+            "saturday": {"start": "08:00", "end": "18:00"},
+            "sunday": {"start": "10:00", "end": "16:00"}
+        },
+        "capacity_limits": {"total": 100, "entrance": 8, "main_area": 50},
+        "data_retention_days": 180,
+        "analytics_enabled": True,
+        "possible_camera_overlaps": [("c09", "c12"), ("c12", "c13"), ("c13", "c16")],
+        "layout": {
+            "layout_id": "campus_layout",
+            "name": "Campus Layout",
+            "bounds": {"min": (0, 0), "max": (70, 30)},
+            "scale_meters_per_pixel": 0.1,
+            "reference_points": [
+                {"point": (0, 0), "description": "Origin point"},
+                {"point": (35, 15), "description": "Center point"}
+            ],
+            "walls": [],
+            "doors": [],
+            "landmarks": []
+        },
+        "zones": [
+            {
+                "zone_id": "entrance",
+                "name": "Campus Entrance",
+                "zone_type": "entrance",
+                "boundary_points": [(0, 0), (10, 0), (10, 5), (0, 5)],
+                "capacity_limit": 8,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 6,
+                "description": "Default campus entrance zone"
+            },
+            {
+                "zone_id": "main_area",
+                "name": "Campus Main Area",
+                "zone_type": "main_area",
+                "boundary_points": [(10, 0), (60, 0), (60, 30), (10, 30)],
+                "capacity_limit": 50,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 40,
+                "description": "Default campus main area zone"
+            },
+            {
+                "zone_id": "corridor",
+                "name": "Campus Corridor",
+                "zone_type": "corridor",
+                "boundary_points": [(60, 5), (70, 5), (70, 15), (60, 15)],
+                "capacity_limit": 15,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 12,
+                "description": "Default campus corridor zone"
+            },
+            {
+                "zone_id": "exit",
+                "name": "Campus Exit",
+                "zone_type": "exit",
+                "boundary_points": [(60, 0), (70, 0), (70, 5), (60, 5)],
+                "capacity_limit": 8,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 6,
+                "description": "Default campus exit zone"
+            }
+        ],
+        "cameras": {
+            "c01": {
+                "display_name": "Campus Gate Camera",
+                "remote_base_key": "video_s37/c01",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (10.0, 5.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 60.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c01_scene_s47.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "upper_right",
+                        "target_cam_id": "c03",
+                        "target_entry_area": "bottom_left",
+                        "notes": None
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c02": {
+                "display_name": "Campus Plaza Camera",
+                "remote_base_key": "video_s37/c02",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (30.0, 6.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 60.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c02_scene_s47.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "upper_right",
+                        "target_cam_id": "c05",
+                        "target_entry_area": "upper left",
+                        "notes": None
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c03": {
+                "display_name": "Campus Walkway Camera",
+                "remote_base_key": "video_s37/c03",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (50.0, 7.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 60.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c03_scene_s47.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "bottom_left",
+                        "target_cam_id": "c01",
+                        "target_entry_area": "upper_right",
+                        "notes": None
+                    },
+                    {
+                        "source_exit_quadrant": "upper_right",
+                        "target_cam_id": "c05",
+                        "target_entry_area": "upper left",
+                        "notes": None
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c05": {
+                "display_name": "Campus Commons Camera",
+                "remote_base_key": "video_s37/c05",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (68.0, 4.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 60.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c05_scene_s47.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "upper_left",
+                        "target_cam_id": "c02",
+                        "target_entry_area": "upper_right",
+                        "notes": None
+                    },
+                    {
+                        "source_exit_quadrant": "upper_left",
+                        "target_cam_id": "c03",
+                        "target_entry_area": "upper_right",
+                        "notes": None
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0}
+                ]
+            }
+        }
+    },
+    "factory": {
+        "name": "Factory Environment",
+        "environment_type": "factory",
+        "description": "Default factory environment with production lines and quality control",
+        "timezone": "UTC",
+        "operating_hours": {
+            "monday": {"start": "06:00", "end": "18:00"},
+            "tuesday": {"start": "06:00", "end": "18:00"},
+            "wednesday": {"start": "06:00", "end": "18:00"},
+            "thursday": {"start": "06:00", "end": "18:00"},
+            "friday": {"start": "06:00", "end": "18:00"}
+        },
+        "capacity_limits": {"total": 40, "production_line_1": 12, "production_line_2": 12},
+        "data_retention_days": 60,
+        "analytics_enabled": True,
+        "possible_camera_overlaps": [("c01", "c03"), ("c02", "c03"), ("c03", "c05")],
+        "layout": {
+            "layout_id": "factory_layout",
+            "name": "Factory Floor Layout",
+            "bounds": {"min": (0, 0), "max": (75, 10)},
+            "scale_meters_per_pixel": 0.1,
+            "reference_points": [
+                {"point": (0, 0), "description": "Factory entrance"},
+                {"point": (37.5, 5), "description": "Factory center"}
+            ],
+            "walls": [],
+            "doors": [],
+            "landmarks": []
+        },
+        "zones": [
+            {
+                "zone_id": "production_line_1",
+                "name": "Production Line 1",
+                "zone_type": "main_area",
+                "boundary_points": [(5, 0), (25, 0), (25, 10), (5, 10)],
+                "capacity_limit": 12,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 10,
+                "description": "Default production line 1 zone"
+            },
+            {
+                "zone_id": "production_line_2",
+                "name": "Production Line 2",
+                "zone_type": "main_area",
+                "boundary_points": [(25, 0), (45, 0), (45, 10), (25, 10)],
+                "capacity_limit": 12,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 10,
+                "description": "Default production line 2 zone"
+            },
+            {
+                "zone_id": "quality_control",
+                "name": "Quality Control",
+                "zone_type": "restricted",
+                "boundary_points": [(45, 0), (65, 0), (65, 10), (45, 10)],
+                "capacity_limit": 5,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 4,
+                "description": "Default quality control zone"
+            },
+            {
+                "zone_id": "factory_exit",
+                "name": "Factory Exit",
+                "zone_type": "exit",
+                "boundary_points": [(65, 0), (75, 0), (75, 5), (65, 5)],
+                "capacity_limit": 6,
+                "monitoring_enabled": True,
+                "occupancy_threshold": 5,
+                "description": "Default factory exit zone"
+            }
+        ],
+        "cameras": {
+            "c09": {
+                "display_name": "Factory Entry Camera",
+                "remote_base_key": "video_s14/c09",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (5.0, 2.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 70.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c09_scene_s14.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "lower_left",
+                        "target_cam_id": "c13",
+                        "target_entry_area": "upper right",
+                        "notes": "wait; overlap c13/c16 possible"
+                    },
+                    {
+                        "source_exit_quadrant": "lower_right",
+                        "target_cam_id": "c13",
+                        "target_entry_area": "upper right",
+                        "notes": "wait; overlap c13/c16 possible"
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c12": {
+                "display_name": "Factory Main Area Camera",
+                "remote_base_key": "video_s14/c12",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (25.0, 15.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 70.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c12_scene_s14.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "upper_left",
+                        "target_cam_id": "c13",
+                        "target_entry_area": "upper left",
+                        "notes": "overlap c13 possible"
+                    },
+                    {
+                        "source_exit_quadrant": "lower_left",
+                        "target_cam_id": "c13",
+                        "target_entry_area": "upper left",
+                        "notes": "overlap c13 possible"
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c13": {
+                "display_name": "Factory Corridor Camera",
+                "remote_base_key": "video_s14/c13",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (45.0, 10.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 70.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c13_scene_s14.npz",
+                "handoff_exit_rules": [
+                    {
+                        "source_exit_quadrant": "upper_right",
+                        "target_cam_id": "c09",
+                        "target_entry_area": "down",
+                        "notes": "wait; overlap c09 possible"
+                    },
+                    {
+                        "source_exit_quadrant": "lower_right",
+                        "target_cam_id": "c09",
+                        "target_entry_area": "down",
+                        "notes": "wait; overlap c09 possible"
+                    },
+                    {
+                        "source_exit_quadrant": "upper_left",
+                        "target_cam_id": "c12",
+                        "target_entry_area": "upper left",
+                        "notes": "overlap c12 possible"
+                    },
+                    {
+                        "source_exit_quadrant": "lower_left",
+                        "target_cam_id": "c12",
+                        "target_entry_area": "upper left",
+                        "notes": "overlap c12 possible"
+                    }
+                ],
+                "handoff_zones": [
+                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
+                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
+                ]
+            },
+            "c16": {
+                "display_name": "Factory Exit Camera",
+                "remote_base_key": "video_s14/c16",
+                "num_sub_videos": 4,
+                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "position": (65.0, 2.0),
+                "resolution": (1920, 1080),
+                "field_of_view": 70.0,
+                "orientation": 0.0,
+                "homography_matrix_path": "homography_points_c16_scene_s14.npz",
+                "handoff_exit_rules": [],
+                "handoff_zones": [
+                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0}
+                ]
+            }
+        }
+    }
+}
+
+
+def _build_video_sets_from_templates(templates: Dict[str, Dict[str, Any]]) -> List[VideoSetEnvironmentConfig]:
+    video_sets: List[VideoSetEnvironmentConfig] = []
+    for env_id, env_cfg in templates.items():
+        for cam_id, cam_cfg in env_cfg.get("cameras", {}).items():
+            video_sets.append(
+                VideoSetEnvironmentConfig(
+                    remote_base_key=cam_cfg["remote_base_key"],
+                    env_id=env_id,
+                    cam_id=cam_id,
+                    num_sub_videos=cam_cfg.get("num_sub_videos", 1),
+                    sub_video_filename_pattern=cam_cfg.get("sub_video_filename_pattern", "sub_video_{idx:02d}.mp4")
+                )
+            )
+    return video_sets
+
+
+def _build_camera_handoff_details_from_templates(
+    templates: Dict[str, Dict[str, Any]]
+) -> Dict[Tuple[str, str], CameraHandoffDetailConfig]:
+    details: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {}
+    for env_id, env_cfg in templates.items():
+        for cam_id, cam_cfg in env_cfg.get("cameras", {}).items():
+            exit_rules = [
+                ExitRuleModel(
+                    source_exit_quadrant=QuadrantName(rule["source_exit_quadrant"]),
+                    target_cam_id=CameraID(rule["target_cam_id"]),
+                    target_entry_area=rule["target_entry_area"],
+                    notes=rule.get("notes")
+                )
+                for rule in cam_cfg.get("handoff_exit_rules", [])
+            ]
+            details[(env_id, cam_id)] = CameraHandoffDetailConfig(
+                exit_rules=exit_rules,
+                homography_matrix_path=cam_cfg.get("homography_matrix_path")
+            )
+    return details
+
+
+def _build_possible_camera_overlaps_from_templates(
+    templates: Dict[str, Dict[str, Any]]
+) -> List[Tuple[str, str]]:
+    overlaps: List[Tuple[str, str]] = []
+    for env_cfg in templates.values():
+        for pair in env_cfg.get("possible_camera_overlaps", []):
+            overlaps.append(tuple(pair))
+    return overlaps
+
+
+def _build_camera_handoff_zones_from_templates(
+    templates: Dict[str, Dict[str, Any]]
+) -> Dict[str, List[Dict[str, float]]]:
+    zones: Dict[str, List[Dict[str, float]]] = {}
+    for env_cfg in templates.values():
+        for cam_id, cam_cfg in env_cfg.get("cameras", {}).items():
+            if cam_cfg.get("handoff_zones"):
+                zones[cam_id] = list(cam_cfg["handoff_zones"])
+    return zones
 
 
 class Settings(BaseSettings):
@@ -42,7 +483,7 @@ class Settings(BaseSettings):
     DAGSHUB_REPO_NAME: str = "spoton_ml"
     LOCAL_VIDEO_DOWNLOAD_DIR: str = "./downloaded_videos"
     # Base directory to read pre-downloaded/local videos from
-    LOCAL_VIDEOS_BASE_DIR: str = "/app/videos"
+    LOCAL_VIDEOS_BASE_DIR: str = Field(default_factory=_resolve_local_videos_base_dir)
     LOCAL_FRAME_EXTRACTION_DIR: str = "./extracted_frames"
     # Phase 6: I/O and caching controls
     MAX_DOWNLOAD_CONCURRENCY: int = Field(default=3, description="Max concurrent S3 downloads")
@@ -56,31 +497,16 @@ class Settings(BaseSettings):
     S3_MAX_TRANSFER_CONCURRENCY: int = Field(default=4, description="S3 multipart transfer concurrency")
     S3_MULTIPART_THRESHOLD_MB: int = Field(default=16, description="S3 multipart threshold (MB)")
 
-    VIDEO_SETS: List[VideoSetEnvironmentConfig] = [
-        VideoSetEnvironmentConfig(remote_base_key="video_s14/c09", env_id="campus", cam_id="c09", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s14/c12", env_id="campus", cam_id="c12", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s14/c13", env_id="campus", cam_id="c13", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s14/c16", env_id="campus", cam_id="c16", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c01", env_id="factory", cam_id="c01", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c02", env_id="factory", cam_id="c02", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c03", env_id="factory", cam_id="c03", num_sub_videos=4),
-        VideoSetEnvironmentConfig(remote_base_key="video_s37/c05", env_id="factory", cam_id="c05", num_sub_videos=4),
-    ]
-
-    CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = {
-        ("campus", "c09"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c13"), target_entry_area="upper right", notes="wait; overlap c13/c16 possible"), ExitRuleModel(source_exit_quadrant=QuadrantName("lower_right"), target_cam_id=CameraID("c13"), target_entry_area="upper right", notes="wait; overlap c13/c16 possible")], homography_matrix_path="homography_points_c09_scene_s14.npz"),
-        ("campus", "c12"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c13"), target_entry_area="upper left", notes="overlap c13 possible"), ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c13"), target_entry_area="upper left", notes="overlap c13 possible")], homography_matrix_path="homography_points_c12_scene_s14.npz"),
-        ("campus", "c13"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c09"), target_entry_area="down", notes="wait; overlap c09 possible"), ExitRuleModel(source_exit_quadrant=QuadrantName("lower_right"), target_cam_id=CameraID("c09"), target_entry_area="down", notes="wait; overlap c09 possible"), ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c12"), target_entry_area="upper left", notes="overlap c12 possible"), ExitRuleModel(source_exit_quadrant=QuadrantName("lower_left"), target_cam_id=CameraID("c12"), target_entry_area="upper left", notes="overlap c12 possible")], homography_matrix_path="homography_points_c13_scene_s14.npz"),
-        ("campus", "c16"): CameraHandoffDetailConfig(exit_rules=[], homography_matrix_path="homography_points_c16_scene_s14.npz"),
-        ("factory", "c01"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c03"), target_entry_area="bottom_left")], homography_matrix_path="homography_points_c01_scene_s47.npz"),
-        ("factory", "c02"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c05"), target_entry_area="upper left")], homography_matrix_path="homography_points_c02_scene_s47.npz"),
-        ("factory", "c03"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("bottom_left"), target_cam_id=CameraID("c01"), target_entry_area="upper_right"), ExitRuleModel(source_exit_quadrant=QuadrantName("upper_right"), target_cam_id=CameraID("c05"), target_entry_area="upper left")], homography_matrix_path="homography_points_c03_scene_s47.npz"),
-        ("factory", "c05"): CameraHandoffDetailConfig(exit_rules=[ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c02"), target_entry_area="upper_right"), ExitRuleModel(source_exit_quadrant=QuadrantName("upper_left"), target_cam_id=CameraID("c03"), target_entry_area="upper_right")], homography_matrix_path="homography_points_c05_scene_s47.npz"),
-    }
+    ENVIRONMENT_TEMPLATES: Dict[str, Dict[str, Any]] = Field(
+        default_factory=lambda: copy.deepcopy(BASE_ENVIRONMENT_CONFIGURATION)
+    )
+    VIDEO_SETS: List[VideoSetEnvironmentConfig] = Field(default_factory=list)
+    CAMERA_HANDOFF_DETAILS: Dict[Tuple[str, str], CameraHandoffDetailConfig] = Field(default_factory=dict)
+    CAMERA_HANDOFF_ZONES: Dict[str, List[Dict[str, float]]] = Field(default_factory=dict)
+    POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
     HOMOGRAPHY_SOURCE: str = Field(default="auto", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
-    POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=lambda: [("c09", "c12"), ("c12", "c13"), ("c13", "c16"),("c01", "c03"),("c02", "c03"),("c03", "c05")])
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
@@ -167,6 +593,17 @@ class Settings(BaseSettings):
         "env_file": ".env",
         "env_file_encoding": "utf-8"
     }
+
+    def model_post_init(self, __context: Any) -> None:
+        super().model_post_init(__context)
+        self._apply_environment_templates()
+
+    def _apply_environment_templates(self) -> None:
+        templates = self.ENVIRONMENT_TEMPLATES
+        self.VIDEO_SETS = _build_video_sets_from_templates(templates)
+        self.CAMERA_HANDOFF_DETAILS = _build_camera_handoff_details_from_templates(templates)
+        self.POSSIBLE_CAMERA_OVERLAPS = _build_possible_camera_overlaps_from_templates(templates)
+        self.CAMERA_HANDOFF_ZONES = _build_camera_handoff_zones_from_templates(templates)
 
     # (Re-ID weights path removed)
     

@@ -4,112 +4,19 @@
   "environment_type": "factory",
   "description": "Default factory environment with production lines and quality control",
   "cameras": {
-    "f01": {
-      "camera_id": "f01",
-      "name": "Factory Line 1 Camera",
+    "c09": {
+      "camera_id": "c09",
+      "name": "Factory Entry Camera",
       "camera_type": "fixed",
       "position": {
-        "x": 10.0,
-        "y": 5.0
-      },
-      "resolution": [
-        1920,
-        1080
-      ],
-      "field_of_view": 60.0,
-      "orientation": 0.0,
-      "frame_rate": 25.0,
-      "exposure_settings": {
-        "auto": true,
-        "value": 0
-      },
-      "focus_settings": {
-        "auto": true,
-        "distance": 0
-      },
-      "intrinsic_matrix": null,
-      "distortion_coefficients": null,
-      "homography_matrix": null,
-      "is_active": true,
-      "last_calibrated": "2025-08-29T13:02:52.097728",
-      "calibration_accuracy": null,
-      "metadata": {}
-    },
-    "f02": {
-      "camera_id": "f02",
-      "name": "Factory Line 2 Camera",
-      "camera_type": "fixed",
-      "position": {
-        "x": 30.0,
-        "y": 5.0
-      },
-      "resolution": [
-        1920,
-        1080
-      ],
-      "field_of_view": 60.0,
-      "orientation": 0.0,
-      "frame_rate": 25.0,
-      "exposure_settings": {
-        "auto": true,
-        "value": 0
-      },
-      "focus_settings": {
-        "auto": true,
-        "distance": 0
-      },
-      "intrinsic_matrix": null,
-      "distortion_coefficients": null,
-      "homography_matrix": null,
-      "is_active": true,
-      "last_calibrated": "2025-08-29T13:02:52.097739",
-      "calibration_accuracy": null,
-      "metadata": {}
-    },
-    "f03": {
-      "camera_id": "f03",
-      "name": "Factory QC Camera",
-      "camera_type": "fixed",
-      "position": {
-        "x": 50.0,
-        "y": 5.0
-      },
-      "resolution": [
-        1920,
-        1080
-      ],
-      "field_of_view": 60.0,
-      "orientation": 0.0,
-      "frame_rate": 25.0,
-      "exposure_settings": {
-        "auto": true,
-        "value": 0
-      },
-      "focus_settings": {
-        "auto": true,
-        "distance": 0
-      },
-      "intrinsic_matrix": null,
-      "distortion_coefficients": null,
-      "homography_matrix": null,
-      "is_active": true,
-      "last_calibrated": "2025-08-29T13:02:52.097743",
-      "calibration_accuracy": null,
-      "metadata": {}
-    },
-    "f04": {
-      "camera_id": "f04",
-      "name": "Factory Exit Camera",
-      "camera_type": "fixed",
-      "position": {
-        "x": 70.0,
+        "x": 5.0,
         "y": 2.0
       },
       "resolution": [
         1920,
         1080
       ],
-      "field_of_view": 60.0,
+      "field_of_view": 70.0,
       "orientation": 0.0,
       "frame_rate": 25.0,
       "exposure_settings": {
@@ -124,9 +31,114 @@
       "distortion_coefficients": null,
       "homography_matrix": null,
       "is_active": true,
-      "last_calibrated": "2025-08-29T13:02:52.097746",
+      "last_calibrated": "2025-09-24T08:55:39.337686",
       "calibration_accuracy": null,
-      "metadata": {}
+      "metadata": {
+        "remote_base_key": "video_s14/c09",
+        "homography_matrix_path": "homography_points_c09_scene_s14.npz"
+      }
+    },
+    "c12": {
+      "camera_id": "c12",
+      "name": "Factory Main Area Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 25.0,
+        "y": 15.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-09-24T08:55:39.337696",
+      "calibration_accuracy": null,
+      "metadata": {
+        "remote_base_key": "video_s14/c12",
+        "homography_matrix_path": "homography_points_c12_scene_s14.npz"
+      }
+    },
+    "c13": {
+      "camera_id": "c13",
+      "name": "Factory Corridor Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 45.0,
+        "y": 10.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-09-24T08:55:39.337700",
+      "calibration_accuracy": null,
+      "metadata": {
+        "remote_base_key": "video_s14/c13",
+        "homography_matrix_path": "homography_points_c13_scene_s14.npz"
+      }
+    },
+    "c16": {
+      "camera_id": "c16",
+      "name": "Factory Exit Camera",
+      "camera_type": "fixed",
+      "position": {
+        "x": 65.0,
+        "y": 2.0
+      },
+      "resolution": [
+        1920,
+        1080
+      ],
+      "field_of_view": 70.0,
+      "orientation": 0.0,
+      "frame_rate": 25.0,
+      "exposure_settings": {
+        "auto": true,
+        "value": 0
+      },
+      "focus_settings": {
+        "auto": true,
+        "distance": 0
+      },
+      "intrinsic_matrix": null,
+      "distortion_coefficients": null,
+      "homography_matrix": null,
+      "is_active": true,
+      "last_calibrated": "2025-09-24T08:55:39.337705",
+      "calibration_accuracy": null,
+      "metadata": {
+        "remote_base_key": "video_s14/c16",
+        "homography_matrix_path": "homography_points_c16_scene_s14.npz"
+      }
     }
   },
   "zones": {
@@ -329,15 +341,12 @@
   "user_permissions": {},
   "is_active": true,
   "created_at": "2025-08-31T13:02:52.097800",
-  "last_updated": "2025-08-31T13:02:52.097800",
+  "last_updated": "2025-09-25T08:55:39.332031",
   "version": "1.0",
   "validation_issues": {
-    "cameras": [
-      "Camera f01 missing homography matrix",
-      "Camera f02 missing homography matrix",
-      "Camera f03 missing homography matrix",
-      "Camera f04 missing homography matrix"
-    ]
+    "cameras": []
   },
-  "metadata": {}
+  "metadata": {
+    "updated_from": "ENVIRONMENT_TEMPLATES"
+  }
 }

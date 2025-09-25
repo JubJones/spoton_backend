@@ -78,39 +78,34 @@ async def get_available_detection_environments():
         
         # If no environments in config, return default ones with detection features
         if not environments:
-            environments = [
-                {
-                    "environment_id": "campus",
-                    "name": "Campus Environment (RT-DETR Detection)",
-                    "description": "RT-DETR detection campus environment with 4 cameras",
-                    "camera_count": 4,
-                    "cameras": ["c09", "c12", "c13", "c16"],
-                    "available": True,
-                    "mode": "detection_processing",
-                    "detection_features": {
-                        "model": "RT-DETR-l",
-                        "person_detection": True,
-                        "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
-                        "real_time_processing": True
+            for env_id, template in settings.ENVIRONMENT_TEMPLATES.items():
+                camera_definitions = template.get("cameras", {})
+                camera_ids = list(camera_definitions.keys())
+                total_sub_videos = sum(
+                    cam_cfg.get("num_sub_videos", 0) for cam_cfg in camera_definitions.values()
+                )
+                environments.append(
+                    {
+                        "environment_id": env_id,
+                        "name": f"{template.get('name', env_id.title() + ' Environment')} (RT-DETR Detection)",
+                        "description": template.get(
+                            "description",
+                            f"RT-DETR detection environment with {len(camera_ids)} cameras"
+                        ),
+                        "camera_count": len(camera_ids),
+                        "cameras": camera_ids,
+                        "total_sub_videos": total_sub_videos,
+                        "available": True,
+                        "mode": "detection_processing",
+                        "detection_features": {
+                            "model": "RT-DETR-l",
+                            "person_detection": True,
+                            "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
+                            "real_time_processing": True
+                        }
                     }
-                },
-                {
-                    "environment_id": "factory",
-                    "name": "Factory Environment (RT-DETR Detection)",
-                    "description": "RT-DETR detection factory environment with 4 cameras",
-                    "camera_count": 4,
-                    "cameras": ["c01", "c02", "c03", "c05"],
-                    "available": True,
-                    "mode": "detection_processing",
-                    "detection_features": {
-                        "model": "RT-DETR-l",
-                        "person_detection": True,
-                        "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
-                        "real_time_processing": True
-                    }
-                }
-            ]
-        
+                )
+
         return {
             "status": "success",
             "data": {
