@@ -12,6 +12,7 @@ Features:
 """
 
 import asyncio
+import copy
 from pathlib import Path
 import uuid
 import time
@@ -27,6 +28,7 @@ from app.services.raw_video_service import RawVideoService
 from app.models.rtdetr_detector import RTDETRDetector
 from app.utils.detection_annotator import DetectionAnnotator
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
+from app.api.websockets.focus_handler import focus_tracking_handler
 from app.api.websockets.frame_handler import frame_handler
 from app.services.homography_service import HomographyService
 from app.services.handoff_detection_service import HandoffDetectionService
@@ -600,7 +602,7 @@ class DetectionVideoService(RawVideoService):
             logger.error(f"❌ DETECTION STREAMING: Error streaming detection results: {e}")
             return False
     
-    async def send_detection_update(self, task_id: uuid.UUID, camera_id: str, frame: np.ndarray, 
+    async def send_detection_update(self, task_id: uuid.UUID, camera_id: str, frame: np.ndarray,
                                    detection_data: Dict[str, Any], frame_number: int):
         """
         Send detection update via WebSocket with Phase 4 spatial intelligence data.
@@ -609,9 +611,15 @@ class DetectionVideoService(RawVideoService):
         replacing the previous static null values with actual spatial intelligence results.
         """
         try:
-            # Create detection overlay with annotated frames
+            payload_data = detection_data
+            focus_applied = False
+            if task_id is not None:
+                payload_data, focus_applied = self._apply_focus_filter(task_id, camera_id, detection_data)
+
             frame_overlay = self.annotator.create_detection_overlay(
-                frame, detection_data["detections"], detection_data.get("tracks")
+                frame,
+                payload_data.get("detections", []),
+                payload_data.get("tracks"),
             )
             
             # Phase 4: Prepare homography data for WebSocket message
@@ -620,9 +628,8 @@ class DetectionVideoService(RawVideoService):
                 homography_data = self.homography_service.get_homography_data(camera_id)
             
             # Phase 4: Prepare mapping coordinates data WITH TRAILS
-            mapping_coordinates = []
-            if "detections" in detection_data:
-                for detection in detection_data["detections"]:
+            mapping_coordinates: List[Dict[str, Any]] = []
+            for detection in payload_data.get("detections", []):
                     # Accept valid coordinates, including (0,0). Validate bounds if possible.
                     if "map_coords" in detection:
                         mx = detection["map_coords"].get("map_x")
@@ -670,7 +677,7 @@ class DetectionVideoService(RawVideoService):
                             "trail": trail_data  # NEW: Trail data added
                         }
                         mapping_coordinates.append(coord_data)
-            
+
             # Create WebSocket message compatible with frontend (same format as raw endpoint)
             detection_message = {
                 "type": MessageType.TRACKING_UPDATE.value,  # Compatible with frontend expectation
@@ -684,22 +691,25 @@ class DetectionVideoService(RawVideoService):
                     "frame_image_base64": frame_overlay["annotated_b64"],  # Use annotated frame for display
                     "original_frame_base64": frame_overlay["original_b64"],  # Keep original for reference
                     # Enhanced: Include tracking data if available
-                    "tracks": detection_data.get("tracks", []),
+                    "tracks": payload_data.get("tracks", []),
                     "frame_width": frame_overlay["width"],
                     "frame_height": frame_overlay["height"], 
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 },
                 # Additional detection-specific data (won't interfere with frontend display)
-                "detection_data": detection_data,
+                "detection_data": payload_data,
                 "future_pipeline_data": {
                     "tracking_data": {
-                        "track_count": len(detection_data.get("tracks", []))
-                    } if detection_data.get("tracks") is not None else None,
+                        "track_count": len(payload_data.get("tracks", []))
+                    } if payload_data.get("tracks") is not None else None,
                     # Phase 4: Populated homography and mapping data
                     "homography_data": homography_data,
                     "mapping_coordinates": mapping_coordinates if mapping_coordinates else None
                 }
             }
+
+            if focus_applied:
+                detection_message["focus"] = payload_data.get("focus_metadata", {})
             
             # Optional on-disk frame cache (sampled) for annotated frames
             try:
@@ -828,6 +838,152 @@ class DetectionVideoService(RawVideoService):
         except Exception as e:
             logger.warning(f"Failed converting tracker output to track data: {e}")
             return []
+
+    @staticmethod
+    def _calculate_iou(box_a: List[float], box_b: List[float]) -> float:
+        try:
+            ax1, ay1, ax2, ay2 = map(float, box_a)
+            bx1, by1, bx2, by2 = map(float, box_b)
+        except (TypeError, ValueError):
+            return 0.0
+
+        inter_x1 = max(ax1, bx1)
+        inter_y1 = max(ay1, by1)
+        inter_x2 = min(ax2, bx2)
+        inter_y2 = min(ay2, by2)
+
+        inter_w = max(0.0, inter_x2 - inter_x1)
+        inter_h = max(0.0, inter_y2 - inter_y1)
+        inter_area = inter_w * inter_h
+
+        area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+        area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+        denom = area_a + area_b - inter_area
+        if denom <= 0.0:
+            return 0.0
+        return inter_area / denom
+
+    FOCUS_IOU_UPDATE_THRESHOLD: float = 0.55
+
+    def _apply_focus_filter(
+        self,
+        task_id: uuid.UUID,
+        camera_id: str,
+        detection_data: Dict[str, Any],
+    ) -> Tuple[Dict[str, Any], bool]:
+        focus_state = focus_tracking_handler.get_focus_state(str(task_id))
+        if not focus_state or not focus_state.has_active_focus():
+            return detection_data, False
+
+        focus_target = focus_state.get_focus_target_summary()
+        if not focus_target:
+            return detection_data, False
+
+        filtered = copy.deepcopy(detection_data)
+        filtered.setdefault("focus_metadata", {}).update(focus_target)
+
+        target_camera = focus_target.get("camera_id")
+        if target_camera and target_camera != camera_id:
+            filtered["detections"] = []
+            filtered["tracks"] = []
+            filtered["detection_count"] = 0
+            filtered["focus_metadata"]["active_on_camera"] = False
+            return filtered, True
+
+        filtered["focus_metadata"]["active_on_camera"] = True
+
+        target_track_id = focus_target.get("track_id")
+        target_detection_id = focus_target.get("detection_id")
+        focus_bbox = None
+
+        filtered_tracks: List[Dict[str, Any]] = []
+        for track in detection_data.get("tracks", []):
+            if target_track_id is not None and track.get("track_id") == target_track_id:
+                focus_bbox = track.get("bbox_xyxy")
+                track_copy = copy.deepcopy(track)
+                track_copy["is_focused"] = True
+                filtered_tracks.append(track_copy)
+                break
+
+        if not focus_bbox and focus_target.get("bbox"):
+            bbox_dict = focus_target["bbox"]
+            focus_bbox = [
+                bbox_dict.get("x1"),
+                bbox_dict.get("y1"),
+                bbox_dict.get("x2"),
+                bbox_dict.get("y2"),
+            ]
+
+        best_detection: Optional[Dict[str, Any]] = None
+        best_iou = -1.0
+
+        for detection in detection_data.get("detections", []):
+            det_id = detection.get("detection_id")
+            bbox = detection.get("bbox") or {}
+            det_bbox = [bbox.get("x1"), bbox.get("y1"), bbox.get("x2"), bbox.get("y2")]
+
+            if target_detection_id and det_id == target_detection_id:
+                best_detection = detection
+                best_iou = 1.0
+                break
+
+            if focus_bbox:
+                iou = self._calculate_iou(focus_bbox, det_bbox)
+                if iou > best_iou:
+                    best_detection = detection
+                    best_iou = iou
+
+        filtered_detections: List[Dict[str, Any]] = []
+        if best_detection and (best_iou >= self.FOCUS_IOU_UPDATE_THRESHOLD or best_iou == 1.0):
+            det_copy = copy.deepcopy(best_detection)
+            det_copy["is_focused"] = True
+            filtered_detections.append(det_copy)
+            bbox = det_copy.get("bbox") or {}
+            focus_state.record_observation(
+                camera_id=camera_id,
+                bbox=[bbox.get("x1"), bbox.get("y1"), bbox.get("x2"), bbox.get("y2")],
+                detection_id=det_copy.get("detection_id"),
+                track_id=det_copy.get("track_id"),
+                confidence=det_copy.get("confidence"),
+            )
+        else:
+            if focus_bbox:
+                x1, y1, x2, y2 = focus_bbox
+                width = (x2 - x1) if None not in focus_bbox else None
+                height = (y2 - y1) if None not in focus_bbox else None
+                center_x = (x1 + x2) / 2 if None not in (x1, x2) else None
+                center_y = (y1 + y2) / 2 if None not in (y1, y2) else None
+                filtered_detections.append({
+                    "detection_id": target_detection_id or "focus_placeholder",
+                    "class_name": "person",
+                    "class_id": 0,
+                    "confidence": focus_target.get("confidence", 1.0),
+                    "bbox": {
+                        "x1": x1,
+                        "y1": y1,
+                        "x2": x2,
+                        "y2": y2,
+                        "width": width,
+                        "height": height,
+                        "center_x": center_x,
+                        "center_y": center_y,
+                    },
+                    "is_focused": True,
+                })
+                focus_state.record_observation(
+                    camera_id=camera_id,
+                    bbox=focus_bbox,
+                    detection_id=target_detection_id,
+                    track_id=target_track_id,
+                    confidence=focus_target.get("confidence"),
+                )
+
+        filtered.setdefault("focus_metadata", {})["match_iou"] = best_iou
+        filtered["tracks"] = filtered_tracks
+        filtered["detections"] = filtered_detections
+        filtered["detection_count"] = len(filtered_detections)
+
+        return filtered, True
 
     async def _enhance_tracks_with_spatial_intelligence(self, tracks: List[Dict[str, Any]], camera_id: str, frame_number: int) -> List[Dict[str, Any]]:
         """Compute map coordinates and short trajectories for tracks using homography and trail service."""

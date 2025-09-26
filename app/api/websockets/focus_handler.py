@@ -8,10 +8,10 @@ import logging
 import asyncio
 import json
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.api.websockets.connection_manager import binary_websocket_manager
-from app.domains.interaction.entities.focus_state import FocusState
+from app.domains.interaction.entities.focus_state import FocusState, PersonDetails
 
 logger = logging.getLogger(__name__)
 
@@ -69,25 +69,46 @@ class FocusTrackingHandler:
             focus_state = self.active_focus_states[task_id]
             
             # Set focus person
-            from app.domains.interaction.entities.focus_state import PersonDetails
             if person_details:
+                raw_first_detected = person_details.get('first_detected')
+                if raw_first_detected:
+                    try:
+                        first_detected = datetime.fromisoformat(raw_first_detected)
+                    except ValueError:
+                        first_detected = datetime.now(timezone.utc)
+                else:
+                    first_detected = datetime.now(timezone.utc)
+
                 person_detail_obj = PersonDetails(
                     global_id=person_id,
-                    first_detected=datetime.fromisoformat(person_details.get('first_detected', datetime.utcnow().isoformat())),
+                    first_detected=first_detected,
                     tracking_duration=person_details.get('tracking_duration', 0.0),
-                    current_camera=person_details.get('current_camera', 'unknown'),
+                    current_camera=person_details.get('current_camera'),
                     position_history=person_details.get('position_history', []),
-                    movement_metrics=person_details.get('movement_metrics', {})
+                    movement_metrics=person_details.get('movement_metrics', {}),
+                    camera_id=person_details.get('camera_id'),
+                    track_id=person_details.get('track_id'),
+                    detection_id=person_details.get('detection_id'),
+                    bbox=person_details.get('bbox'),
+                    confidence=person_details.get('confidence'),
                 )
             else:
                 person_detail_obj = PersonDetails(
                     global_id=person_id,
-                    first_detected=datetime.utcnow(),
+                    first_detected=datetime.now(timezone.utc),
                     tracking_duration=0.0,
-                    current_camera='unknown'
+                    current_camera=None,
                 )
-            
+
             focus_state.set_focus_person(person_id, person_detail_obj)
+            if person_details:
+                focus_state.record_observation(
+                    camera_id=person_details.get('camera_id', person_detail_obj.current_camera or 'unknown'),
+                    bbox=person_details.get('bbox'),
+                    confidence=person_details.get('confidence'),
+                    detection_id=person_details.get('detection_id'),
+                    track_id=person_details.get('track_id'),
+                )
             
             # Send focus update
             await self.send_focus_update(task_id, focus_state)
