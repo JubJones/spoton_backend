@@ -10,7 +10,7 @@ import json
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
-from app.api.websockets.connection_manager import binary_websocket_manager
+from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
 from app.domains.interaction.entities.focus_state import FocusState, PersonDetails
 
 logger = logging.getLogger(__name__)
@@ -109,16 +109,32 @@ class FocusTrackingHandler:
                     detection_id=person_details.get('detection_id'),
                     track_id=person_details.get('track_id'),
                 )
-            
+
+            logger.info(
+                "Focus selection updated: task=%s person=%s camera=%s track=%s detection=%s",
+                task_id,
+                person_id,
+                focus_state.person_details.camera_id if focus_state.person_details else None,
+                focus_state.person_details.track_id if focus_state.person_details else None,
+                focus_state.person_details.detection_id if focus_state.person_details else None,
+            )
+
             # Send focus update
             await self.send_focus_update(task_id, focus_state)
             
             # Start continuous updates if not already running
             await self.start_focus_updates(task_id)
-            
-            logger.info(f"Focus set on person {person_id} for task {task_id}")
+
+            logger.info(
+                "Focus set on person: task=%s person=%s camera=%s track=%s detection=%s",
+                task_id,
+                person_id,
+                focus_state.person_details.camera_id if focus_state.person_details else None,
+                focus_state.person_details.track_id if focus_state.person_details else None,
+                focus_state.person_details.detection_id if focus_state.person_details else None,
+            )
             return True
-            
+
         except Exception as e:
             logger.error(f"Error setting focus person for task {task_id}: {e}")
             return False
@@ -182,12 +198,19 @@ class FocusTrackingHandler:
             }
             
             await binary_websocket_manager.send_json_message(
-                task_id, 
+                task_id,
                 message,
-                message_type=binary_websocket_manager.MessageType.CONTROL_MESSAGE
+                message_type=MessageType.CONTROL_MESSAGE
             )
-            
-            logger.debug(f"Sent focus update for task {task_id}")
+
+            logger.debug(
+                "Focus update dispatched",
+                extra={
+                    "task_id": task_id,
+                    "focused_person_id": focus_state.focused_person_id,
+                    "camera_id": focus_state.person_details.camera_id if focus_state.person_details else None,
+                },
+            )
             
         except Exception as e:
             logger.error(f"Error sending focus update for task {task_id}: {e}")

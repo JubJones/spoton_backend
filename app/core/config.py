@@ -569,6 +569,24 @@ class Settings(BaseSettings):
     TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 90
 
+    # WebSocket client connection guards
+    STREAMING_CLIENT_INITIAL_GRACE_SECONDS: float = Field(
+        default=15.0,
+        description="Seconds to wait for an initial WebSocket client before stopping the stream"
+    )
+    STREAMING_CLIENT_IDLE_TIMEOUT_SECONDS: float = Field(
+        default=12.0,
+        description="Seconds to continue processing after the last WebSocket client disconnects"
+    )
+    DETECTION_CLIENT_INITIAL_GRACE_SECONDS: Optional[float] = Field(
+        default=None,
+        description="Override initial grace period (in seconds) for detection tasks; falls back to STREAMING_CLIENT_INITIAL_GRACE_SECONDS when unset"
+    )
+    DETECTION_CLIENT_IDLE_TIMEOUT_SECONDS: Optional[float] = Field(
+        default=None,
+        description="Override idle timeout (in seconds) for detection tasks; falls back to STREAMING_CLIENT_IDLE_TIMEOUT_SECONDS when unset"
+    )
+
     # Lazy initialization toggles to reduce cold start
     PRELOAD_TRACKER_FACTORY: bool = Field(default=True, description="Preload prototype tracker at startup")
     PRELOAD_HOMOGRAPHY: bool = Field(default=True, description="Preload homography matrices at startup")

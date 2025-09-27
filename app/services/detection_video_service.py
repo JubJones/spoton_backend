@@ -445,14 +445,20 @@ class DetectionVideoService(RawVideoService):
             # Step 3: Process frames with detection
             logger.info(f"🔍 DETECTION PIPELINE: Step 3/4 - Processing frames with detection for task {task_id}")
             detection_success = await self._process_frames_with_detection(task_id, video_data)
+            if self._task_marked_stopped(task_id):
+                logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
+                return
             if not detection_success:
                 raise RuntimeError("Failed to process frames with detection")
-            
+
             await self._update_task_status(task_id, "STREAMING", 0.75, "Streaming detection results")
-            
+
             # Step 4: Stream detection results (integrated with frame processing)
             logger.info(f"📡 DETECTION PIPELINE: Step 4/4 - Streaming detection results for task {task_id}")
             streaming_success = await self._stream_detection_results(task_id, video_data)
+            if self._task_marked_stopped(task_id):
+                logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped before summary streaming (no clients)")
+                return
             if not streaming_success:
                 raise RuntimeError("Failed to stream detection results")
             
@@ -473,6 +479,7 @@ class DetectionVideoService(RawVideoService):
                 self.active_tasks.remove(task_id)
             if environment_id in self.environment_tasks:
                 del self.environment_tasks[environment_id]
+            self._clear_client_watch(task_id)
     
     async def _process_frames_with_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """Process video frames with RT-DETR detection."""
@@ -490,6 +497,7 @@ class DetectionVideoService(RawVideoService):
                 return False
             
             frame_index = 0
+            aborted_due_to_no_clients = False
             
             # Process frames from all cameras
             while frame_index < total_frames:
@@ -497,7 +505,10 @@ class DetectionVideoService(RawVideoService):
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 DETECTION PROCESSING: Task {task_id} was stopped")
                     break
-                
+                if not self._should_continue_stream(task_id, detection_mode=True):
+                    aborted_due_to_no_clients = True
+                    break
+
                 # Read frames from all cameras
                 camera_frames = {}
                 camera_detections = {}
@@ -549,7 +560,13 @@ class DetectionVideoService(RawVideoService):
                 cap = data.get("video_capture")
                 if cap:
                     cap.release()
-            
+
+            if aborted_due_to_no_clients:
+                reason = "Detection stopped - no active WebSocket clients"
+                self._mark_task_stopped_due_to_idle_clients(task_id, reason)
+                logger.info(f"🛑 DETECTION PROCESSING: {reason} (task {task_id})")
+                return True
+
             logger.info(f"✅ DETECTION PROCESSING: Frame processing completed for task {task_id}")
             return True
             
@@ -880,32 +897,23 @@ class DetectionVideoService(RawVideoService):
             return detection_data, False
 
         filtered = copy.deepcopy(detection_data)
-        filtered.setdefault("focus_metadata", {}).update(focus_target)
+        filtered_metadata = filtered.setdefault("focus_metadata", {})
+        filtered_metadata.update(focus_target)
 
         target_camera = focus_target.get("camera_id")
         if target_camera and target_camera != camera_id:
             filtered["detections"] = []
             filtered["tracks"] = []
             filtered["detection_count"] = 0
-            filtered["focus_metadata"]["active_on_camera"] = False
+            filtered_metadata["active_on_camera"] = False
             return filtered, True
-
-        filtered["focus_metadata"]["active_on_camera"] = True
+        filtered_metadata["active_on_camera"] = True
 
         target_track_id = focus_target.get("track_id")
         target_detection_id = focus_target.get("detection_id")
-        focus_bbox = None
+        focus_bbox: Optional[List[float]] = None
 
-        filtered_tracks: List[Dict[str, Any]] = []
-        for track in detection_data.get("tracks", []):
-            if target_track_id is not None and track.get("track_id") == target_track_id:
-                focus_bbox = track.get("bbox_xyxy")
-                track_copy = copy.deepcopy(track)
-                track_copy["is_focused"] = True
-                filtered_tracks.append(track_copy)
-                break
-
-        if not focus_bbox and focus_target.get("bbox"):
+        if focus_target.get("bbox"):
             bbox_dict = focus_target["bbox"]
             focus_bbox = [
                 bbox_dict.get("x1"),
@@ -914,28 +922,94 @@ class DetectionVideoService(RawVideoService):
                 bbox_dict.get("y2"),
             ]
 
-        best_detection: Optional[Dict[str, Any]] = None
-        best_iou = -1.0
+        best_track: Optional[Dict[str, Any]] = None
+        best_track_iou = -1.0
+        track_candidates: List[Dict[str, Any]] = []
+        for track in detection_data.get("tracks", []):
+            track_bbox = track.get("bbox_xyxy")
+            if track_bbox is None:
+                continue
 
-        for detection in detection_data.get("detections", []):
-            det_id = detection.get("detection_id")
-            bbox = detection.get("bbox") or {}
-            det_bbox = [bbox.get("x1"), bbox.get("y1"), bbox.get("x2"), bbox.get("y2")]
+            iou = self._calculate_iou(track_bbox, focus_bbox) if focus_bbox is not None else -1.0
+            track_candidates.append({
+                "track_id": track.get("track_id"),
+                "iou": iou,
+            })
 
-            if target_detection_id and det_id == target_detection_id:
-                best_detection = detection
-                best_iou = 1.0
+            if target_track_id is not None and track.get("track_id") == target_track_id:
+                best_track = track
+                best_track_iou = 1.0
+                focus_bbox = track_bbox
                 break
 
-            if focus_bbox:
-                iou = self._calculate_iou(focus_bbox, det_bbox)
-                if iou > best_iou:
-                    best_detection = detection
-                    best_iou = iou
+            if focus_bbox is not None and iou > best_track_iou:
+                best_track = track
+                best_track_iou = iou
+
+        if best_track is None and detection_data.get("tracks"):
+            best_track = detection_data["tracks"][0]
+            best_track_iou = 0.0
+            focus_bbox = best_track.get("bbox_xyxy")
+
+        filtered_tracks: List[Dict[str, Any]] = []
+        if best_track is not None:
+            filtered_metadata["track_id"] = best_track.get("track_id")
+            track_copy = copy.deepcopy(best_track)
+            track_copy["is_focused"] = True
+            filtered_tracks.append(track_copy)
+            if track_copy.get("bbox_xyxy"):
+                focus_state.record_observation(
+                    camera_id=camera_id,
+                    bbox=track_copy.get("bbox_xyxy"),
+                    detection_id=filtered_metadata.get("detection_id"),
+                    track_id=track_copy.get("track_id"),
+                    confidence=track_copy.get("confidence"),
+                )
+
+        if focus_bbox is None:
+            return filtered, True
+
+        best_detection: Optional[Dict[str, Any]] = None
+        best_iou = -1.0
+        target_detection_match: Optional[Dict[str, Any]] = None
+        target_detection_iou = -1.0
+
+        reference_bbox = best_track.get("bbox_xyxy") if best_track is not None else focus_bbox
+        detection_candidates: List[Dict[str, Any]] = []
+
+        for detection in detection_data.get("detections", []):
+            bbox = detection.get("bbox") or {}
+            det_bbox = [bbox.get("x1"), bbox.get("y1"), bbox.get("x2"), bbox.get("y2")]
+            if reference_bbox is None or any(v is None for v in det_bbox):
+                continue
+
+            iou = self._calculate_iou(reference_bbox, det_bbox)
+            detection_candidates.append({
+                "detection_id": detection.get("detection_id"),
+                "iou": iou,
+            })
+
+            if detection.get("detection_id") == target_detection_id:
+                target_detection_match = detection
+                target_detection_iou = iou
+
+            if iou > best_iou:
+                best_detection = detection
+                best_iou = iou
+
+        # Prefer the explicit detection id when available
+        chosen_detection = None
+        chosen_iou = -1.0
+        if target_detection_match is not None:
+            chosen_detection = target_detection_match
+            chosen_iou = target_detection_iou
+        else:
+            chosen_detection = best_detection
+            chosen_iou = best_iou
 
         filtered_detections: List[Dict[str, Any]] = []
-        if best_detection and (best_iou >= self.FOCUS_IOU_UPDATE_THRESHOLD or best_iou == 1.0):
-            det_copy = copy.deepcopy(best_detection)
+        if chosen_detection and (chosen_iou >= self.FOCUS_IOU_UPDATE_THRESHOLD or chosen_iou == 1.0):
+            det_copy = copy.deepcopy(chosen_detection)
             det_copy["is_focused"] = True
             filtered_detections.append(det_copy)
             bbox = det_copy.get("bbox") or {}
@@ -946,6 +1020,8 @@ class DetectionVideoService(RawVideoService):
                 track_id=det_copy.get("track_id"),
                 confidence=det_copy.get("confidence"),
             )
+            filtered_metadata["detection_id"] = det_copy.get("detection_id")
+            best_iou = chosen_iou
         else:
             if focus_bbox:
                 x1, y1, x2, y2 = focus_bbox
@@ -977,11 +1053,34 @@ class DetectionVideoService(RawVideoService):
                     track_id=target_track_id,
                     confidence=focus_target.get("confidence"),
                 )
+                filtered_metadata["detection_id"] = target_detection_id
+                best_iou = target_detection_iou if target_detection_match is not None else best_iou
 
-        filtered.setdefault("focus_metadata", {})["match_iou"] = best_iou
+        filtered_metadata["match_iou"] = best_iou
         filtered["tracks"] = filtered_tracks
         filtered["detections"] = filtered_detections
         filtered["detection_count"] = len(filtered_detections)
+
+        logger.info(
+            'Focus filter applied: task=%s camera=%s selected_track=%s selected_det=%s match_iou=%.3f',
+            str(task_id),
+            camera_id,
+            filtered_metadata.get('track_id'),
+            filtered_metadata.get('detection_id'),
+            best_iou,
+        )
+        logger.debug(
+            'Focus filter candidates',
+            extra={
+                'task_id': str(task_id),
+                'camera_id': camera_id,
+                'track_candidates': track_candidates,
+                'detection_candidates': detection_candidates,
+                'best_track_iou': best_track_iou,
+                'target_track_id': target_track_id,
+                'target_detection_id': target_detection_id,
+            },
+        )
 
         return filtered, True
 
@@ -1051,6 +1150,9 @@ class DetectionVideoService(RawVideoService):
             # Process frames with detection only
             await self._update_task_status(task_id, "PROCESSING", 0.60, "Processing frames with RT-DETR detection")
             success = await self._process_frames_simple_detection(task_id, video_data)
+            if self._task_marked_stopped(task_id):
+                logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
+                return
             if not success:
                 raise RuntimeError("Failed to process frames with detection")
             
@@ -1076,6 +1178,7 @@ class DetectionVideoService(RawVideoService):
                     await self.tracker_factory.clear_trackers_for_task(task_id)
             except Exception:
                 pass
+            self._clear_client_watch(task_id)
     
     async def _process_frames_simple_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """
@@ -1097,11 +1200,16 @@ class DetectionVideoService(RawVideoService):
             
             frame_index = 0
             frames_processed = 0
+            aborted_due_to_no_clients = False
             
             # Main processing loop
             while frame_index < total_frames:
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 SIMPLE DETECTION: Task {task_id} was stopped")
+                    break
+
+                if not self._should_continue_stream(task_id, detection_mode=True):
+                    aborted_due_to_no_clients = True
                     break
                 
                 # Process all cameras for current frame
@@ -1155,10 +1263,16 @@ class DetectionVideoService(RawVideoService):
                 cap = data.get("video_capture")
                 if cap:
                     cap.release()
-            
+
+            if aborted_due_to_no_clients:
+                reason = "Detection stopped - no active WebSocket clients"
+                self._mark_task_stopped_due_to_idle_clients(task_id, reason)
+                logger.info(f"🛑 SIMPLE DETECTION: {reason} (task {task_id})")
+                return True
+
             logger.info(f"✅ SIMPLE DETECTION: Completed processing - {frames_processed} frames processed")
             return True
-            
+
         except Exception as e:
             logger.error(f"❌ SIMPLE DETECTION: Error in frame processing: {e}")
             return False
@@ -1185,13 +1299,18 @@ class DetectionVideoService(RawVideoService):
             
             frame_index = 0
             frames_streamed = 0
+            aborted_due_to_no_clients = False
             
             # Main processing loop
             while frame_index < total_frames:
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 PHASE 2 PROCESSING: Task {task_id} was stopped")
                     break
-                
+
+                if not self._should_continue_stream(task_id, detection_mode=True):
+                    aborted_due_to_no_clients = True
+                    break
+
                 # Process all cameras for current frame
                 camera_frames_processed = 0
                 
@@ -1243,7 +1362,13 @@ class DetectionVideoService(RawVideoService):
                 cap = data.get("video_capture")
                 if cap:
                     cap.release()
-            
+
+            if aborted_due_to_no_clients:
+                reason = "Detection stopped - no active WebSocket clients"
+                self._mark_task_stopped_due_to_idle_clients(task_id, reason)
+                logger.info(f"🛑 PHASE 2 PROCESSING: {reason} (task {task_id})")
+                return True
+
             logger.info(f"✅ PHASE 2 PROCESSING: Completed real-time processing - {frames_streamed} updates streamed")
             return True
             
