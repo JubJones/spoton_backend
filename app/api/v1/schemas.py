@@ -1,3 +1,4 @@
+from enum import Enum
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -87,3 +88,21 @@ class WebSocketMessage(BaseModel):
     """
     type: str = Field(..., description="Type of WebSocket message (e.g., 'tracking_update', 'status_update', 'batch_processing_complete').")
     payload: Dict[str, Any] = Field(..., description="The actual message content, structure depends on 'type'.")
+# --- Playback Control Schemas ---
+
+class PlaybackState(str, Enum):
+    """Enumerates backend-managed playback states."""
+
+    PLAYING = "playing"
+    PAUSED = "paused"
+    STOPPED = "stopped"
+
+
+class PlaybackStatusResponse(BaseModel):
+    """Represents the playback control status returned to clients."""
+
+    task_id: str
+    state: PlaybackState
+    last_transition_at: datetime
+    last_frame_index: Optional[int] = None
+    last_error: Optional[str] = None

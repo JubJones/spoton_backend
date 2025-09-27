@@ -16,6 +16,7 @@ The SpotOn backend has reached **100% production readiness** with comprehensive 
 - **🛡️ Authentication**: Full JWT implementation with role-based access control
 - **📈 Analytics Endpoints**: Real-time metrics, behavior analysis, system statistics
 - **📦 Export Capabilities**: Data export, report generation, video export with overlays
+- **🕹️ Playback Control**: Pause/resume processing tasks with runtime coordination and metrics
 - **🔍 System Monitoring**: Performance dashboard, diagnostics, alerts, maintenance operations
 
 ## Quick Start
@@ -64,6 +65,13 @@ GET  /                                 # Welcome message
 POST /api/v1/detection-processing-tasks/start    # Start detection session
 GET  /api/v1/detection-processing-tasks/{id}/status  # Get task status
 DELETE /api/v1/detection-processing-tasks/{id}/stop  # Stop task
+```
+
+### Playback Control *(requires `ENABLE_PLAYBACK_CONTROL=true`)*
+```bash
+POST /api/v1/controls/{task_id}/pause      # Pause frame emission and tracking loops
+POST /api/v1/controls/{task_id}/resume     # Resume a paused task
+GET  /api/v1/controls/{task_id}/status     # Inspect playback state and last frame index
 ```
 
 ### Real-time Data
@@ -198,6 +206,8 @@ curl -X POST http://localhost:3847/api/v1/export/tracking-data \
 TARGET_FPS=3                           # Processing frame rate
 FRAME_JPEG_QUALITY=70                  # Image quality (1-100)
 DETECTION_CONFIDENCE_THRESHOLD=0.7     # Detection sensitivity
+ENABLE_PLAYBACK_CONTROL=true           # Toggle pause/resume endpoints
+PLAYBACK_CONTROL_TIMEOUT_SECONDS=1.0   # Pause/resume acknowledgement timeout
 ```
 
 ### Camera Configuration

@@ -31,10 +31,13 @@ from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
 from app.services.homography_service import HomographyService
+from app.services.playback_status_store import PlaybackStatusStore
+from app.services.task_runtime_registry import TaskRuntimeRegistry
+from app.services.playback_control_service import PlaybackControlService
 
 from app.models.base_models import AbstractDetector
 
-from app.api.websockets import manager as websocket_manager
+from app.api.websockets import binary_websocket_manager as websocket_manager
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +100,33 @@ def get_video_data_manager_service(
 def get_notification_service() -> NotificationService:
     """Dependency provider for NotificationService (singleton)."""
     return NotificationService(manager=websocket_manager)
+
+
+@lru_cache()
+def get_playback_status_store() -> PlaybackStatusStore:
+    """Provide a shared in-memory store for playback state."""
+
+    return PlaybackStatusStore()
+
+
+@lru_cache()
+def get_task_runtime_registry() -> TaskRuntimeRegistry:
+    """Provide a global registry coordinating playback runtime state."""
+
+    return TaskRuntimeRegistry()
+
+
+def get_playback_control_service(
+    status_store: PlaybackStatusStore = Depends(get_playback_status_store),
+    runtime_registry: TaskRuntimeRegistry = Depends(get_task_runtime_registry),
+) -> PlaybackControlService:
+    """Dependency provider for playback control orchestration."""
+
+    return PlaybackControlService(
+        status_store=status_store,
+        runtime_registry=runtime_registry,
+        timeout_seconds=settings.PLAYBACK_CONTROL_TIMEOUT_SECONDS,
+    )
 
 
 # --- Services that depend on preloaded components ---

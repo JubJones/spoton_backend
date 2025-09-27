@@ -11,6 +11,7 @@ from app.core.security_config import configure_security_middleware, get_cors_con
 from app.api.v1.endpoints import detection_processing_tasks
 from app.api.v1.endpoints import environments
 from app.api.v1.endpoints import analytics as analytics_endpoints
+from app.api.v1.endpoints import playback_controls
 from app.api.websockets import endpoints as ws_router
 from app.api import health as health_router
 from app.infrastructure.cache.tracking_cache import get_tracking_cache
@@ -216,6 +217,13 @@ app.include_router(
     prefix=f"{api_v1_router_prefix}/analytics",
     tags=["V1 - Analytics"]
 )
+if settings.ENABLE_PLAYBACK_CONTROL:
+    app.include_router(
+        playback_controls.router,
+        prefix=f"{api_v1_router_prefix}/controls"
+    )
+else:
+    logger.info("Playback control endpoints are disabled via settings.ENABLE_PLAYBACK_CONTROL")
 
 app.include_router(ws_router.router, prefix="/ws", tags=["WebSockets"])
 

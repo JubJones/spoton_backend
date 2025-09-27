@@ -587,6 +587,15 @@ class Settings(BaseSettings):
         description="Override idle timeout (in seconds) for detection tasks; falls back to STREAMING_CLIENT_IDLE_TIMEOUT_SECONDS when unset"
     )
 
+    ENABLE_PLAYBACK_CONTROL: bool = Field(
+        default=True,
+        description="Enable playback control API endpoints and coordination services",
+    )
+    PLAYBACK_CONTROL_TIMEOUT_SECONDS: float = Field(
+        default=1.0,
+        description="Maximum seconds to wait for playback pause/resume acknowledgement",
+    )
+
     # Lazy initialization toggles to reduce cold start
     PRELOAD_TRACKER_FACTORY: bool = Field(default=True, description="Preload prototype tracker at startup")
     PRELOAD_HOMOGRAPHY: bool = Field(default=True, description="Preload homography matrices at startup")

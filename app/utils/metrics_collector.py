@@ -181,6 +181,8 @@ class ProductionMetricsCollector:
         self.pipeline_metrics = PipelineMetrics()
         self.resource_metrics = ResourceMetrics()
         self.quality_metrics = QualityMetrics()
+        self.playback_transition_counts: Dict[str, int] = defaultdict(int)
+        self.playback_pause_latencies: deque = deque(maxlen=200)
         
         # Alert thresholds
         self.alert_thresholds = {
@@ -355,7 +357,7 @@ class ProductionMetricsCollector:
                               websocket_connections: int, alerts_active: int):
         """
         Record business and operational metrics.
-        
+
         Args:
             active_tasks: Number of active processing tasks
             total_cameras: Total number of cameras being processed
@@ -372,6 +374,34 @@ class ProductionMetricsCollector:
             
         except Exception as e:
             logger.error(f"Error recording business metrics: {e}")
+
+    def record_playback_transition(self, previous_state: str, next_state: str) -> None:
+        """Record a playback state transition event."""
+
+        try:
+            key = f"{previous_state.lower()}_to_{next_state.lower()}"
+            self.playback_transition_counts[key] += 1
+            self._add_metric_point(
+                'playback_transitions_total',
+                1,
+                time.time(),
+                labels={'transition': key},
+            )
+        except Exception as error:
+            logger.debug(f"Error recording playback transition metric: {error}")
+
+    def record_playback_pause_latency(self, latency_seconds: float) -> None:
+        """Record latency between pause command and acknowledgement."""
+
+        try:
+            self.playback_pause_latencies.append(latency_seconds)
+            self._add_metric_point(
+                'playback_pause_latency_seconds',
+                latency_seconds,
+                time.time(),
+            )
+        except Exception as error:
+            logger.debug(f"Error recording playback latency metric: {error}")
     
     def _add_metric_point(self, metric_name: str, value: float, timestamp: float,
                          labels: Dict[str, str] = None, metadata: Dict[str, Any] = None):
@@ -567,6 +597,17 @@ class ProductionMetricsCollector:
                     'uptime_percentage': self.quality_metrics.uptime_percentage,
                     'error_rate_percent': self.quality_metrics.error_rate
                 },
+                'playback_metrics': {
+                    'transition_counts': dict(self.playback_transition_counts),
+                    'average_pause_latency_ms': (
+                        statistics.mean(self.playback_pause_latencies) * 1000
+                        if self.playback_pause_latencies
+                        else 0.0
+                    ),
+                    'recent_pause_latency_ms': [
+                        latency * 1000 for latency in list(self.playback_pause_latencies)[-5:]
+                    ],
+                },
                 'alerts': {
                     'active_alerts_count': len(self.active_alerts),
                     'active_alerts': list(self.active_alerts.values()),
@@ -637,7 +678,23 @@ class ProductionMetricsCollector:
             lines.append(f"# HELP spoton_active_alerts Number of active alerts")
             lines.append(f"# TYPE spoton_active_alerts gauge")
             lines.append(f"spoton_active_alerts {len(self.active_alerts)}")
-            
+
+            lines.append("# HELP spoton_playback_transitions_total Playback state transition counts")
+            lines.append("# TYPE spoton_playback_transitions_total counter")
+            for transition, count in self.playback_transition_counts.items():
+                lines.append(
+                    f'spoton_playback_transitions_total{{transition="{transition}"}} {count}'
+                )
+
+            avg_latency = (
+                statistics.mean(self.playback_pause_latencies)
+                if self.playback_pause_latencies
+                else 0.0
+            )
+            lines.append("# HELP spoton_playback_pause_latency_seconds Average pause acknowledgement latency")
+            lines.append("# TYPE spoton_playback_pause_latency_seconds gauge")
+            lines.append(f"spoton_playback_pause_latency_seconds {avg_latency}")
+
             return "\n".join(lines)
             
         except Exception as e:

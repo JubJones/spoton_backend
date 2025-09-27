@@ -12,7 +12,7 @@ import asyncio
 from pathlib import Path
 import uuid
 from uuid import UUID
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, List, Tuple, TYPE_CHECKING
 import logging
 from datetime import datetime, timezone
 import time
@@ -24,6 +24,10 @@ from app.services.video_data_manager_service import VideoDataManagerService
 from app.utils.asset_downloader import AssetDownloader
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
 from app.api.websockets.frame_handler import frame_handler
+
+if TYPE_CHECKING:
+    from app.services.playback_status_store import PlaybackStatusStore
+    from app.services.task_runtime_registry import TaskRuntimeRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -62,8 +66,45 @@ class RawVideoService:
         
         # Performance tracking
         self.streaming_times: List[float] = []
-        
+
+        # Playback coordination (optional dependencies)
+        self.playback_status_store: Optional["PlaybackStatusStore"] = None
+        self.playback_runtime_registry: Optional["TaskRuntimeRegistry"] = None
+
         logger.info("RawVideoService initialized")
+
+    def attach_playback_interfaces(
+        self,
+        *,
+        status_store: Optional["PlaybackStatusStore"] = None,
+        runtime_registry: Optional["TaskRuntimeRegistry"] = None,
+    ) -> None:
+        """Attach playback coordination collaborators provided via dependency injection."""
+
+        if status_store is not None:
+            self.playback_status_store = status_store
+        if runtime_registry is not None:
+            self.playback_runtime_registry = runtime_registry
+
+    async def _register_playback_task(self, task_id: UUID) -> None:
+        if self.playback_runtime_registry is not None:
+            await self.playback_runtime_registry.register(str(task_id))
+        if self.playback_status_store is not None:
+            await self.playback_status_store.get_status(str(task_id))
+
+    async def _cleanup_playback_task(self, task_id: UUID) -> None:
+        if self.playback_runtime_registry is not None:
+            await self.playback_runtime_registry.remove(str(task_id))
+
+    async def _wait_for_playback(self, task_id: UUID) -> None:
+        if self.playback_runtime_registry is not None:
+            await self.playback_runtime_registry.wait_until_playing(str(task_id))
+
+    async def _record_playback_progress(self, task_id: UUID, frame_index: int) -> None:
+        if self.playback_runtime_registry is not None:
+            self.playback_runtime_registry.update_frame_index(str(task_id), frame_index)
+        if self.playback_status_store is not None:
+            await self.playback_status_store.update_last_frame_index(str(task_id), frame_index)
 
     def _get_client_timeout_config(self, *, detection_mode: bool = False) -> Tuple[float, float]:
         """Resolve grace and idle timeouts for the current streaming mode."""
@@ -199,6 +240,8 @@ class RawVideoService:
             self.tasks[task_id] = task_state
             self.active_tasks.add(task_id)
             self.environment_tasks[environment_id] = task_id
+
+            await self._register_playback_task(task_id)
             
             # Update statistics
             self.streaming_stats["total_tasks_created"] += 1
@@ -284,6 +327,7 @@ class RawVideoService:
             if environment_id in self.environment_tasks:
                 del self.environment_tasks[environment_id]
             self._clear_client_watch(task_id)
+            await self._cleanup_playback_task(task_id)
     
     async def _download_video_data(self, environment_id: str) -> Dict[str, Any]:
         """Download video data for the environment."""
@@ -381,6 +425,12 @@ class RawVideoService:
                     logger.info(f"📡 RAW STREAM: Task {task_id} was stopped, ending streaming at frame {frame_index}")
                     break
 
+                await self._wait_for_playback(task_id)
+
+                if task_id not in self.active_tasks:
+                    logger.info(f"📡 RAW STREAM: Task {task_id} stopped during pause wait")
+                    break
+
                 if not self._should_continue_stream(task_id, detection_mode=False):
                     aborted_due_to_no_clients = True
                     break
@@ -465,10 +515,12 @@ class RawVideoService:
                         success_count += 1
                 
                 success = success_count > 0
-                
+
                 if success:
                     self.streaming_stats["total_frames_streamed"] += len(camera_frames)
-                    
+
+                    await self._record_playback_progress(task_id, frame_index)
+
                     # Log progress periodically
                     if frame_index % 30 == 0:  # Every 30 frames
                         progress = (frame_index / total_frames) * 0.25 + 0.75  # 0.75-1.0 range

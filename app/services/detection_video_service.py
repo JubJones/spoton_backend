@@ -17,6 +17,7 @@ from pathlib import Path
 import uuid
 import time
 import logging
+import math
 from typing import Dict, Any, Optional, List, Tuple, Set
 from datetime import datetime, timezone
 import numpy as np
@@ -250,22 +251,73 @@ class DetectionVideoService(RawVideoService):
 
         # Step 2: Tracking integration (via tracker factory)
         tracks: List[Dict[str, Any]] = []
+        tracker_used = False
         try:
             if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
                 tracker = self.camera_trackers.get(camera_id)
                 # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
                 np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
                 tracked_np = await tracker.update(np_dets, frame)
+                if tracked_np.size == 0:
+                    logger.info(
+                        "Tracker produced no tracks for %s (detections=%s)",
+                        camera_id,
+                        len(detection_data.get("detections", []))
+                    )
+                else:
+                    logger.debug(
+                        "Tracker output for %s frame %s: %s",
+                        camera_id,
+                        frame_number,
+                        tracked_np[:, 4].tolist() if tracked_np.ndim == 2 and tracked_np.shape[1] > 4 else tracked_np.tolist(),
+                    )
                 # Convert tracked output to track dicts
                 tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                if tracks:
+                    logger.info("Tracker produced %s tracks for %s", len(tracks), camera_id)
                 # Enhance with spatial intelligence (map coords + short trajectory)
                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                tracker_used = True
+            else:
+                logger.debug(
+                    "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
+                    camera_id,
+                    settings.TRACKING_ENABLED,
+                    camera_id in self.camera_trackers,
+                )
         except Exception as e:
             logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
             tracks = []
 
         # Step 3: Attach tracks to detection data for downstream consumers
         detection_data["tracks"] = tracks
+
+        try:
+            self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
+            if tracker_used and logger.isEnabledFor(logging.DEBUG):
+                sample = [
+                    {
+                        "detection_id": det.get("detection_id"),
+                        "track_id": det.get("track_id"),
+                        "global_id": det.get("global_id"),
+                        "iou": det.get("track_assignment_iou"),
+                        "center_dist": det.get("track_assignment_center_distance"),
+                    }
+                    for det in (detection_data.get("detections") or [])[:3]
+                ]
+                logger.debug(
+                    "Detection-track association (camera=%s frame=%s): %s",
+                    camera_id,
+                    frame_number,
+                    sample,
+                )
+        except Exception as exc:
+            logger.debug(
+                "Detection-track association failed for %s frame %s: %s",
+                camera_id,
+                frame_number,
+                exc,
+            )
         
         # Frontend: emit auxiliary events (non-blocking)
         try:
@@ -856,6 +908,104 @@ class DetectionVideoService(RawVideoService):
             logger.warning(f"Failed converting tracker output to track data: {e}")
             return []
 
+    def _associate_detections_with_tracks(
+        self,
+        camera_id: str,
+        detections: Optional[List[Dict[str, Any]]],
+        tracks: Optional[List[Dict[str, Any]]],
+    ) -> None:
+        """Promote tracker identifiers onto detection entries for stability.
+
+        Matches detections to tracks using IoU and center distance so the frontend can
+        rely on a consistent `detection_id` instead of frame-local indexes.
+        """
+
+        if not detections or not tracks:
+            return
+
+        assigned_track_ids: Set[int] = set()
+
+        for detection in detections:
+            bbox = detection.get("bbox") or {}
+            x1 = bbox.get("x1")
+            y1 = bbox.get("y1")
+            x2 = bbox.get("x2")
+            y2 = bbox.get("y2")
+
+            if None in (x1, y1, x2, y2):
+                continue
+
+            detection_bbox = [float(x1), float(y1), float(x2), float(y2)]
+            det_center = ((detection_bbox[0] + detection_bbox[2]) / 2.0, detection_bbox[3])
+
+            best_track: Optional[Dict[str, Any]] = None
+            best_iou = 0.0
+            best_center_dist = float("inf")
+
+            for track in tracks:
+                track_bbox = track.get("bbox_xyxy")
+                if not track_bbox or len(track_bbox) != 4:
+                    continue
+
+                track_id = track.get("track_id")
+                if track_id is None:
+                    continue
+
+                iou = self._calculate_iou(track_bbox, detection_bbox)
+                track_center = ((float(track_bbox[0]) + float(track_bbox[2])) / 2.0, float(track_bbox[3]))
+                center_dist = math.hypot(track_center[0] - det_center[0], track_center[1] - det_center[1])
+
+                already_assigned = track_id in assigned_track_ids
+                if (
+                    iou > best_iou + 1e-6
+                    or (
+                        abs(iou - best_iou) <= 1e-6
+                        and (center_dist < best_center_dist - 1e-6 or (center_dist <= best_center_dist + 1e-6 and not already_assigned))
+                    )
+                ):
+                    best_track = track
+                    best_iou = iou
+                    best_center_dist = center_dist
+
+            if not best_track:
+                continue
+
+            track_id = best_track.get("track_id")
+            if track_id is None:
+                continue
+
+            if best_iou < 0.1 and best_center_dist > 96.0:
+                # Avoid weak matches that would cause identity jumps.
+                continue
+
+            assigned_track_ids.add(track_id)
+
+            original_detection_id = detection.get("detection_id")
+            if original_detection_id and original_detection_id != f"track_{track_id:03d}":
+                detection.setdefault("metadata", {})
+                if isinstance(detection["metadata"], dict):
+                    detection["metadata"].setdefault("original_detection_id", original_detection_id)
+                else:
+                    detection["metadata"] = {"original_detection_id": original_detection_id}
+
+            detection["detection_id"] = f"track_{track_id:03d}"
+            detection["track_id"] = track_id
+
+            global_id = best_track.get("global_id")
+            detection["global_id"] = str(global_id) if global_id is not None else None
+            detection["tracking_key"] = f"{camera_id}:track:{track_id}"
+            detection["track_assignment_iou"] = round(best_iou, 4)
+            detection["track_assignment_center_distance"] = round(best_center_dist, 2)
+
+            logger.debug(
+                "Detection %s (camera=%s) associated with track %s -> detection_id=%s iou=%.3f",
+                original_detection_id,
+                camera_id,
+                track_id,
+                detection["detection_id"],
+                best_iou,
+            )
+
     @staticmethod
     def _calculate_iou(box_a: List[float], box_b: List[float]) -> float:
         try:
@@ -1179,6 +1329,7 @@ class DetectionVideoService(RawVideoService):
             except Exception:
                 pass
             self._clear_client_watch(task_id)
+            await self._cleanup_playback_task(task_id)
     
     async def _process_frames_simple_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """
@@ -1206,6 +1357,12 @@ class DetectionVideoService(RawVideoService):
             while frame_index < total_frames:
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 SIMPLE DETECTION: Task {task_id} was stopped")
+                    break
+
+                await self._wait_for_playback(task_id)
+
+                if task_id not in self.active_tasks:
+                    logger.info(f"🔍 SIMPLE DETECTION: Task {task_id} stopped during pause wait")
                     break
 
                 if not self._should_continue_stream(task_id, detection_mode=True):
@@ -1252,7 +1409,9 @@ class DetectionVideoService(RawVideoService):
                         task_id, "PROCESSING", progress,
                         f"Processed frame {frame_index}/{total_frames} - {frames_processed} detections sent"
                     )
-                
+
+                await self._record_playback_progress(task_id, frame_index)
+
                 frame_index += 1
                 
                 # Small delay to prevent overwhelming WebSocket clients
@@ -1307,6 +1466,12 @@ class DetectionVideoService(RawVideoService):
                     logger.info(f"🔍 PHASE 2 PROCESSING: Task {task_id} was stopped")
                     break
 
+                await self._wait_for_playback(task_id)
+
+                if task_id not in self.active_tasks:
+                    logger.info(f"🔍 PHASE 2 PROCESSING: Task {task_id} stopped during pause wait")
+                    break
+
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True
                     break
@@ -1351,7 +1516,9 @@ class DetectionVideoService(RawVideoService):
                         task_id, "PROCESSING", progress,
                         f"Streaming frame {frame_index}/{total_frames} - {frames_streamed} updates sent"
                     )
-                
+
+                await self._record_playback_progress(task_id, frame_index)
+
                 frame_index += 1
                 
                 # Small delay to prevent overwhelming WebSocket clients

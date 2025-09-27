@@ -31,6 +31,12 @@ from app.services.analytics_engine import AnalyticsEngine
 from app.api.websockets import binary_websocket_manager as websocket_manager
 from app.services.raw_video_service import raw_video_service, RawVideoService
 from app.services.detection_video_service import detection_video_service, DetectionVideoService
+from app.services.playback_status_store import PlaybackStatusStore
+from app.services.task_runtime_registry import TaskRuntimeRegistry
+from app.dependencies import (
+    get_playback_status_store as global_playback_status_store,
+    get_task_runtime_registry as global_task_runtime_registry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -209,14 +215,30 @@ def get_analytics_service() -> AnalyticsEngine:
 
 
 @lru_cache()
-def get_raw_video_service() -> RawVideoService:
+def get_raw_video_service(
+    playback_status_store: PlaybackStatusStore = Depends(global_playback_status_store),
+    playback_runtime_registry: TaskRuntimeRegistry = Depends(global_task_runtime_registry),
+) -> RawVideoService:
     """Dependency provider for RawVideoService."""
     logger.debug("Initializing RawVideoService instance (or returning cached).")
-    return raw_video_service
+    service = raw_video_service
+    service.attach_playback_interfaces(
+        status_store=playback_status_store,
+        runtime_registry=playback_runtime_registry,
+    )
+    return service
 
 
 @lru_cache()
-def get_detection_video_service() -> DetectionVideoService:
+def get_detection_video_service(
+    playback_status_store: PlaybackStatusStore = Depends(global_playback_status_store),
+    playback_runtime_registry: TaskRuntimeRegistry = Depends(global_task_runtime_registry),
+) -> DetectionVideoService:
     """Dependency provider for DetectionVideoService."""
     logger.debug("Initializing DetectionVideoService instance (or returning cached).")
-    return detection_video_service
+    service = detection_video_service
+    service.attach_playback_interfaces(
+        status_store=playback_status_store,
+        runtime_registry=playback_runtime_registry,
+    )
+    return service
