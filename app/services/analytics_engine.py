@@ -14,7 +14,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass, field
-from collections import defaultdict, deque
+from collections import deque
 import statistics
 import numpy as np
 from sklearn.cluster import DBSCAN
@@ -100,21 +100,40 @@ class AnalyticsEngine:
             'reports_generated': 0
         }
         
+        # Lifecycle flags
+        self._initialized = False
+        self._real_time_task: Optional[asyncio.Task] = None
+        self._redis_retry_at: Optional[datetime] = None
+        self._db_retry_at: Optional[datetime] = None
+        self._retry_interval = timedelta(minutes=2)
+        
         logger.info("AnalyticsEngine initialized")
     
     async def initialize(self):
         """Initialize the analytics engine."""
         try:
+            if self._initialized:
+                logger.info("AnalyticsEngine already initialized; skipping")
+                return
+            
             # Start real-time analytics processing
-            asyncio.create_task(self._real_time_analytics_loop())
+            self._real_time_task = asyncio.create_task(
+                self._real_time_analytics_loop(),
+                name="spoton-analytics-real-time-loop"
+            )
             
             # Initialize prediction models
             await self._initialize_prediction_models()
             
+            self._initialized = True
             logger.info("AnalyticsEngine initialized successfully")
             
         except Exception as e:
             logger.error(f"Error initializing AnalyticsEngine: {e}")
+            self._initialized = False
+            if self._real_time_task is not None:
+                self._real_time_task.cancel()
+                self._real_time_task = None
             raise
     
     # Real-Time Analytics
@@ -135,14 +154,14 @@ class AnalyticsEngine:
         try:
             current_time = datetime.now(timezone.utc)
             
-            # Get active persons from cache
-            active_persons = await tracking_cache.get_active_persons()
+            # Get active persons from cache (with graceful degradation)
+            active_persons = await self._fetch_active_person_states(current_time)
             
-            # Calculate metrics
-            detection_rate = await self._calculate_detection_rate()
-            average_confidence = await self._calculate_average_confidence()
-            camera_loads = await self._calculate_camera_loads()
-            performance_metrics = await self._get_performance_metrics()
+            # Calculate metrics with dependency-aware backoff
+            detection_rate = await self._calculate_detection_rate(current_time)
+            average_confidence = await self._calculate_average_confidence(current_time)
+            camera_loads = self._derive_camera_loads(active_persons)
+            performance_metrics = await self._get_performance_metrics(current_time)
             
             # Store metrics
             metrics = RealTimeMetrics(
@@ -171,81 +190,119 @@ class AnalyticsEngine:
         except Exception as e:
             logger.error(f"Error processing real-time metrics: {e}")
     
-    async def _calculate_detection_rate(self) -> float:
+    async def _calculate_detection_rate(self, current_time: datetime) -> float:
         """Calculate current detection rate."""
+        stats = await self._get_detection_stats(
+            lookback=timedelta(minutes=1),
+            current_time=current_time
+        )
+        total = stats.get('total_detections', 0)
         try:
-            # Get recent detection statistics
-            end_time = datetime.now(timezone.utc)
-            start_time = end_time - timedelta(minutes=1)
-            
-            stats = await integrated_db_service.get_detection_statistics(
-                environment_id="default",
-                start_time=start_time,
-                end_time=end_time
-            )
-            
-            return stats.get('total_detections', 0) / 60.0  # detections per second
-            
-        except Exception as e:
-            logger.error(f"Error calculating detection rate: {e}")
+            return total / 60.0
+        except Exception:
             return 0.0
     
-    async def _calculate_average_confidence(self) -> float:
+    async def _calculate_average_confidence(self, current_time: datetime) -> float:
         """Calculate average detection confidence."""
+        stats = await self._get_detection_stats(
+            lookback=timedelta(minutes=5),
+            current_time=current_time
+        )
+        return float(stats.get('avg_confidence', 0.0) or 0.0)
+    
+    async def _get_performance_metrics(self, current_time: datetime) -> Dict[str, float]:
+        """Get current performance metrics."""
+        if self._redis_retry_at and current_time < self._redis_retry_at:
+            return {}
+
         try:
-            # Get recent detection statistics
-            end_time = datetime.now(timezone.utc)
-            start_time = end_time - timedelta(minutes=5)
-            
+            if getattr(tracking_cache, 'redis', None) is None:
+                await tracking_cache.initialize()
+
+            cache_stats = await tracking_cache.get_cache_stats()
+            self._redis_retry_at = None
+
+            hits = cache_stats.get('cache_stats', {}).get('hits', 0)
+            misses = cache_stats.get('cache_stats', {}).get('misses', 0)
+            total = max(1, hits + misses)
+
+            return {
+                'cache_hit_rate': hits / total,
+                'memory_usage': 0.0,
+                'processing_latency': 0.0,
+                'error_rate': 0.0,
+            }
+
+        except Exception as e:
+            logger.debug(f"Performance metrics unavailable (cache dependency issue): {e}")
+            self._redis_retry_at = current_time + self._retry_interval
+            setattr(tracking_cache, 'redis', None)
+            return {}
+
+    async def _fetch_active_person_states(self, current_time: datetime) -> List[Any]:
+        """Fetch active persons with dependency-aware backoff."""
+        if self._redis_retry_at and current_time < self._redis_retry_at:
+            return []
+
+        try:
+            if getattr(tracking_cache, 'redis', None) is None:
+                await tracking_cache.initialize()
+
+            active_persons = await tracking_cache.get_active_persons()
+            self._redis_retry_at = None
+            return active_persons
+
+        except Exception as e:
+            logger.debug(f"Active person cache unavailable: {e}")
+            self._redis_retry_at = current_time + self._retry_interval
+            setattr(tracking_cache, 'redis', None)
+            return []
+
+    async def _get_detection_stats(self, lookback: timedelta, current_time: datetime) -> Dict[str, Any]:
+        """Retrieve detection statistics with database retry backoff."""
+        if self._db_retry_at and current_time < self._db_retry_at:
+            return {}
+
+        end_time = current_time
+        start_time = end_time - lookback
+
+        try:
             stats = await integrated_db_service.get_detection_statistics(
                 environment_id="default",
                 start_time=start_time,
                 end_time=end_time
             )
-            
-            return stats.get('avg_confidence', 0.0)
-            
+
+            if stats and 'total_detections' in stats:
+                self._db_retry_at = None
+                return stats
+
+            # If the service returned an empty result, apply retry backoff
+            logger.debug("Detection statistics unavailable or empty; applying backoff")
+
         except Exception as e:
-            logger.error(f"Error calculating average confidence: {e}")
-            return 0.0
-    
-    async def _calculate_camera_loads(self) -> Dict[str, int]:
-        """Calculate current load per camera."""
+            logger.debug(f"Detection statistics query failed: {e}")
+
+        self._db_retry_at = current_time + self._retry_interval
+        return {}
+
+    def _derive_camera_loads(self, active_persons: List[Any]) -> Dict[str, int]:
+        """Build camera load mapping from active person state."""
+        camera_loads: Dict[str, int] = {}
         try:
-            camera_loads = {}
-            
-            # Get active persons by camera
-            active_persons = await tracking_cache.get_active_persons()
-            
             for person in active_persons:
-                camera_id = person.last_seen_camera
-                camera_loads[camera_id] = camera_loads.get(camera_id, 0) + 1
-            
-            return camera_loads
-            
+                camera_id = None
+                if isinstance(person, dict):
+                    camera_id = person.get('last_seen_camera')
+                else:
+                    camera_id = getattr(person, 'last_seen_camera', None)
+
+                if camera_id:
+                    camera_loads[camera_id] = camera_loads.get(camera_id, 0) + 1
         except Exception as e:
-            logger.error(f"Error calculating camera loads: {e}")
-            return {}
-    
-    async def _get_performance_metrics(self) -> Dict[str, float]:
-        """Get current performance metrics."""
-        try:
-            # Get cache statistics
-            cache_stats = await tracking_cache.get_cache_stats()
-            
-            # Extract relevant performance metrics
-            return {
-                'cache_hit_rate': cache_stats.get('cache_stats', {}).get('hits', 0) / 
-                                 max(1, cache_stats.get('cache_stats', {}).get('hits', 0) + 
-                                     cache_stats.get('cache_stats', {}).get('misses', 0)),
-                'memory_usage': 0.0,  # Would be implemented based on system monitoring
-                'processing_latency': 0.0,  # Would be implemented based on timing metrics
-                'error_rate': 0.0  # Would be implemented based on error tracking
-            }
-            
-        except Exception as e:
-            logger.error(f"Error getting performance metrics: {e}")
-            return {}
+            logger.debug(f"Failed to derive camera loads: {e}")
+
+        return camera_loads
     
     # Person Behavior Analysis
     async def analyze_person_behavior(
@@ -919,6 +976,21 @@ class AnalyticsEngine:
             'reports_generated': 0
         }
         logger.info("Analytics statistics reset")
+
+    async def shutdown(self):
+        """Shutdown analytics engine background tasks."""
+        if self._real_time_task:
+            task = self._real_time_task
+            self._real_time_task = None
+            if not task.done():
+                task.cancel()
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    logger.info("Real-time analytics loop cancelled during shutdown")
+                except Exception as e:
+                    logger.warning(f"Error while waiting for analytics loop shutdown: {e}")
+        self._initialized = False
 
 
 # Global analytics engine instance

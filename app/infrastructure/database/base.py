@@ -104,7 +104,8 @@ async def create_hypertables():
                 "SELECT create_hypertable('tracking_events', 'timestamp', if_not_exists => TRUE);",
                 "SELECT create_hypertable('detection_events', 'timestamp', if_not_exists => TRUE);",
                 "SELECT create_hypertable('person_trajectories', 'timestamp', if_not_exists => TRUE);",
-                "SELECT create_hypertable('analytics_aggregations', 'time_bucket', if_not_exists => TRUE);"
+                "SELECT create_hypertable('analytics_aggregations', 'time_bucket', if_not_exists => TRUE);",
+                "SELECT create_hypertable('analytics_totals', 'bucket_start', if_not_exists => TRUE);"
             ]
             
             for query in hypertable_queries:

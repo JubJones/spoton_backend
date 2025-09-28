@@ -53,6 +53,27 @@ class PathPredictionRequest(BaseModel):
     prediction_horizon: int = Field(30, description="Prediction horizon in seconds")
 
 
+# Dashboard Endpoint
+@router.get("/dashboard")
+async def get_analytics_dashboard(
+    environment_id: str = Query("default", description="Environment identifier"),
+    window_hours: int = Query(24, ge=1, le=168, description="Hours of history to include"),
+    uptime_days: int = Query(7, ge=1, le=30, description="Days of uptime history"),
+):
+    """Return consolidated analytics snapshot for dashboard rendering."""
+    snapshot = await database_integration_service.get_dashboard_snapshot(
+        environment_id=environment_id,
+        window_hours=window_hours,
+        uptime_history_days=uptime_days,
+    )
+
+    return {
+        "status": "success",
+        "data": snapshot,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+
+
 # Real-Time Analytics Endpoints
 @router.get("/real-time/metrics")
 async def get_real_time_metrics():

@@ -20,6 +20,7 @@ from app.services.environment_configuration_service import (
     initialize_environment_configuration_service,
     get_environment_configuration_service,
 )
+from app.services.analytics_engine import analytics_engine
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -157,6 +158,12 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             logger.debug(f"Could not inject services into detection video service: {e}")
 
+        # Initialize analytics engine so real-time metrics are populated
+        try:
+            await analytics_engine.initialize()
+        except Exception as e:
+            logger.warning(f"Analytics engine initialization encountered issues (non-fatal): {e}")
+
         # Detector is initialized on-demand by services; keep None for now
         app_instance.state.detector = None
     except Exception as e:
@@ -166,6 +173,10 @@ async def lifespan(app_instance: FastAPI):
         yield
     finally:
         logger.info("Application shutdown sequence initiated...")
+        try:
+            await analytics_engine.shutdown()
+        except Exception as e:
+            logger.warning(f"Analytics engine shutdown encountered issues: {e}")
         # Graceful shutdown: cancel background tasks
         try:
             cleanup_task = getattr(app_instance.state, '_trail_cleanup_task', None)

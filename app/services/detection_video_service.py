@@ -35,6 +35,7 @@ from app.services.homography_service import HomographyService
 from app.services.handoff_detection_service import HandoffDetectionService
 from app.services.trail_management_service import TrailManagementService
 from app.services.camera_tracker_factory import CameraTrackerFactory
+from app.tracing import analytics_event_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -577,6 +578,31 @@ class DetectionVideoService(RawVideoService):
                             detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
+
+                            # Persist aggregated analytics counters for dashboard views
+                            environment_id = None
+                            camera_config = data.get("config")
+                            if camera_config is not None:
+                                environment_id = getattr(camera_config, "env_id", None)
+                            environment_id = environment_id or "default"
+
+                            detection_count = detection_data.get("detection_count", 0)
+                            detections_payload = detection_data.get("detections", []) or []
+                            average_confidence = None
+                            if detection_count > 0:
+                                average_confidence = sum(
+                                    float(det.get("confidence", 0.0)) for det in detections_payload
+                                ) / detection_count
+
+                            await analytics_event_tracer.record_detection_batch(
+                                environment_id=environment_id,
+                                camera_id=camera_id,
+                                detections=detection_count,
+                                unique_entities=detection_count,
+                                average_confidence=average_confidence,
+                                trace_id=str(task_id),
+                                timestamp=datetime.now(timezone.utc),
+                            )
                             camera_detections[camera_id] = detection_data
                             
                             # Phase 2: Send real-time detection update via WebSocket
@@ -612,6 +638,19 @@ class DetectionVideoService(RawVideoService):
                 cap = data.get("video_capture")
                 if cap:
                     cap.release()
+
+            # Record uptime snapshots for the processed cameras (simplified 100% uptime assumption)
+            for camera_id, data in video_data.items():
+                camera_config = data.get("config")
+                environment_id = getattr(camera_config, "env_id", None) if camera_config else None
+                environment_id = environment_id or "default"
+                await analytics_event_tracer.record_camera_uptime(
+                    environment_id=environment_id,
+                    camera_id=camera_id,
+                    uptime_percent=100.0,
+                    samples=1,
+                    trace_id=str(task_id),
+                )
 
             if aborted_due_to_no_clients:
                 reason = "Detection stopped - no active WebSocket clients"

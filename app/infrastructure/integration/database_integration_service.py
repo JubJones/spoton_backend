@@ -14,6 +14,7 @@ from typing import List, Optional, Dict, Any, Tuple
 from contextlib import asynccontextmanager
 
 from app.infrastructure.database.integrated_database_service import integrated_db_service
+from app.infrastructure.database.repositories.analytics_totals_repository import DEFAULT_BUCKET_SECONDS
 from app.infrastructure.cache.tracking_cache import tracking_cache
 from app.domains.detection.entities.detection import Detection, BoundingBox
 from typing import Any
@@ -487,6 +488,81 @@ class DatabaseIntegrationService:
             logger.error(f"Error getting analytics summary: {e}")
             self.service_stats['failed_operations'] += 1
             return {}
+
+    async def record_uptime_snapshot(
+        self,
+        environment_id: str,
+        camera_id: Optional[CameraID],
+        uptime_percent: float,
+        snapshot_day: Optional[datetime] = None,
+        samples: int = 1,
+    ) -> None:
+        """Proxy to record uptime information for dashboard analytics."""
+        try:
+            await integrated_db_service.record_uptime_snapshot(
+                environment_id=environment_id,
+                camera_id=str(camera_id) if camera_id else None,
+                uptime_percent=uptime_percent,
+                snapshot_day=snapshot_day,
+                samples=samples,
+            )
+        except Exception as e:
+            logger.warning(f"Error recording uptime snapshot: {e}")
+
+    async def record_detection_batch(
+        self,
+        environment_id: str,
+        camera_id: Optional[CameraID],
+        detections: int,
+        unique_entities: int,
+        average_confidence: Optional[float],
+        bucket_size_seconds: int = DEFAULT_BUCKET_SECONDS,
+    ) -> None:
+        """Bridge method to record aggregated detection batches."""
+        try:
+            await integrated_db_service.record_detection_batch(
+                environment_id=environment_id,
+                camera_id=str(camera_id) if camera_id else None,
+                detections=detections,
+                unique_entities=unique_entities,
+                average_confidence=average_confidence,
+                bucket_size_seconds=bucket_size_seconds,
+            )
+        except Exception as e:
+            logger.warning(f"Error recording detection batch aggregate: {e}")
+
+    async def get_dashboard_snapshot(
+        self,
+        environment_id: str,
+        window_hours: int = 24,
+        uptime_history_days: int = 7,
+    ) -> Dict[str, Any]:
+        """Get consolidated dashboard analytics snapshot."""
+        try:
+            return await integrated_db_service.get_dashboard_snapshot(
+                environment_id=environment_id,
+                window_hours=window_hours,
+                uptime_history_days=uptime_history_days,
+            )
+        except Exception as e:
+            logger.error(f"Error getting dashboard snapshot: {e}")
+            self.service_stats['failed_operations'] += 1
+            return {
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "summary": {
+                    "total_detections": 0,
+                    "average_confidence_percent": 0.0,
+                    "system_uptime_percent": 0.0,
+                    "uptime_delta_percent": 0.0,
+                },
+                "cameras": [],
+                "charts": {
+                    "detections_per_bucket": [],
+                    "average_confidence_trend": [],
+                    "uptime_trend": [],
+                },
+                "notes": ["Dashboard snapshot unavailable; check server logs."],
+            }
     
     # Maintenance and Utilities
     async def cleanup_old_data(self, days_to_keep: int = 30) -> Dict[str, Any]:

@@ -72,14 +72,15 @@ ws.onmessage = (event) => {
 | `/api/v1/environments/{environmentId}/zones` | GET | Zone configuration |
 | `/api/v1/environments/{environmentId}/sessions` | GET | Session data |
 
-### Analytics (Real-time)
+### Analytics
 
 | Endpoint | Method | Purpose |
 |----------|---------|----------|
-| `/api/v1/analytics/real-time/metrics` | GET | Real-time metrics |
-| `/api/v1/analytics/real-time/active-persons` | GET | Active persons count |
-| `/api/v1/analytics/real-time/camera-loads` | GET | Camera processing loads |
-| `/api/v1/analytics/system/statistics` | GET | System statistics |
+| `/api/v1/analytics/dashboard` | GET | Aggregated totals for dashboard cards & charts |
+| `/api/v1/analytics/real-time/metrics` | GET | Live metrics snapshot (if enabled) |
+| `/api/v1/analytics/real-time/active-persons` | GET | Active persons roster |
+| `/api/v1/analytics/real-time/camera-loads` | GET | Current load per camera |
+| `/api/v1/analytics/system/statistics` | GET | Analytics + DB service health |
 
 ## Integration Patterns
 
@@ -126,6 +127,78 @@ const playback = await fetch(`/api/v1/controls/${taskId}/status`).then(r => r.js
 ```
 
 > **Tip**: The backend debounces repeated transitions and resumes from the saved frame index, so toggling quickly will not duplicate frames.
+
+### 5. Analytics Dashboard Snapshot
+```javascript
+// Fetch a single payload containing totals, camera cards, and chart data
+const dashboard = await fetch(
+  '/api/v1/analytics/dashboard?environment_id=factory&window_hours=24&uptime_days=14'
+).then(r => r.json());
+
+const { summary, cameras, charts } = dashboard.data;
+
+// Example usage
+renderSummaryCards({
+  totalDetections: summary.total_detections,
+  avgConfidence: summary.average_confidence_percent,
+  systemUptime: summary.system_uptime_percent,
+  uptimeDelta: summary.uptime_delta_percent,
+});
+
+renderCameraTiles(
+  cameras.map((camera) => ({
+    id: camera.camera_id,
+    detections: camera.detections,
+    unique: camera.unique_entities,
+    confidence: camera.average_confidence_percent,
+    uptime: camera.uptime_percent,
+  }))
+);
+
+renderDetectionChart(charts.detections_per_bucket);
+renderConfidenceTrend(charts.average_confidence_trend);
+renderUptimeTrend(charts.uptime_trend);
+```
+
+**Response Shape**
+```json
+{
+  "status": "success",
+  "data": {
+    "generated_at": "2025-01-15T10:00:00Z",
+    "summary": {
+      "total_detections": 12840,
+      "average_confidence_percent": 83.1,
+      "system_uptime_percent": 97.5,
+      "uptime_delta_percent": 2.0
+    },
+    "cameras": [
+      {
+        "camera_id": "c01",
+        "detections": 280,
+        "unique_entities": 15,
+        "average_confidence_percent": 82.0,
+        "uptime_percent": 97.5
+      }
+    ],
+    "charts": {
+      "detections_per_bucket": [
+        { "timestamp": "2025-01-15T07:00:00Z", "detections": 42 }
+      ],
+      "average_confidence_trend": [
+        { "timestamp": "2025-01-15T07:00:00Z", "confidence_percent": 81.2 }
+      ],
+      "uptime_trend": [
+        { "date": "2025-01-14", "uptime_percent": 95.4 },
+        { "date": "2025-01-15", "uptime_percent": 97.5 }
+      ]
+    },
+    "notes": [
+      "Analytics values are aggregated from persisted detection and uptime events."
+    ]
+  }
+}
+```
 
 ## WebSocket Communication
 

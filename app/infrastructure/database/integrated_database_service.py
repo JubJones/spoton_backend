@@ -17,7 +17,11 @@ from contextlib import asynccontextmanager
 
 from app.infrastructure.cache.tracking_cache import tracking_cache, CachedPersonState
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
-from app.infrastructure.database.base import get_db, check_database_connection
+from app.infrastructure.database.repositories.analytics_totals_repository import (
+    AnalyticsTotalsRepository,
+    DEFAULT_BUCKET_SECONDS,
+)
+from app.infrastructure.database.base import get_db, get_session_factory, check_database_connection
 from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.domains.mapping.entities.trajectory import Trajectory
@@ -107,6 +111,20 @@ class IntegratedDatabaseService:
         db = next(get_db())
         try:
             yield TrackingRepository(db)
+        finally:
+            db.close()
+
+    @asynccontextmanager
+    async def get_analytics_repository(self):
+        """Context manager yielding analytics totals repository when DB enabled."""
+        session_factory = get_session_factory()
+        if session_factory is None:
+            yield None
+            return
+
+        db = session_factory()
+        try:
+            yield AnalyticsTotalsRepository(db)
         finally:
             db.close()
     
@@ -261,8 +279,17 @@ class IntegratedDatabaseService:
                 )
                 
                 self.sync_stats.db_writes += 1
+                if event is not None:
+                    await self._aggregate_detection_event(
+                        environment_id=environment_id,
+                        camera_id=camera_id,
+                        confidence=confidence,
+                        event_timestamp=datetime.now(timezone.utc),
+                        detections=1,
+                        unique_entities=1,
+                    )
                 return event is not None
-                
+
         except Exception as e:
             logger.error(f"Error storing detection event: {e}")
             return False
@@ -303,10 +330,238 @@ class IntegratedDatabaseService:
                 
                 self.sync_stats.db_writes += 1
                 return event is not None
-                
+
         except Exception as e:
             logger.error(f"Error storing tracking event: {e}")
             return False
+
+    async def _aggregate_detection_event(
+        self,
+        *,
+        environment_id: str,
+        camera_id: Optional[str],
+        confidence: Optional[float],
+        event_timestamp: Optional[datetime],
+        detections: int,
+        unique_entities: int,
+        bucket_size_seconds: int = DEFAULT_BUCKET_SECONDS,
+    ) -> None:
+        """Persist aggregated detection metrics for dashboard consumption."""
+        if detections <= 0:
+            return
+
+        timestamp = event_timestamp or datetime.now(timezone.utc)
+        confidence_value = float(confidence) if confidence is not None else 0.0
+        confidence_samples = detections if confidence is not None else 0
+
+        try:
+            async with self.get_analytics_repository() as repo:
+                if repo is None:
+                    return
+
+                repo.increment_detection_totals(
+                    environment_id=environment_id,
+                    camera_id=camera_id,
+                    event_time=timestamp,
+                    detections=detections,
+                    unique_entities=unique_entities,
+                    confidence_sum=confidence_value * detections,
+                    confidence_samples=confidence_samples,
+                    bucket_size_seconds=bucket_size_seconds,
+                )
+
+                repo.increment_detection_totals(
+                    environment_id=environment_id,
+                    camera_id=None,
+                    event_time=timestamp,
+                    detections=detections,
+                    unique_entities=unique_entities,
+                    confidence_sum=confidence_value * detections,
+                    confidence_samples=confidence_samples,
+                    bucket_size_seconds=bucket_size_seconds,
+                )
+
+                logger.debug(
+                    "Aggregated detection totals",
+                    extra={
+                        "environment_id": environment_id,
+                        "camera_id": camera_id,
+                        "detections": detections,
+                        "unique_entities": unique_entities,
+                        "avg_confidence": confidence,
+                        "bucket_size_seconds": bucket_size_seconds,
+                        "event_timestamp": timestamp.isoformat(),
+                    },
+                )
+
+        except Exception as exc:
+            logger.warning(f"Failed to aggregate detection metrics: {exc}")
+
+    async def record_uptime_snapshot(
+        self,
+        *,
+        environment_id: str,
+        camera_id: Optional[str],
+        uptime_percent: float,
+        snapshot_day: Optional[datetime] = None,
+        samples: int = 1,
+    ) -> None:
+        """Record uptime statistics for later dashboard retrieval."""
+        day = (snapshot_day or datetime.now(timezone.utc)).date()
+        try:
+            async with self.get_analytics_repository() as repo:
+                if repo is None:
+                    return
+                repo.upsert_uptime_snapshot(
+                    environment_id=environment_id,
+                    camera_id=camera_id,
+                    day=day,
+                    uptime_percent=uptime_percent,
+                    samples=samples,
+                )
+        except Exception as exc:
+            logger.warning(f"Failed to record uptime snapshot: {exc}")
+
+    async def record_detection_batch(
+        self,
+        *,
+        environment_id: str,
+        camera_id: Optional[str],
+        detections: int,
+        unique_entities: int,
+        average_confidence: Optional[float],
+        event_timestamp: Optional[datetime] = None,
+        bucket_size_seconds: int = DEFAULT_BUCKET_SECONDS,
+    ) -> None:
+        """Public helper to aggregate detection batches without persisting raw events."""
+        await self._aggregate_detection_event(
+            environment_id=environment_id,
+            camera_id=camera_id,
+            confidence=average_confidence,
+            event_timestamp=event_timestamp,
+            detections=detections,
+            unique_entities=unique_entities,
+            bucket_size_seconds=bucket_size_seconds,
+        )
+
+    async def get_dashboard_snapshot(
+        self,
+        *,
+        environment_id: str,
+        window_hours: int = 24,
+        bucket_size_seconds: int = DEFAULT_BUCKET_SECONDS,
+        uptime_history_days: int = 7,
+    ) -> Dict[str, Any]:
+        """Return aggregated analytics snapshot for dashboard endpoint."""
+        window_hours = max(window_hours, 1)
+        end_time = datetime.now(timezone.utc)
+        start_time = end_time - timedelta(hours=window_hours)
+
+        snapshot = {
+            "generated_at": end_time.isoformat(),
+            "summary": {
+                "total_detections": 0,
+                "average_confidence_percent": 0.0,
+                "system_uptime_percent": 0.0,
+                "uptime_delta_percent": 0.0,
+            },
+            "cameras": [],
+            "charts": {
+                "detections_per_bucket": [],
+                "average_confidence_trend": [],
+                "uptime_trend": [],
+            },
+            "notes": ["Analytics values are aggregated from persisted detection and uptime events."],
+        }
+
+        try:
+            async with self.get_analytics_repository() as repo:
+                if repo is None:
+                    return snapshot
+
+                totals = repo.fetch_window_totals(
+                    environment_id=environment_id,
+                    start=start_time,
+                    end=end_time,
+                    bucket_size_seconds=bucket_size_seconds,
+                )
+
+                camera_totals = repo.fetch_camera_breakdown(
+                    environment_id=environment_id,
+                    start=start_time,
+                    end=end_time,
+                    bucket_size_seconds=bucket_size_seconds,
+                )
+
+                time_buckets = repo.fetch_bucketed_series(
+                    environment_id=environment_id,
+                    start=start_time,
+                    end=end_time,
+                    bucket_size_seconds=bucket_size_seconds,
+                )
+
+                uptime_series = repo.fetch_uptime_series(
+                    environment_id=environment_id,
+                    days=uptime_history_days,
+                )
+
+                snapshot["summary"]["total_detections"] = totals.detections
+                snapshot["summary"]["average_confidence_percent"] = round(totals.average_confidence * 100, 2)
+
+                if uptime_series:
+                    latest_uptime = uptime_series[-1].uptime_percent
+                    snapshot["summary"]["system_uptime_percent"] = round(latest_uptime, 2)
+                    if len(uptime_series) > 1:
+                        previous = uptime_series[-2].uptime_percent
+                        snapshot["summary"]["uptime_delta_percent"] = round(latest_uptime - previous, 2)
+
+                for totals_per_camera in camera_totals:
+                    camera_snapshot = {
+                        "camera_id": totals_per_camera.camera_id,
+                        "detections": totals_per_camera.detections,
+                        "unique_entities": totals_per_camera.unique_entities,
+                        "average_confidence_percent": round(totals_per_camera.average_confidence * 100, 2),
+                        "uptime_percent": 0.0,
+                    }
+
+                    camera_uptime = repo.fetch_uptime_series(
+                        environment_id=environment_id,
+                        days=1,
+                        camera_id=totals_per_camera.camera_id,
+                    )
+                    if camera_uptime:
+                        camera_snapshot["uptime_percent"] = round(camera_uptime[-1].uptime_percent, 2)
+
+                    snapshot["cameras"].append(camera_snapshot)
+
+                snapshot["charts"]["detections_per_bucket"] = [
+                    {
+                        "timestamp": bucket.bucket_start.isoformat(),
+                        "detections": bucket.detections,
+                    }
+                    for bucket in time_buckets
+                ]
+
+                snapshot["charts"]["average_confidence_trend"] = [
+                    {
+                        "timestamp": bucket.bucket_start.isoformat(),
+                        "confidence_percent": round(bucket.average_confidence * 100, 2),
+                    }
+                    for bucket in time_buckets
+                ]
+
+                snapshot["charts"]["uptime_trend"] = [
+                    {
+                        "date": str(item.day),
+                        "uptime_percent": round(item.uptime_percent, 2),
+                    }
+                    for item in uptime_series
+                ]
+
+        except Exception as exc:
+            logger.error(f"Failed to build dashboard snapshot: {exc}")
+
+        return snapshot
     
     # Trajectory Management
     async def store_trajectory_point(

@@ -10,7 +10,20 @@ Handles:
 
 from datetime import datetime, timezone
 from typing import Optional, Dict, Any, List
-from sqlalchemy import Column, Integer, String, Float, DateTime, Boolean, Text, JSON, Index, ForeignKey
+from sqlalchemy import (
+    Column,
+    Integer,
+    String,
+    Float,
+    DateTime,
+    Boolean,
+    Text,
+    JSON,
+    Index,
+    ForeignKey,
+    BigInteger,
+    Date,
+)
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship, declarative_base
 from sqlalchemy.sql import func
@@ -359,3 +372,49 @@ TrackingEvent.person_identity = relationship(
     foreign_keys=[TrackingEvent.global_person_id],
     primaryjoin="TrackingEvent.global_person_id == PersonIdentity.global_person_id"
 )
+
+
+class AnalyticsTotals(Base):
+    """Aggregated detection metrics stored per time bucket."""
+
+    __tablename__ = 'analytics_totals'
+
+    bucket_start = Column(DateTime(timezone=True), primary_key=True)
+    bucket_size_seconds = Column(Integer, primary_key=True)
+    environment_id = Column(String(50), primary_key=True)
+    camera_id = Column(String(50), primary_key=True, default='__all__')
+
+    detections = Column(BigInteger, nullable=False, default=0)
+    unique_entities = Column(BigInteger, nullable=False, default=0)
+    confidence_sum = Column(Float, nullable=False, default=0.0)
+    confidence_samples = Column(BigInteger, nullable=False, default=0)
+    uptime_percent = Column(Float, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_analytics_totals_bucket', 'bucket_start'),
+        Index('idx_analytics_totals_env', 'environment_id'),
+        Index('idx_analytics_totals_camera_bucket', 'environment_id', 'camera_id', 'bucket_start'),
+    )
+
+
+class AnalyticsUptimeDaily(Base):
+    """Daily uptime snapshot metrics for cameras and environments."""
+
+    __tablename__ = 'analytics_uptime_daily'
+
+    day = Column(Date, primary_key=True)
+    environment_id = Column(String(50), primary_key=True)
+    camera_id = Column(String(50), primary_key=True, default='__all__')
+    uptime_percent = Column(Float, nullable=False)
+    samples = Column(Integer, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index('idx_analytics_uptime_daily_day_env', 'day', 'environment_id'),
+        Index('idx_analytics_uptime_daily_camera', 'camera_id'),
+    )
