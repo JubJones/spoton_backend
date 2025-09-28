@@ -53,6 +53,14 @@ ws.onmessage = (event) => {
 | `/api/v1/detection-processing-tasks/{taskId}/status` | GET | Detection task status |
 | `/api/v1/detection-processing-tasks/environment/{environment}/cleanup` | POST | Cleanup environment tasks |
 
+### Playback Control *(requires `ENABLE_PLAYBACK_CONTROL=true`)*
+
+| Endpoint | Method | Purpose |
+|----------|---------|----------|
+| `/api/v1/controls/{taskId}/pause` | POST | Transition task to `paused` and block frame progression |
+| `/api/v1/controls/{taskId}/resume` | POST | Resume task from the last delivered frame index |
+| `/api/v1/controls/{taskId}/status` | GET | Fetch playback state, last frame, and error context |
+
 ### Environment Management
 
 | Endpoint | Method | Purpose |
@@ -104,6 +112,21 @@ const status = await fetch(`/api/v1/detection-processing-tasks/${taskId}/status`
 // Status: QUEUED → INITIALIZING → DOWNLOADING → EXTRACTING → PROCESSING → COMPLETED
 ```
 
+### 4. Playback Control Workflow
+```javascript
+// Pause the active task
+await fetch(`/api/v1/controls/${taskId}/pause`, { method: 'POST' });
+
+// Resume when ready
+await fetch(`/api/v1/controls/${taskId}/resume`, { method: 'POST' });
+
+// Poll status for UI updates (optional)
+const playback = await fetch(`/api/v1/controls/${taskId}/status`).then(r => r.json());
+// playback.state === 'paused' | 'playing'; playback.last_frame_index indicates the last processed frame
+```
+
+> **Tip**: The backend debounces repeated transitions and resumes from the saved frame index, so toggling quickly will not duplicate frames.
+
 ## WebSocket Communication
 
 ### Connection URLs
@@ -153,6 +176,7 @@ class SpotOnClient {
   constructor() {
     this.taskId = null;
     this.ws = null;
+    this.playbackState = 'playing';
   }
 
   async initialize() {
@@ -175,6 +199,7 @@ class SpotOnClient {
 
     const task = await response.json();
     this.taskId = task.task_id;
+    this.playbackState = 'playing';
 
     // Monitor until PROCESSING
     while (true) {
@@ -232,6 +257,14 @@ class SpotOnClient {
       }));
     };
   }
+
+  async togglePlayback() {
+    const nextAction = this.playbackState === 'playing' ? 'pause' : 'resume';
+    await fetch(`/api/v1/controls/${this.taskId}/${nextAction}`, { method: 'POST' });
+    const status = await fetch(`/api/v1/controls/${this.taskId}/status`).then(r => r.json());
+    this.playbackState = status.state;
+    updatePlaybackButtonLabel(this.playbackState); // Update UI control text/icon
+  }
 }
 ```
 
@@ -261,6 +294,17 @@ interface Environment {
 }
 ```
 
+### Playback Status Response
+```typescript
+interface PlaybackStatusResponse {
+  task_id: string;
+  state: 'playing' | 'paused' | 'stopped';
+  last_transition_at: string;     // ISO timestamp of last state change
+  last_frame_index?: number;      // Frame index captured when pause was acknowledged
+  last_error?: string | null;     // Populated when backend fails to transition
+}
+```
+
 ## Error Handling
 
 ### HTTP Status Codes
@@ -280,6 +324,9 @@ POST /detection-processing-tasks/start → { "detail": "Invalid environment_id" 
 
 // Task not found
 GET /detection-processing-tasks/invalid/status → { "detail": "Task not found" }
+
+// Playback command for unknown task
+POST /controls/invalid/pause → { "detail": "Task not found" }
 ```
 
 ### WebSocket Reconnection

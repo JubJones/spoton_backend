@@ -28,12 +28,20 @@ class TaskRuntimeRegistry:
 
     def __init__(self) -> None:
         self._runtimes: Dict[str, TaskRuntime] = {}
-        self._lock = asyncio.Lock()
+        self._lock: Optional[asyncio.Lock] = None
+
+    async def _get_lock(self) -> asyncio.Lock:
+        """Lazily initialize the asyncio lock within an active event loop."""
+
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     async def register(self, task_id: str) -> TaskRuntime:
         """Ensure a runtime entry exists for the given task."""
 
-        async with self._lock:
+        lock = await self._get_lock()
+        async with lock:
             runtime = self._runtimes.get(task_id)
             if runtime is None:
                 runtime = TaskRuntime(task_id=task_id)
@@ -43,7 +51,8 @@ class TaskRuntimeRegistry:
     async def remove(self, task_id: str) -> None:
         """Remove runtime entry when task is complete."""
 
-        async with self._lock:
+        lock = await self._get_lock()
+        async with lock:
             self._runtimes.pop(task_id, None)
 
     def get_runtime(self, task_id: str) -> Optional[TaskRuntime]:
