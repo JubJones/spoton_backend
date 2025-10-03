@@ -249,7 +249,9 @@ class AnalyticsTotalsRepository:
 
         buckets: List[TimeBucket] = []
         for ts, detections, confidence_sum, confidence_samples in rows:
-            avg_conf = (confidence_sum / confidence_samples) if confidence_samples else 0.0
+            conf_sum = float(confidence_sum or 0.0)
+            samples = int(confidence_samples or 0)
+            avg_conf = (conf_sum / samples) if samples else 0.0
             buckets.append(
                 TimeBucket(
                     bucket_start=ts,

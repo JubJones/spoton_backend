@@ -24,6 +24,7 @@ services:
       - ./data:/app/data  # Mount calibration and data files
       - ./homography_data:/app/homography_data  # Mount homography calibration files
       - ./videos:/app/videos:ro  # Mount local videos directory for playback instead of S3
+      - ./scripts:/app/scripts  # Expose scripts for setup tasks
       # Remove these volume mounts for production deployment
     env_file:
       - .env
@@ -40,9 +41,16 @@ services:
       # Docker networking
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
-    # No hard dependency on Redis; enable with `--profile infra` when needed
+    # Redis and TimescaleDB start alongside the backend so analytics is ready
     # No GPU deployment section - CPU only
     command: uvicorn app.main:app --host 0.0.0.0 --port 3847
+    depends_on:
+      redis:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:3847/health"]
       interval: 30s
@@ -70,7 +78,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    profiles: ["infra"]
     # CPU resource limits to prevent overwhelming
     deploy:
       resources:
@@ -97,7 +104,6 @@ services:
       timeout: 5s
       retries: 5
     restart: unless-stopped
-    profiles: ["infra"]
     # CPU resource limits
     deploy:
       resources:
@@ -106,6 +112,32 @@ services:
           memory: 1G
         reservations:
           memory: 512M
+
+  db-init:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        PYTORCH_VARIANT: cpu
+    image: spoton_backend_image:cpu
+    container_name: spoton_db_setup_cpu
+    command: bash -c "cd /app && /opt/venv/bin/python scripts/setup_db.py"
+    env_file:
+      - .env
+      - .env.cpu
+    environment:
+      - REDIS_HOST=redis
+      - POSTGRES_SERVER=timescaledb
+      - PYTHONPATH=/app
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+    restart: "no"
 
 volumes:
   redis_data:

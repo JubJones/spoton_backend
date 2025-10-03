@@ -1,0 +1,38 @@
+# GPU image using official PyTorch CUDA runtime base
+FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=off \
+    PIP_DISABLE_PIP_VERSION_CHECK=on \
+    PIP_DEFAULT_TIMEOUT=100 \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 \
+    curl ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
+
+WORKDIR /app
+
+# Copy project metadata and install deps
+COPY pyproject.toml README.md ./
+
+# The base already includes matching torch/torchvision/torchaudio; pip will skip reinstall.
+RUN --mount=type=cache,target=/root/.cache/pip pip install .
+
+COPY app ./app
+
+RUN mkdir -p /home/appuser/.cache \
+    && mkdir -p /app/weights /app/homography_data /app/downloaded_videos /app/extracted_frames \
+    && chown -R appuser:appgroup /app /home/appuser
+
+USER appuser
+
+EXPOSE 3847
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3847"]

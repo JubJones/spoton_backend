@@ -20,7 +20,9 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.preprocessing import StandardScaler
 
+from app.core.config import settings
 from app.infrastructure.database.integrated_database_service import integrated_db_service
+from app.infrastructure.database.repositories.analytics_totals_repository import DEFAULT_BUCKET_SECONDS
 from app.infrastructure.cache.tracking_cache import tracking_cache
 from app.domains.mapping.entities.coordinate import Coordinate
 from app.shared.types import CameraID
@@ -90,6 +92,15 @@ class AnalyticsEngine:
         self.anomaly_threshold = 0.7  # anomaly detection threshold
         self.clustering_eps = 0.5  # DBSCAN clustering parameter
         self.clustering_min_samples = 3
+
+        primary_env = getattr(settings, "PRIMARY_ANALYTICS_ENVIRONMENT", "factory")
+        fallback_envs = list(getattr(settings, "SECONDARY_ANALYTICS_ENVIRONMENTS", ["default"]))
+        if primary_env not in fallback_envs:
+            fallback_envs.insert(0, primary_env)
+        else:
+            fallback_envs.remove(primary_env)
+            fallback_envs.insert(0, primary_env)
+        self.analytics_environments: List[str] = fallback_envs
         
         # Performance tracking
         self.analytics_stats = {
@@ -161,12 +172,19 @@ class AnalyticsEngine:
             detection_rate = await self._calculate_detection_rate(current_time)
             average_confidence = await self._calculate_average_confidence(current_time)
             camera_loads = self._derive_camera_loads(active_persons)
+
+            active_count = len(active_persons)
+            if not camera_loads:
+                fallback_loads = await self._build_camera_loads_from_analytics()
+                if fallback_loads:
+                    camera_loads = fallback_loads
+                    active_count = sum(fallback_loads.values())
             performance_metrics = await self._get_performance_metrics(current_time)
             
             # Store metrics
             metrics = RealTimeMetrics(
                 timestamp=current_time,
-                active_persons=len(active_persons),
+                active_persons=active_count,
                 detection_rate=detection_rate,
                 average_confidence=average_confidence,
                 camera_loads=camera_loads,
@@ -178,14 +196,14 @@ class AnalyticsEngine:
             # Update analytics cache
             self.analytics_cache['real_time_metrics'] = {
                 'timestamp': current_time.isoformat(),
-                'active_persons': len(active_persons),
+                'active_persons': active_count,
                 'detection_rate': detection_rate,
                 'average_confidence': average_confidence,
                 'camera_loads': camera_loads,
                 'performance_metrics': performance_metrics
             }
             
-            logger.debug(f"Processed real-time metrics: {len(active_persons)} active persons")
+            logger.debug(f"Processed real-time metrics: {active_count} active persons")
             
         except Exception as e:
             logger.error(f"Error processing real-time metrics: {e}")
@@ -196,9 +214,15 @@ class AnalyticsEngine:
             lookback=timedelta(minutes=1),
             current_time=current_time
         )
+        if not stats:
+            return 0.0
+
+        if 'detection_rate' in stats:
+            return float(stats['detection_rate'])
+
         total = stats.get('total_detections', 0)
         try:
-            return total / 60.0
+            return total / max(1.0, timedelta(minutes=1).total_seconds())
         except Exception:
             return 0.0
     
@@ -241,22 +265,41 @@ class AnalyticsEngine:
 
     async def _fetch_active_person_states(self, current_time: datetime) -> List[Any]:
         """Fetch active persons with dependency-aware backoff."""
+        allow_cache = True
         if self._redis_retry_at and current_time < self._redis_retry_at:
-            return []
+            allow_cache = False
 
-        try:
-            if getattr(tracking_cache, 'redis', None) is None:
-                await tracking_cache.initialize()
+        active_persons: List[Any] = []
 
-            active_persons = await tracking_cache.get_active_persons()
-            self._redis_retry_at = None
-            return active_persons
+        if allow_cache:
+            try:
+                if getattr(tracking_cache, 'redis', None) is None:
+                    await tracking_cache.initialize()
 
-        except Exception as e:
-            logger.debug(f"Active person cache unavailable: {e}")
-            self._redis_retry_at = current_time + self._retry_interval
-            setattr(tracking_cache, 'redis', None)
-            return []
+                active_persons = await tracking_cache.get_active_persons()
+                if active_persons:
+                    self._redis_retry_at = None
+                    return active_persons
+
+            except Exception as e:
+                logger.debug(f"Active person cache unavailable: {e}")
+                self._redis_retry_at = current_time + self._retry_interval
+                setattr(tracking_cache, 'redis', None)
+
+        if not active_persons:
+            for env in self.analytics_environments:
+                try:
+                    persons = await integrated_db_service.get_active_persons(
+                        environment_id=env,
+                        prefer_cache=False
+                    )
+                    if persons:
+                        logger.debug(f"Fetched {len(persons)} active persons from DB for env {env}")
+                        return persons
+                except Exception as db_error:
+                    logger.debug(f"DB fallback for active persons failed ({env}): {db_error}")
+
+        return []
 
     async def _get_detection_stats(self, lookback: timedelta, current_time: datetime) -> Dict[str, Any]:
         """Retrieve detection statistics with database retry backoff."""
@@ -266,24 +309,77 @@ class AnalyticsEngine:
         end_time = current_time
         start_time = end_time - lookback
 
-        try:
-            stats = await integrated_db_service.get_detection_statistics(
-                environment_id="default",
-                start_time=start_time,
-                end_time=end_time
-            )
+        for env in self.analytics_environments:
+            try:
+                stats = await integrated_db_service.get_detection_statistics(
+                    environment_id=env,
+                    start_time=start_time,
+                    end_time=end_time
+                )
 
-            if stats and 'total_detections' in stats:
-                self._db_retry_at = None
-                return stats
+                if stats and (stats.get('total_detections') or stats.get('avg_confidence')):
+                    self._db_retry_at = None
+                    stats['environment_id'] = env
+                    return stats
 
-            # If the service returned an empty result, apply retry backoff
-            logger.debug("Detection statistics unavailable or empty; applying backoff")
+            except Exception as e:
+                logger.debug(f"Detection statistics query failed for {env}: {e}")
 
-        except Exception as e:
-            logger.debug(f"Detection statistics query failed: {e}")
+        # Fallback to aggregated analytics snapshot to ensure metrics are populated
+        for env in self.analytics_environments:
+            try:
+                window_hours = max(1, int(lookback.total_seconds() // 3600) or 1)
+                snapshot = await integrated_db_service.get_dashboard_snapshot(
+                    environment_id=env,
+                    window_hours=window_hours,
+                    bucket_size_seconds=DEFAULT_BUCKET_SECONDS,
+                    uptime_history_days=1,
+                )
+                summary = snapshot.get('summary', {})
+                total_raw = summary.get('total_detections', 0)
+                avg_confidence_percent = summary.get('average_confidence_percent')
 
+                if total_raw:
+                    total = float(total_raw)
+                    detection_rate = total / float(window_hours * 3600)
+                    stats = {
+                        'total_detections': int(round(total)),
+                        'avg_confidence': float(avg_confidence_percent or 0.0) / 100.0,
+                        'detection_rate': detection_rate,
+                        'environment_id': env,
+                    }
+                    self._db_retry_at = None
+                    return stats
+
+            except Exception as agg_error:
+                logger.debug(f"Aggregated analytics fallback failed for {env}: {agg_error}")
+
+        logger.debug("Detection statistics unavailable; applying retry backoff")
         self._db_retry_at = current_time + self._retry_interval
+        return {}
+
+    async def _build_camera_loads_from_analytics(self) -> Dict[str, int]:
+        """Derive camera loads from aggregated analytics as a fallback."""
+        env_candidates = self.analytics_environments
+        for env in env_candidates:
+            try:
+                snapshot = await integrated_db_service.get_dashboard_snapshot(
+                    environment_id=env,
+                    window_hours=1,
+                    bucket_size_seconds=DEFAULT_BUCKET_SECONDS,
+                    uptime_history_days=1,
+                )
+                loads: Dict[str, int] = {}
+                for camera in snapshot.get('cameras', []):
+                    camera_id = camera.get('camera_id')
+                    count = camera.get('unique_entities')
+                    if camera_id and count:
+                        loads[camera_id] = int(count)
+                if loads:
+                    return loads
+            except Exception as exc:
+                logger.debug(f"Aggregated camera load fallback failed for {env}: {exc}")
+
         return {}
 
     def _derive_camera_loads(self, active_persons: List[Any]) -> Dict[str, int]:

@@ -1,0 +1,29 @@
+# Ignore VCS and editor files
+.git
+.gitignore
+.github
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.DS_Store
+
+# Python build artifacts
+build/
+dist/
+*.egg-info/
+
+# Local data and caches
+downloaded_videos/
+extracted_frames/
+
+# Large assets mounted at runtime (not copied into image)
+weights/
+homography_data/
+data/
+tests/
+ref/
+ws_received_images/
+
+# Node/other caches if present
+node_modules/
