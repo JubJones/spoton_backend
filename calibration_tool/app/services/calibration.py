@@ -22,7 +22,6 @@ class CalibrationSession:
 
     def reset_points(self) -> None:
         self.source_points.clear()
-        self.destination_points.clear()
         self.test_points.clear()
         self.homography = None
 
@@ -42,11 +41,14 @@ class CalibrationManager:
 
     def __init__(self) -> None:
         self._sessions: Dict[str, CalibrationSession] = {}
+        self._shared_destination_points: List[Point] = []
 
     # Session helpers -------------------------------------------------
     def get_session(self, camera_id: str) -> CalibrationSession:
         if camera_id not in self._sessions:
             self._sessions[camera_id] = CalibrationSession(camera_id=camera_id)
+        session = self._sessions[camera_id]
+        session.destination_points = self._shared_destination_points
         return self._sessions[camera_id]
 
     def set_frame(self, camera_id: str, frame_path: str, frame_image: np.ndarray) -> None:
@@ -61,18 +63,39 @@ class CalibrationManager:
         session.homography = None
         return len(session.source_points)
 
-    def add_destination_point(self, camera_id: str, point: Point) -> int:
+    def set_source_point(self, camera_id: str, index: int, point: Point) -> None:
         session = self.get_session(camera_id)
-        if len(session.destination_points) >= len(session.source_points):
-            raise ValueError("Destination point count cannot exceed source point count")
-        session.destination_points.append(point)
+        session.source_points[index] = point
         session.homography = None
-        return len(session.destination_points)
+
+    def delete_source_point(self, camera_id: str, index: int) -> None:
+        session = self.get_session(camera_id)
+        session.source_points.pop(index)
+        session.homography = None
+
+    def add_destination_point(self, point: Point) -> int:
+        self._shared_destination_points.append(point)
+        self._invalidate_homographies()
+        return len(self._shared_destination_points)
+
+    def set_destination_point(self, index: int, point: Point) -> None:
+        self._shared_destination_points[index] = point
+        self._invalidate_homographies()
+
+    def delete_destination_point(self, index: int) -> None:
+        self._shared_destination_points.pop(index)
+        for session in self._sessions.values():
+            if len(session.source_points) > index:
+                session.source_points.pop(index)
+            session.homography = None
+            session.test_points.clear()
+
+    @property
+    def destination_points(self) -> List[Point]:
+        return self._shared_destination_points
 
     def undo_last_point(self, camera_id: str) -> None:
         session = self.get_session(camera_id)
-        if session.destination_points and len(session.destination_points) == len(session.source_points):
-            session.destination_points.pop()
         if session.source_points:
             session.source_points.pop()
         session.homography = None
@@ -87,7 +110,8 @@ class CalibrationManager:
     # Homography ------------------------------------------------------
     def can_compute_homography(self, camera_id: str) -> bool:
         session = self.get_session(camera_id)
-        return len(session.source_points) >= 4 and len(session.source_points) == len(session.destination_points)
+        dest_count = len(self._shared_destination_points)
+        return len(session.source_points) >= 4 and len(session.source_points) == dest_count
 
     def compute_homography(self, camera_id: str) -> np.ndarray:
         session = self.get_session(camera_id)
@@ -95,7 +119,7 @@ class CalibrationManager:
             raise ValueError("Need at least 4 matching point pairs before computing homography")
 
         src = np.array(session.source_points, dtype=np.float32)
-        dst = np.array(session.destination_points, dtype=np.float32)
+        dst = np.array(self._shared_destination_points, dtype=np.float32)
         matrix, mask = cv2.findHomography(src, dst)
         if matrix is None:
             raise RuntimeError("OpenCV could not compute a homography matrix with the provided points")
@@ -115,6 +139,11 @@ class CalibrationManager:
     # Summary ---------------------------------------------------------
     def sessions(self) -> Sequence[CalibrationSession]:
         return tuple(self._sessions.values())
+
+    def _invalidate_homographies(self) -> None:
+        for session in self._sessions.values():
+            session.homography = None
+            session.test_points.clear()
 
     def cameras_with_homography(self) -> List[str]:
         return [session.camera_id for session in self._sessions.values() if session.homography is not None]

@@ -36,12 +36,14 @@ STATUS_COLORS = {
     "warn": "#d29922",
     "error": "#f85149",
 }
-
-
-def format_point_list(points) -> str:
-    if not points:
-        return ""
-    return "\n".join(f"{idx}: ({x:.1f}, {y:.1f})" for idx, (x, y) in enumerate(points, start=1))
+CAMERA_COLORS = [
+    "#58a6ff",  # blue
+    "#ffa657",  # orange
+    "#7ee787",  # green
+    "#f778ba",  # pink
+    "#d2a8ff",  # purple
+    "#f2cc60",  # gold
+]
 
 
 def format_homography(matrix) -> str:
@@ -100,6 +102,9 @@ class CalibrationApp:
         ensure_ground_plane()
         self.manager = CalibrationManager()
         self.camera_options = DEFAULT_CAMERAS.copy()
+        self.camera_colors: Dict[str, str] = {}
+        for camera in self.camera_options:
+            self._assign_color(camera)
 
         self.root, self.widgets = create_root(self.camera_options)
         self.root.protocol("WM_DELETE_WINDOW", self.root.destroy)
@@ -110,6 +115,8 @@ class CalibrationApp:
         self.current_camera = self.widgets["camera_var"].get() or self.camera_options[0]
         self.current_camera_display: Optional[DisplayImage] = None
         self.test_click_pending = False
+        self.edit_source_index: Optional[int] = None
+        self.edit_dest_index: Optional[int] = None
 
         self._setup_bindings()
         draw_placeholder(self.widgets["camera_canvas"], CAMERA_CANVAS_SIZE, "Load a camera frame")
@@ -128,17 +135,34 @@ class CalibrationApp:
         status_var.set(message)
         status_label.configure(fg=color)
 
-    def _update_text(self, widget: tk.Text, content: str) -> None:
-        widget.configure(state=tk.NORMAL)
-        widget.delete("1.0", tk.END)
-        if content:
-            widget.insert(tk.END, content)
-        widget.configure(state=tk.DISABLED)
+    def _assign_color(self, camera_id: str) -> str:
+        if camera_id not in self.camera_colors:
+            color = CAMERA_COLORS[len(self.camera_colors) % len(CAMERA_COLORS)]
+            self.camera_colors[camera_id] = color
+        return self.camera_colors[camera_id]
+
+    def _get_camera_color(self, camera_id: str) -> str:
+        return self._assign_color(camera_id)
+
+    def _update_listbox(self, widget: tk.Listbox, points) -> None:
+        selection = widget.curselection()
+        selected_index = selection[0] if selection else None
+        widget.delete(0, tk.END)
+        for idx, (x, y) in enumerate(points, start=1):
+            widget.insert(tk.END, f"{idx}: ({x:.1f}, {y:.1f})")
+        if selected_index is not None and selected_index < widget.size():
+            widget.select_set(selected_index)
 
     def _refresh_point_panels(self, session: CalibrationSession) -> None:
-        self._update_text(self.widgets["source_text"], format_point_list(session.source_points))
-        self._update_text(self.widgets["dest_text"], format_point_list(session.destination_points))
-        self._update_text(self.widgets["homography_text"], format_homography(session.homography))
+        self._update_listbox(self.widgets["source_list"], session.source_points)
+        self._update_listbox(self.widgets["dest_list"], self.manager.destination_points)
+        homography_text: tk.Text = self.widgets["homography_text"]
+        homography_text.configure(state=tk.NORMAL)
+        homography_text.delete("1.0", tk.END)
+        matrix_text = format_homography(session.homography)
+        if matrix_text:
+            homography_text.insert(tk.END, matrix_text)
+        homography_text.configure(state=tk.DISABLED)
 
     def _refresh_buttons(self, camera_id: str) -> None:
         compute_state = tk.NORMAL if self.manager.can_compute_homography(camera_id) else tk.DISABLED
@@ -157,12 +181,15 @@ class CalibrationApp:
             return
         self.current_camera_display = prepare_image_for_display(session.frame_image, CAMERA_CANVAS_SIZE)
         draw_image(canvas, self.current_camera_display)
-        draw_points(canvas, self.current_camera_display, session.source_points, color="#ffa657", label_prefix="S")
+        color = self._get_camera_color(session.camera_id)
+        draw_points(canvas, self.current_camera_display, session.source_points, color=color, label_prefix="S")
 
     def _refresh_ground_view(self, session: CalibrationSession) -> None:
         canvas = self.widgets["ground_canvas"]
         draw_image(canvas, self.ground_display)
-        draw_points(canvas, self.ground_display, session.destination_points, color="#58a6ff", label_prefix="D")
+        color = self._get_camera_color(session.camera_id)
+        label_prefix = f"{session.camera_id} #"
+        draw_points(canvas, self.ground_display, self.manager.destination_points, color=color, label_prefix=label_prefix)
         if session.test_points:
             draw_test_points(canvas, self.ground_display, session.test_points)
 
@@ -183,6 +210,10 @@ class CalibrationApp:
         self.widgets["compute_button"].configure(command=self._on_compute)
         self.widgets["test_button"].configure(command=self._on_test)
         self.widgets["export_button"].configure(command=self._on_export)
+        self.widgets["edit_source_button"].configure(command=self._on_edit_source_point)
+        self.widgets["delete_source_button"].configure(command=self._on_delete_source_point)
+        self.widgets["edit_dest_button"].configure(command=self._on_edit_dest_point)
+        self.widgets["delete_dest_button"].configure(command=self._on_delete_dest_point)
 
         self.widgets["camera_canvas"].bind("<Button-1>", self._on_camera_canvas_click)
         self.widgets["ground_canvas"].bind("<Button-1>", self._on_ground_canvas_click)
@@ -202,9 +233,12 @@ class CalibrationApp:
         menu = option_menu["menu"]
         camera_var: tk.StringVar = self.widgets["camera_var"]
         menu.add_command(label=name, command=tk._setit(camera_var, name))
+        self._assign_color(name)
         camera_var.set(name)
         self.current_camera = name
         self.test_click_pending = False
+        self.edit_source_index = None
+        self.edit_dest_index = None
         session = self.manager.get_session(name)
         self._refresh_all(session)
         self._set_status(f"Added camera {name}", "ok")
@@ -215,6 +249,8 @@ class CalibrationApp:
             return
         self.current_camera = selected
         self.test_click_pending = False
+        self.edit_source_index = None
+        self.edit_dest_index = None
         self._refresh_all(self.manager.get_session(selected))
         self._set_status(f"Switched to {selected}")
 
@@ -245,6 +281,14 @@ class CalibrationApp:
         if point is None:
             self._set_status("Click inside the image area", "warn")
             return
+        if self.edit_source_index is not None:
+            index = self.edit_source_index
+            self.manager.set_source_point(self.current_camera, index, point)
+            self.edit_source_index = None
+            session = self.manager.get_session(self.current_camera)
+            self._refresh_all(session)
+            self._set_status(f"Updated source point #{index + 1}", "ok")
+            return
         if self.test_click_pending:
             try:
                 mapped_point = self.manager.transform_point(self.current_camera, point)
@@ -267,8 +311,15 @@ class CalibrationApp:
         if point is None:
             self._set_status("Click inside the map area", "warn")
             return
+        if self.edit_dest_index is not None:
+            index = self.edit_dest_index
+            self.manager.set_destination_point(index, point)
+            self.edit_dest_index = None
+            self._refresh_all(session)
+            self._set_status(f"Updated map point #{index + 1}", "ok")
+            return
         try:
-            self.manager.add_destination_point(self.current_camera, point)
+            self.manager.add_destination_point(point)
             self._refresh_all(session)
             self._set_status(f"Captured map point #{len(session.destination_points)}", "ok")
         except ValueError as exc:
@@ -278,13 +329,15 @@ class CalibrationApp:
         session = self.manager.get_session(self.current_camera)
         self.manager.undo_last_point(self.current_camera)
         self.test_click_pending = False
+        self.edit_source_index = None
         self._refresh_all(session)
-        self._set_status("Removed last point pair")
+        self._set_status("Removed last source point")
 
     def _on_reset(self) -> None:
         session = self.manager.get_session(self.current_camera)
         self.manager.reset_camera(self.current_camera)
         self.test_click_pending = False
+        self.edit_source_index = None
         self._refresh_all(session)
         self._set_status("Cleared points", "warn")
 
@@ -311,6 +364,52 @@ class CalibrationApp:
         export_path = export_results(self.manager)
         save_ground_overlays(self.manager)
         self._set_status(f"Exported to {export_path.name}", "ok")
+
+    def _get_selected_index(self, listbox: tk.Listbox) -> Optional[int]:
+        selection = listbox.curselection()
+        if not selection:
+            return None
+        return int(selection[0])
+
+    def _on_edit_source_point(self) -> None:
+        index = self._get_selected_index(self.widgets["source_list"])
+        if index is None:
+            self._set_status("Select a source point to edit", "warn")
+            return
+        self.edit_source_index = index
+        self._set_status(f"Click on the camera image to update source #{index + 1}")
+
+    def _on_delete_source_point(self) -> None:
+        index = self._get_selected_index(self.widgets["source_list"])
+        if index is None:
+            self._set_status("Select a source point to delete", "warn")
+            return
+        self.manager.delete_source_point(self.current_camera, index)
+        self.test_click_pending = False
+        self.edit_source_index = None
+        session = self.manager.get_session(self.current_camera)
+        self._refresh_all(session)
+        self._set_status(f"Deleted source point #{index + 1}", "warn")
+
+    def _on_edit_dest_point(self) -> None:
+        index = self._get_selected_index(self.widgets["dest_list"])
+        if index is None:
+            self._set_status("Select a map point to edit", "warn")
+            return
+        self.edit_dest_index = index
+        self._set_status(f"Click on the ground plane to update map #{index + 1}")
+
+    def _on_delete_dest_point(self) -> None:
+        index = self._get_selected_index(self.widgets["dest_list"])
+        if index is None:
+            self._set_status("Select a map point to delete", "warn")
+            return
+        self.manager.delete_destination_point(index)
+        self.test_click_pending = False
+        self.edit_dest_index = None
+        session = self.manager.get_session(self.current_camera)
+        self._refresh_all(session)
+        self._set_status(f"Deleted map point #{index + 1}", "warn")
 
 
 def run() -> None:

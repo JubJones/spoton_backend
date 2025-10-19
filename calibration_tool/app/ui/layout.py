@@ -59,35 +59,45 @@ def create_root(camera_options: Sequence[str]) -> tuple[tk.Tk, dict[str, object]
     ttk.Label(side_frame, text="Source Points").grid(row=0, column=0, sticky="w")
     ttk.Label(side_frame, text="Destination Points").grid(row=0, column=1, sticky="w", padx=(10, 0))
 
-    source_text = tk.Text(side_frame, width=28, height=12, state="disabled")
-    dest_text = tk.Text(side_frame, width=28, height=12, state="disabled")
-    source_text.grid(row=1, column=0, pady=(0, 8))
-    dest_text.grid(row=1, column=1, pady=(0, 8), padx=(10, 0))
+    source_list = tk.Listbox(side_frame, width=28, height=12, exportselection=False)
+    dest_list = tk.Listbox(side_frame, width=28, height=12, exportselection=False)
+    source_list.grid(row=1, column=0, pady=(0, 4))
+    dest_list.grid(row=1, column=1, pady=(0, 4), padx=(10, 0))
 
-    ttk.Label(side_frame, text="Homography Matrix").grid(row=2, column=0, columnspan=2, sticky="w")
+    edit_source_button = ttk.Button(side_frame, text="Edit Source")
+    edit_dest_button = ttk.Button(side_frame, text="Edit Map")
+    edit_source_button.grid(row=2, column=0, sticky="ew", pady=(0, 2))
+    edit_dest_button.grid(row=2, column=1, sticky="ew", padx=(10, 0), pady=(0, 2))
+
+    delete_source_button = ttk.Button(side_frame, text="Delete Source")
+    delete_dest_button = ttk.Button(side_frame, text="Delete Map")
+    delete_source_button.grid(row=3, column=0, sticky="ew", pady=(0, 6))
+    delete_dest_button.grid(row=3, column=1, sticky="ew", padx=(10, 0), pady=(0, 6))
+
+    ttk.Label(side_frame, text="Homography Matrix").grid(row=4, column=0, columnspan=2, sticky="w")
     homography_text = tk.Text(side_frame, width=38, height=8, state="disabled")
-    homography_text.grid(row=3, column=0, columnspan=2, pady=(0, 8))
+    homography_text.grid(row=5, column=0, columnspan=2, pady=(0, 8))
 
-    undo_button = ttk.Button(side_frame, text="Undo Last")
+    undo_button = ttk.Button(side_frame, text="Undo Last Source")
     reset_button = ttk.Button(side_frame, text="Reset Points")
-    undo_button.grid(row=4, column=0, sticky="ew", pady=(0, 4))
-    reset_button.grid(row=4, column=1, sticky="ew", padx=(10, 0), pady=(0, 4))
+    undo_button.grid(row=6, column=0, sticky="ew", pady=(0, 4))
+    reset_button.grid(row=6, column=1, sticky="ew", padx=(10, 0), pady=(0, 4))
 
     compute_button = ttk.Button(side_frame, text="Compute Homography", state=tk.DISABLED)
-    compute_button.grid(row=5, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+    compute_button.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
     test_button = ttk.Button(side_frame, text="Test Transform", state=tk.DISABLED)
-    test_button.grid(row=6, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+    test_button.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
     export_button = ttk.Button(side_frame, text="Export", state=tk.DISABLED)
-    export_button.grid(row=7, column=0, columnspan=2, sticky="ew", pady=(0, 4))
+    export_button.grid(row=9, column=0, columnspan=2, sticky="ew", pady=(0, 4))
 
     zones_button = ttk.Button(side_frame, text="Zones (coming soon)", state=tk.DISABLED)
-    zones_button.grid(row=8, column=0, columnspan=2, sticky="ew", pady=(0, 8))
+    zones_button.grid(row=10, column=0, columnspan=2, sticky="ew", pady=(0, 8))
 
     status_var = tk.StringVar(value="Ready")
     status_label = tk.Label(side_frame, textvariable=status_var, fg="#1f6feb")
-    status_label.grid(row=9, column=0, columnspan=2, sticky="w")
+    status_label.grid(row=11, column=0, columnspan=2, sticky="w")
 
     widgets: dict[str, object] = {
         "camera_var": camera_var,
@@ -97,8 +107,12 @@ def create_root(camera_options: Sequence[str]) -> tuple[tk.Tk, dict[str, object]
         "camera_file_var": camera_file_var,
         "camera_canvas": camera_canvas,
         "ground_canvas": ground_canvas,
-        "source_text": source_text,
-        "dest_text": dest_text,
+        "source_list": source_list,
+        "dest_list": dest_list,
+        "edit_source_button": edit_source_button,
+        "edit_dest_button": edit_dest_button,
+        "delete_source_button": delete_source_button,
+        "delete_dest_button": delete_dest_button,
         "homography_text": homography_text,
         "undo_button": undo_button,
         "reset_button": reset_button,
