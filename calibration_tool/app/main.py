@@ -155,7 +155,7 @@ class CalibrationApp:
 
     def _refresh_point_panels(self, session: CalibrationSession) -> None:
         self._update_listbox(self.widgets["source_list"], session.source_points)
-        self._update_listbox(self.widgets["dest_list"], self.manager.destination_points)
+        self._update_listbox(self.widgets["dest_list"], session.destination_points)
         homography_text: tk.Text = self.widgets["homography_text"]
         homography_text.configure(state=tk.NORMAL)
         homography_text.delete("1.0", tk.END)
@@ -187,9 +187,18 @@ class CalibrationApp:
     def _refresh_ground_view(self, session: CalibrationSession) -> None:
         canvas = self.widgets["ground_canvas"]
         draw_image(canvas, self.ground_display)
-        color = self._get_camera_color(session.camera_id)
-        label_prefix = f"{session.camera_id} #"
-        draw_points(canvas, self.ground_display, self.manager.destination_points, color=color, label_prefix=label_prefix)
+        for other_session in self.manager.sessions():
+            if other_session.camera_id == session.camera_id:
+                continue
+            if not other_session.destination_points:
+                continue
+            color = self._get_camera_color(other_session.camera_id)
+            label_prefix = f"{other_session.camera_id} #"
+            draw_points(canvas, self.ground_display, other_session.destination_points, color=color, label_prefix=label_prefix)
+        if session.destination_points:
+            color = self._get_camera_color(session.camera_id)
+            label_prefix = f"{session.camera_id} #"
+            draw_points(canvas, self.ground_display, session.destination_points, color=color, label_prefix=label_prefix)
         if session.test_points:
             draw_test_points(canvas, self.ground_display, session.test_points)
 
@@ -313,13 +322,13 @@ class CalibrationApp:
             return
         if self.edit_dest_index is not None:
             index = self.edit_dest_index
-            self.manager.set_destination_point(index, point)
+            self.manager.set_destination_point(self.current_camera, index, point)
             self.edit_dest_index = None
             self._refresh_all(session)
             self._set_status(f"Updated map point #{index + 1}", "ok")
             return
         try:
-            self.manager.add_destination_point(point)
+            self.manager.add_destination_point(self.current_camera, point)
             self._refresh_all(session)
             self._set_status(f"Captured map point #{len(session.destination_points)}", "ok")
         except ValueError as exc:
@@ -404,7 +413,7 @@ class CalibrationApp:
         if index is None:
             self._set_status("Select a map point to delete", "warn")
             return
-        self.manager.delete_destination_point(index)
+        self.manager.delete_destination_point(self.current_camera, index)
         self.test_click_pending = False
         self.edit_dest_index = None
         session = self.manager.get_session(self.current_camera)
