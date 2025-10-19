@@ -257,7 +257,13 @@ class CalibrationApp:
     def _on_load_frame(self) -> None:
         file_path = filedialog.askopenfilename(
             title="Select camera frame",
-            filetypes=[("Image Files", "*.png;*.jpg;*.jpeg;*.bmp")],
+            filetypes=[
+                ("PNG files", "*.png"),
+                ("JPEG files", "*.jpg"),
+                ("JPEG files", "*.jpeg"),
+                ("BMP files", "*.bmp"),
+                ("All files", "*.*")
+            ],
         )
         if not file_path:
             return
