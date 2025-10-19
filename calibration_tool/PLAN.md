@@ -8,7 +8,7 @@
 
 1. **Prepare the Environment**
    - Use Python 3.10+ and create/activate a virtual environment just for this tool.
-   - Install only the essentials: `opencv-python`, `numpy`, and a lightweight GUI library such as `PySimpleGUI` (wraps Tkinter, easy for rapid UI).
+   - Install only the essentials: `opencv-python`, `numpy`, and `Pillow` for image handling. The UI layer will rely on the standard `tkinter` module (already bundled with Python).
 
 2. **Organize the Project Skeleton**
    - Create folders: `app/` for code, `data/` for saved frames, `exports/` for results, `assets/` for the ground plane image.
@@ -19,7 +19,7 @@
    - Include an input for scale metadata (e.g., pixels-per-meter) and store it alongside the PNG in a `ground_plane.json`.
 
 4. **Build the Minimal UI Frame**
-   - Use PySimpleGUI to lay out a window with three panes: camera frame display, ground plane display, and a side panel for point tables/buttons.
+   - Construct the window directly with `tkinter`, using `Frame` sections and `Canvas` widgets for the camera view and ground plane, plus a side panel for controls.
    - Add buttons for: `Load Camera Frame`, `Add Camera Point`, `Add Map Point`, `Undo Last`, `Compute Homography`, and `Export`.
 
 5. **Implement Point Collection Logic**
@@ -48,4 +48,3 @@
 10. **Lightweight Validation**
     - Test the flow end-to-end with sample images: load a frame, mark points, compute homography, verify transformations, then export.
     - Keep a short checklist in the repo (e.g., `test_cases.md`) noting the manual steps taken for validation.
-
