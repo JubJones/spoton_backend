@@ -1,0 +1,116 @@
+{
+  "generated_from": "homography_20251024-103317.json",
+  "environments": {
+    "campus": {
+      "base_camera": "c03",
+      "distance_tolerance": 50,
+      "cameras": {
+        "c01": {
+          "overlaps_with": [
+            "c03"
+          ]
+        },
+        "c02": {
+          "overlaps_with": [
+            "c03"
+          ]
+        },
+        "c03": {
+          "overlaps_with": [
+            "c01",
+            "c02",
+            "c05"
+          ]
+        },
+        "c05": {
+          "overlaps_with": [
+            "c03"
+          ]
+        }
+      },
+      "overlap_pairs": [
+        {
+          "cameras": [
+            "c01",
+            "c03"
+          ],
+          "region": {
+            "type": "rectangle",
+            "points": [
+              [
+                1368.75,
+                806.25
+              ],
+              [
+                1384.375,
+                806.25
+              ],
+              [
+                1384.375,
+                1334.375
+              ],
+              [
+                1368.75,
+                1334.375
+              ]
+            ]
+          }
+        },
+        {
+          "cameras": [
+            "c02",
+            "c03"
+          ],
+          "region": {
+            "type": "rectangle",
+            "points": [
+              [
+                384.375,
+                681.25
+              ],
+              [
+                1281.25,
+                681.25
+              ],
+              [
+                1281.25,
+                1321.875
+              ],
+              [
+                384.375,
+                1321.875
+              ]
+            ]
+          }
+        },
+        {
+          "cameras": [
+            "c03",
+            "c05"
+          ],
+          "region": {
+            "type": "rectangle",
+            "points": [
+              [
+                25.0,
+                450.0
+              ],
+              [
+                325.0,
+                450.0
+              ],
+              [
+                325.0,
+                1328.125
+              ],
+              [
+                25.0,
+                1328.125
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
