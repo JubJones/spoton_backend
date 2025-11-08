@@ -49,6 +49,8 @@ services:
         condition: service_healthy
       timescaledb:
         condition: service_healthy
+      geometric-migration:
+        condition: service_completed_successfully
       db-init:
         condition: service_completed_successfully
     healthcheck:
@@ -133,6 +135,24 @@ services:
       timescaledb:
         condition: service_healthy
       redis:
+        condition: service_healthy
+    volumes:
+      - ./app:/app/app
+      - ./scripts:/app/scripts
+    restart: "no"
+
+  geometric-migration:
+    image: spoton_backend_image:cpu
+    container_name: spoton_geometric_migration_cpu
+    command: bash -c "cd /app && /opt/venv/bin/python scripts/apply_geometric_metrics_migration.py"
+    env_file:
+      - .env
+      - .env.cpu
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-spoton_user}:${POSTGRES_PASSWORD:-spoton_password}@timescaledb:${POSTGRES_PORT:-5432}/${POSTGRES_DB:-spotondb}
+      - PYTHONPATH=/app
+    depends_on:
+      timescaledb:
         condition: service_healthy
     volumes:
       - ./app:/app/app

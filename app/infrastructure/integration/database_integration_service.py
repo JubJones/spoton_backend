@@ -531,6 +531,37 @@ class DatabaseIntegrationService:
         except Exception as e:
             logger.warning(f"Error recording detection batch aggregate: {e}")
 
+    async def record_geometric_metrics(
+        self,
+        *,
+        environment_id: str,
+        camera_id: Optional[CameraID],
+        extraction_total_attempts: int,
+        extraction_validation_failures: int,
+        extraction_success_rate: float,
+        transformation_total_attempts: Optional[int],
+        transformation_validation_failures: Optional[int],
+        transformation_success_rate: Optional[float],
+        roi_total_created: int,
+        event_timestamp: datetime,
+    ) -> None:
+        """Bridge geometric metrics into the integrated database service."""
+        try:
+            await integrated_db_service.record_geometric_metrics(
+                environment_id=environment_id,
+                camera_id=str(camera_id) if camera_id else None,
+                extraction_total_attempts=extraction_total_attempts,
+                extraction_validation_failures=extraction_validation_failures,
+                extraction_success_rate=extraction_success_rate,
+                transformation_total_attempts=transformation_total_attempts,
+                transformation_validation_failures=transformation_validation_failures,
+                transformation_success_rate=transformation_success_rate,
+                roi_total_created=roi_total_created,
+                event_timestamp=event_timestamp,
+            )
+        except Exception as exc:
+            logger.warning(f"Error recording geometric metrics: {exc}")
+
     async def get_dashboard_snapshot(
         self,
         environment_id: str,

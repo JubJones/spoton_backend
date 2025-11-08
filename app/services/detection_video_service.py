@@ -35,7 +35,16 @@ from app.services.homography_service import HomographyService
 from app.services.handoff_detection_service import HandoffDetectionService
 from app.services.trail_management_service import TrailManagementService
 from app.services.camera_tracker_factory import CameraTrackerFactory
+from app.services.geometric import (
+    BottomPointExtractor,
+    ImagePoint,
+    WorldPlaneTransformer,
+    WorldPoint,
+    ROICalculator,
+    ROIShape,
+)
 from app.tracing import analytics_event_tracer
+from app.shared.types import CameraID
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +61,15 @@ class DetectionVideoService(RawVideoService):
     - Inherits all raw video capabilities from parent class
     """
     
-    def __init__(self, *, homography_service: Optional[HomographyService] = None, tracker_factory: Optional[CameraTrackerFactory] = None, trail_service: Optional[TrailManagementService] = None):
+    def __init__(
+        self,
+        *,
+        homography_service: Optional[HomographyService] = None,
+        tracker_factory: Optional[CameraTrackerFactory] = None,
+        trail_service: Optional[TrailManagementService] = None,
+        bottom_point_extractor: Optional[BottomPointExtractor] = None,
+        world_plane_transformer: Optional[WorldPlaneTransformer] = None,
+    ):
         super().__init__()
         
         # RT-DETR detector instance (Phase 1)
@@ -71,6 +88,25 @@ class DetectionVideoService(RawVideoService):
         
         # Trail management service for 2D mapping feature
         self.trail_service = trail_service or TrailManagementService(trail_length=getattr(settings, 'TRAIL_LENGTH', 3))
+
+        # Phase 1: Bottom-center point extraction service
+        self.bottom_point_extractor = bottom_point_extractor or BottomPointExtractor(
+            validation_enabled=getattr(settings, "ENABLE_POINT_VALIDATION", True)
+        )
+
+        # Phase 2: World-plane transformer for geometric normalization
+        self.world_plane_transformer = (
+            world_plane_transformer or WorldPlaneTransformer.from_settings()
+        )
+
+        roi_shape_value = str(getattr(settings, "ROI_SHAPE", "circular")).lower()
+        self.roi_shape = ROIShape._value2member_map_.get(roi_shape_value, ROIShape.CIRCULAR)
+        self.roi_calculator = ROICalculator(
+            base_radius=getattr(settings, "ROI_BASE_RADIUS", 1.5),
+            max_walking_speed=getattr(settings, "ROI_MAX_WALKING_SPEED", 1.5),
+            min_radius=getattr(settings, "ROI_MIN_RADIUS", 0.5),
+            max_radius=getattr(settings, "ROI_MAX_RADIUS", 10.0),
+        )
         
         # Detection statistics (enhanced for Phase 2)
         self.detection_stats = {
@@ -103,6 +139,28 @@ class DetectionVideoService(RawVideoService):
         # Frontend event cache
 
         logger.info("DetectionVideoService initialized (Phase 4: Spatial Intelligence)")
+
+    async def _emit_geometric_metrics(self, environment_id: str, camera_id: str) -> None:
+        """Publish geometric extraction and transformation stats to analytics pipeline."""
+        try:
+            extraction_stats = self.bottom_point_extractor.get_statistics()
+            transformation_stats = (
+                self.world_plane_transformer.get_statistics()
+                if self.world_plane_transformer
+                else None
+            )
+            roi_stats = self.roi_calculator.get_statistics()
+            await analytics_event_tracer.record_geometric_metrics(
+                environment_id=environment_id,
+                camera_id=camera_id,
+                extraction_stats=extraction_stats,
+                transformation_stats=transformation_stats,
+                roi_stats=roi_stats,
+                matcher_stats=None,
+                metrics_summary=None,
+            )
+        except Exception as exc:
+            logger.debug("Failed to emit geometric metrics: %s", exc)
     
     async def initialize_detection_services(self, environment_id: str = "default", task_id: Optional[uuid.UUID] = None) -> bool:
         """Initialize detection services including RT-DETR model loading and spatial intelligence services."""
@@ -382,24 +440,93 @@ class DetectionVideoService(RawVideoService):
                 # Phase 4: Apply spatial intelligence
                 map_coords = {"map_x": 0, "map_y": 0}  # Default fallback
                 projection_success = False
+                transformation_quality: Optional[float] = None
                 handoff_triggered = False
                 candidate_cameras = []
-                
-                # Homography coordinate transformation (Unified Phase 4 system only)
-                if self.homography_service:
-                    # Use foot point (bottom center of bounding box) for mapping
-                    foot_point = (bbox_dict["center_x"], bbox_dict["y2"])
-                    projected_coords = self.homography_service.project_to_map(camera_id, foot_point)
+                search_roi_payload: Optional[Dict[str, Optional[float]]] = None
+
+                bottom_point: Optional[ImagePoint] = None
+                try:
+                    bottom_point = self.bottom_point_extractor.extract_point(
+                        bbox_x=bbox_dict["x1"],
+                        bbox_y=bbox_dict["y1"],
+                        bbox_width=bbox_dict["width"],
+                        bbox_height=bbox_dict["height"],
+                        camera_id=CameraID(camera_id),
+                        person_id=None,
+                        frame_number=frame_number,
+                        timestamp=None,
+                        frame_width=frame_width,
+                        frame_height=frame_height,
+                    )
+                except ValueError as exc:
+                    logger.debug(
+                        "Bottom point validation failed for detection %s in camera %s: %s",
+                        detection.id,
+                        camera_id,
+                        exc,
+                    )
+
+                world_point: Optional[WorldPoint] = None
+                if self.world_plane_transformer and bottom_point:
+                    try:
+                        world_point = self.world_plane_transformer.transform_point(bottom_point)
+                        transformation_quality = world_point.transformation_quality
+                        map_coords = {"map_x": world_point.x, "map_y": world_point.y}
+                        projection_success = transformation_quality >= 0.5
+                    except (KeyError, ValueError) as exc:
+                        logger.debug(
+                            "World-plane transform failed for camera %s detection %s: %s",
+                            camera_id,
+                            detection.id,
+                            exc,
+                        )
+
+                # Homography coordinate transformation fallback (legacy)
+                if not projection_success and self.homography_service and bottom_point:
+                    fallback_point = (bottom_point.x, bottom_point.y)
+                    projected_coords = self.homography_service.project_to_map(camera_id, fallback_point)
                     if projected_coords:
                         candidate_map_x, candidate_map_y = projected_coords
-                        # Validate coordinates including allowing (0,0) if within bounds
                         if self.homography_service.validate_map_coordinate(camera_id, candidate_map_x, candidate_map_y):
                             map_coords = {"map_x": candidate_map_x, "map_y": candidate_map_y}
                             projection_success = True
-                            logger.debug(f"Map coords accepted for {camera_id}: ({candidate_map_x:.4f}, {candidate_map_y:.4f})")
+                            transformation_quality = transformation_quality or 0.8  # Legacy validation success
+                            logger.debug(
+                                "Fallback homography map coords accepted for %s: (%.4f, %.4f)",
+                                camera_id,
+                                candidate_map_x,
+                                candidate_map_y,
+                            )
                         else:
-                            logger.debug(f"Projected coords out of bounds for {camera_id}: ({candidate_map_x}, {candidate_map_y})")
-                
+                            logger.debug(
+                                "Fallback projected coords out of bounds for %s: (%.4f, %.4f)",
+                            camera_id,
+                            candidate_map_x,
+                            candidate_map_y,
+                        )
+
+                if projection_success and map_coords:
+                    try:
+                        roi = self.roi_calculator.calculate_roi(
+                            (map_coords["map_x"], map_coords["map_y"]),
+                            time_elapsed=0.0,
+                            transformation_quality=transformation_quality if transformation_quality is not None else 1.0,
+                            shape=self.roi_shape,
+                            source_camera=camera_id,
+                            dest_camera=None,
+                            person_id=None,
+                            timestamp=None,
+                        )
+                        search_roi_payload = roi.to_dict()
+                    except Exception as exc:
+                        logger.debug(
+                            "ROI calculation failed for detection %s in camera %s: %s",
+                            detection.id,
+                            camera_id,
+                            exc,
+                        )
+
                 # Handoff detection
                 if self.handoff_service:
                     handoff_triggered, candidate_cameras = self.handoff_service.check_handoff_trigger(
@@ -420,8 +547,10 @@ class DetectionVideoService(RawVideoService):
                     "spatial_data": {
                         "handoff_triggered": handoff_triggered,
                         "candidate_cameras": candidate_cameras,
-                        "coordinate_system": "bev_map_meters" if projection_success else None,
-                        "projection_successful": projection_success
+                        "coordinate_system": "world_meters" if projection_success else None,
+                        "projection_successful": projection_success,
+                        "transformation_quality": transformation_quality,
+                        "search_roi": search_roi_payload,
                     }
                 }
                 
@@ -446,6 +575,8 @@ class DetectionVideoService(RawVideoService):
             self.detection_stats["total_detections_found"] += len(detections)
             self.detection_stats["successful_detections"] += 1
             self._update_detection_stats()
+
+            await self._emit_geometric_metrics(environment_id=env_for_camera, camera_id=camera_id)
             
             return detection_data
             

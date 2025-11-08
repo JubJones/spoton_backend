@@ -5,6 +5,7 @@ This involves detection, per-camera tracking, handoff trigger detection, and map
 import asyncio
 import logging
 import uuid
+import time
 from typing import Dict, List, Tuple, Optional, Any, Set
 from collections import defaultdict
 from pathlib import Path
@@ -23,7 +24,18 @@ from app.shared.types import (
 from app.services.camera_tracker_factory import CameraTrackerFactory
 from app.services.notification_service import NotificationService
 from app.services.homography_service import HomographyService 
+from app.services.geometric import (
+    BottomPointExtractor,
+    ImagePoint,
+    WorldPlaneTransformer,
+    WorldPoint,
+    ROICalculator,
+    ROIShape,
+    GeometricMatcher,
+    MetricsCollector,
+)
 from app.core.config import settings
+from app.tracing import analytics_event_tracer
 
 logger = logging.getLogger(__name__)
 
@@ -41,12 +53,34 @@ class MultiCameraFrameProcessor:
         homography_service: HomographyService, 
         notification_service: NotificationService,
         device: torch.device,
+        bottom_point_extractor: Optional[BottomPointExtractor] = None,
+        world_plane_transformer: Optional[WorldPlaneTransformer] = None,
     ):
         self.detector = detector 
         self.tracker_factory = tracker_factory
         self.homography_service = homography_service 
         self.notification_service = notification_service
         self.device = device
+        self.bottom_point_extractor = bottom_point_extractor or BottomPointExtractor(
+            validation_enabled=getattr(settings, "ENABLE_POINT_VALIDATION", True)
+        )
+        self.world_plane_transformer = world_plane_transformer or WorldPlaneTransformer.from_settings()
+        roi_shape_value = str(getattr(settings, "ROI_SHAPE", "circular")).lower()
+        self.roi_shape = ROIShape._value2member_map_.get(roi_shape_value, ROIShape.CIRCULAR)
+        self.roi_calculator = ROICalculator(
+            base_radius=getattr(settings, "ROI_BASE_RADIUS", 1.5),
+            max_walking_speed=getattr(settings, "ROI_MAX_WALKING_SPEED", 1.5),
+            min_radius=getattr(settings, "ROI_MIN_RADIUS", 0.5),
+            max_radius=getattr(settings, "ROI_MAX_RADIUS", 10.0),
+        )
+        self.geometric_matcher = GeometricMatcher(
+            exact_match_confidence=getattr(settings, "EXACT_MATCH_CONFIDENCE", 0.95),
+            closest_match_confidence=getattr(settings, "CLOSEST_MATCH_CONFIDENCE", 0.70),
+            distance_penalty_factor=getattr(settings, "DISTANCE_PENALTY_FACTOR", 0.1),
+        )
+        self.metrics_collector = MetricsCollector(
+            high_confidence_threshold=getattr(settings, "HIGH_CONFIDENCE_THRESHOLD", 0.8),
+        )
         logger.info("MultiCameraFrameProcessor initialized (expects pre-loaded components).")
 
 
@@ -67,6 +101,157 @@ class MultiCameraFrameProcessor:
         except Exception as e:
             logger.debug(f"Error projecting point {image_point_xy}: {e}")
             return None
+
+    async def _emit_geometric_metrics(self, environment_id: str) -> None:
+        """Publish aggregated geometric metrics for observability."""
+        try:
+            extraction_stats = self.bottom_point_extractor.get_statistics()
+            transformation_stats = (
+                self.world_plane_transformer.get_statistics()
+                if self.world_plane_transformer
+                else None
+            )
+            roi_stats = self.roi_calculator.get_statistics()
+            metrics_summary = self.metrics_collector.get_metrics().to_dict()
+            await analytics_event_tracer.record_geometric_metrics(
+                environment_id=environment_id,
+                camera_id=None,
+                extraction_stats=extraction_stats,
+                transformation_stats=transformation_stats,
+                roi_stats=roi_stats,
+                matcher_stats=self.geometric_matcher.get_statistics(),
+                metrics_summary=metrics_summary,
+            )
+        except Exception as exc:
+            logger.debug("MultiCameraFrameProcessor metrics emission failed: %s", exc)
+
+    def _apply_geometric_matching(
+        self,
+        final_batch_results: Dict[CameraID, List[TrackedObjectData]],
+        processed_frame_count: int,
+    ) -> None:
+        """Perform cross-camera geometric matching using ROIs and world coordinates."""
+        min_confidence = getattr(settings, "MIN_MATCH_CONFIDENCE", 0.5)
+        cameras = list(final_batch_results.keys())
+        if len(cameras) < 2:
+            return
+
+        timestamp_value = float(processed_frame_count)
+
+        # Pre-compute candidate world points per camera
+        candidates_by_camera: Dict[CameraID, List[WorldPoint]] = {}
+        for cam_id, track_data in final_batch_results.items():
+            candidates: List[WorldPoint] = []
+            for track in track_data:
+                if track.map_coords is None:
+                    continue
+                try:
+                    world_point = WorldPoint(
+                        x=float(track.map_coords[0]),
+                        y=float(track.map_coords[1]),
+                        camera_id=str(cam_id),
+                        person_id=int(track.track_id),
+                        original_image_point=(0.0, 0.0),
+                        frame_number=processed_frame_count,
+                        timestamp=timestamp_value,
+                        transformation_quality=float(track.transformation_quality or 1.0),
+                    )
+                    candidates.append(world_point)
+                except Exception as exc:
+                    logger.debug("Skipping candidate creation for camera %s track %s: %s", cam_id, track.track_id, exc)
+            candidates_by_camera[cam_id] = candidates
+
+        for source_camera, tracks in final_batch_results.items():
+            for track in tracks:
+                if track.map_coords is None or not track.search_roi:
+                    continue
+
+                try:
+                    roi_shape = ROIShape(track.search_roi.get("shape", "circular"))
+                    roi = SearchROI(
+                        center=(float(track.search_roi["center_x"]), float(track.search_roi["center_y"])),
+                        radius=float(track.search_roi.get("radius") or 0.0),
+                        width=track.search_roi.get("width"),
+                        height=track.search_roi.get("height"),
+                        shape=roi_shape,
+                        source_camera=str(source_camera),
+                        dest_camera=None,
+                        person_id=int(track.track_id),
+                        timestamp=track.search_roi.get("timestamp"),
+                    )
+                except Exception as exc:
+                    logger.debug("Failed to rehydrate ROI for camera %s track %s: %s", source_camera, track.track_id, exc)
+                    continue
+
+                source_world_point = WorldPoint(
+                    x=float(track.map_coords[0]),
+                    y=float(track.map_coords[1]),
+                    camera_id=str(source_camera),
+                    person_id=int(track.track_id),
+                    original_image_point=(0.0, 0.0),
+                    frame_number=processed_frame_count,
+                    timestamp=timestamp_value,
+                    transformation_quality=float(track.transformation_quality or 1.0),
+                )
+
+                best_match = None
+                best_confidence = -1.0
+
+                for dest_camera, candidates in candidates_by_camera.items():
+                    if dest_camera == source_camera or not candidates:
+                        continue
+
+                    roi.dest_camera = str(dest_camera)
+                    start_time = time.perf_counter()
+                    match_result = self.geometric_matcher.match_person(source_world_point, candidates, roi)
+                    elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+                    self.metrics_collector.record_match(
+                        match_result=match_result,
+                        processing_time_ms=elapsed_ms,
+                        transformation_quality=transformation_quality if transformation_quality is not None else 0.0,
+                    )
+
+                    if not match_result.is_successful():
+                        continue
+
+                    if match_result.confidence < min_confidence:
+                        continue
+
+                    if match_result.confidence > best_confidence:
+                        best_confidence = match_result.confidence
+                        best_match = match_result
+
+                if not best_match:
+                    continue
+
+                track.geometric_match = {
+                    "role": "source",
+                    "dest_camera": best_match.dest_camera,
+                    "matched_track_id": best_match.matched_person_id,
+                    "match_type": best_match.match_type.value,
+                    "confidence": best_match.confidence,
+                    "distance_m": best_match.spatial_distance,
+                    "candidates_in_roi": best_match.candidates_in_roi,
+                    "roi_radius": best_match.roi_radius,
+                }
+
+                # annotate destination track
+                dest_tracks = final_batch_results.get(CameraID(best_match.dest_camera))
+                if dest_tracks:
+                    for dest_track in dest_tracks:
+                        if int(dest_track.track_id) == best_match.matched_person_id:
+                            dest_track.geometric_match = {
+                                "role": "target",
+                                "source_camera": str(source_camera),
+                                "source_track_id": int(track.track_id),
+                                "match_type": best_match.match_type.value,
+                                "confidence": best_match.confidence,
+                                "distance_m": best_match.spatial_distance,
+                                "candidates_in_roi": best_match.candidates_in_roi,
+                                "roi_radius": best_match.roi_radius,
+                            }
+                            break
 
     def _parse_raw_tracker_output(
         self, task_id: uuid.UUID, camera_id: CameraID, tracker_output_np: np.ndarray
@@ -313,11 +498,79 @@ class MultiCameraFrameProcessor:
             gid_assigned: Optional[GlobalID] = assoc_manager.track_to_global_id.get(track_key)
             
             map_coords_output: Optional[List[float]] = None
+            transformation_quality: Optional[float] = None
             homography_matrix_current_cam = self.homography_service.get_homography_matrix(environment_id, cam_id_active)
-            if homography_matrix_current_cam is not None:
-                foot_point_x = (bbox_xyxy[0] + bbox_xyxy[2]) / 2.0
-                foot_point_y = bbox_xyxy[3] 
-                map_coords_output = self._project_point_to_map((foot_point_x, foot_point_y), homography_matrix_current_cam)
+            frame_shape_for_cam = camera_frame_shapes.get(cam_id_active)
+            bottom_point: Optional[ImagePoint] = None
+
+            if frame_shape_for_cam:
+                frame_height, frame_width = frame_shape_for_cam
+                bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox_xyxy
+                bbox_width = bbox_x2 - bbox_x1
+                bbox_height = bbox_y2 - bbox_y1
+
+                try:
+                    bottom_point = self.bottom_point_extractor.extract_point(
+                        bbox_x=bbox_x1,
+                        bbox_y=bbox_y1,
+                        bbox_width=bbox_width,
+                        bbox_height=bbox_height,
+                        camera_id=cam_id_active,
+                        person_id=track_id_active,
+                        frame_number=processed_frame_count,
+                        timestamp=None,
+                        frame_width=frame_width,
+                        frame_height=frame_height,
+                    )
+                except ValueError as exc:
+                    logger.debug(
+                        "[Task %s][%s] Bottom point extraction failed for track %s: %s",
+                        task_id,
+                        cam_id_active,
+                        track_id_active,
+                        exc,
+                    )
+
+            if self.world_plane_transformer and bottom_point:
+                try:
+                    world_point = self.world_plane_transformer.transform_point(bottom_point)
+                    map_coords_output = [world_point.x, world_point.y]
+                    transformation_quality = world_point.transformation_quality
+                except (KeyError, ValueError) as exc:
+                    logger.debug(
+                        "[Task %s][%s] World-plane transform failed for track %s: %s",
+                        task_id,
+                        cam_id_active,
+                        track_id_active,
+                        exc,
+                    )
+
+            if map_coords_output is None and homography_matrix_current_cam is not None and bottom_point:
+                map_coords_output = self._project_point_to_map((bottom_point.x, bottom_point.y), homography_matrix_current_cam)
+                transformation_quality = transformation_quality or 0.8
+
+            search_roi_payload: Optional[Dict[str, Optional[float]]] = None
+            if map_coords_output is not None:
+                try:
+                    roi = self.roi_calculator.calculate_roi(
+                        (map_coords_output[0], map_coords_output[1]),
+                        time_elapsed=0.0,
+                        transformation_quality=transformation_quality if transformation_quality is not None else 1.0,
+                        shape=self.roi_shape,
+                        source_camera=str(cam_id_active),
+                        dest_camera=None,
+                        person_id=int(track_id_active),
+                        timestamp=None,
+                    )
+                    search_roi_payload = roi.to_dict()
+                except Exception as exc:
+                    logger.debug(
+                        "[Task %s][%s] ROI calculation failed for track %s: %s",
+                        task_id,
+                        cam_id_active,
+                        track_id_active,
+                        exc,
+                    )
 
             track_obj_data = TrackedObjectData(
                 camera_id=cam_id_active,
@@ -326,7 +579,9 @@ class MultiCameraFrameProcessor:
                 bbox_xyxy=bbox_xyxy,
                 confidence=confidences_map.get(track_key), 
                 feature_vector=list(original_feature) if original_feature is not None else None,
-                map_coords=map_coords_output
+                map_coords=map_coords_output,
+                search_roi=search_roi_payload,
+                transformation_quality=transformation_quality,
             )
             final_batch_results[cam_id_active].append(track_obj_data)
 
@@ -337,6 +592,8 @@ class MultiCameraFrameProcessor:
             f"Features for association: {len(features_for_assoc_input)}. "
             f"Handoff Triggers: {len(all_handoff_triggers_this_batch)}."
         )
+        self._apply_geometric_matching(final_batch_results, processed_frame_count)
+        await self._emit_geometric_metrics(environment_id)
         return dict(final_batch_results) 
 
     async def clear_task_resources(self, task_id: uuid.UUID, environment_id: str):

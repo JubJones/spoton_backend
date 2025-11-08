@@ -418,3 +418,29 @@ class AnalyticsUptimeDaily(Base):
         Index('idx_analytics_uptime_daily_day_env', 'day', 'environment_id'),
         Index('idx_analytics_uptime_daily_camera', 'camera_id'),
     )
+
+
+class GeometricMetricsEvent(Base):
+    """Geometric pipeline metrics snapshots."""
+
+    __tablename__ = 'geometric_metrics_events'
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    event_timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    environment_id = Column(String(50), nullable=False, index=True)
+    camera_id = Column(String(50), nullable=True, index=True)
+
+    extraction_total_attempts = Column(BigInteger, nullable=False, default=0)
+    extraction_validation_failures = Column(BigInteger, nullable=False, default=0)
+    extraction_success_rate = Column(Float, nullable=False, default=0.0)
+
+    transformation_total_attempts = Column(BigInteger, nullable=True)
+    transformation_validation_failures = Column(BigInteger, nullable=True)
+    transformation_success_rate = Column(Float, nullable=True)
+    roi_total_created = Column(BigInteger, nullable=False, default=0)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+
+    __table_args__ = (
+        Index('idx_geometric_metrics_env_camera', 'environment_id', 'camera_id'),
+    )

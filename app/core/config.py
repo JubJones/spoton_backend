@@ -507,6 +507,23 @@ class Settings(BaseSettings):
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
     HOMOGRAPHY_SOURCE: str = Field(default="auto", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
+    HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
+    WORLD_BOUNDS_X_MIN: float = Field(default=-50.0, description="Minimum world X coordinate (meters)")
+    WORLD_BOUNDS_X_MAX: float = Field(default=50.0, description="Maximum world X coordinate (meters)")
+    WORLD_BOUNDS_Y_MIN: float = Field(default=-50.0, description="Minimum world Y coordinate (meters)")
+    WORLD_BOUNDS_Y_MAX: float = Field(default=50.0, description="Maximum world Y coordinate (meters)")
+    ENABLE_POINT_VALIDATION: bool = Field(default=True, description="Enable image-space point validation checks")
+    ENABLE_BOUNDS_VALIDATION: bool = Field(default=True, description="Enable world bounds validation after homography projection")
+    ROI_BASE_RADIUS: float = Field(default=1.5, description="Base ROI radius in meters")
+    ROI_MAX_WALKING_SPEED: float = Field(default=1.5, description="Maximum walking speed in m/s for ROI expansion")
+    ROI_MIN_RADIUS: float = Field(default=0.5, description="Minimum ROI radius in meters")
+    ROI_MAX_RADIUS: float = Field(default=10.0, description="Maximum ROI radius in meters")
+    ROI_SHAPE: str = Field(default="circular", description="ROI shape: 'circular' or 'rectangular'")
+    EXACT_MATCH_CONFIDENCE: float = Field(default=0.95, description="Base confidence for exact geometric matches")
+    CLOSEST_MATCH_CONFIDENCE: float = Field(default=0.70, description="Base confidence when choosing closest candidate")
+    DISTANCE_PENALTY_FACTOR: float = Field(default=0.1, description="Confidence reduction per meter of separation")
+    MIN_MATCH_CONFIDENCE: float = Field(default=0.5, description="Minimum confidence required to accept geometric match")
+    HIGH_CONFIDENCE_THRESHOLD: float = Field(default=0.8, description="Threshold for counting matches as high-confidence")
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

@@ -2,7 +2,7 @@
 """
 Module for shared type aliases and data structures used across the application.
 """
-from typing import Dict, Tuple, Optional, List, NewType, NamedTuple, Callable
+from typing import Dict, Tuple, Optional, List, NewType, NamedTuple, Callable, Any
 import numpy as np
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,9 @@ class TrackedObjectData(BaseModel):
     confidence: Optional[float] = None
     feature_vector: Optional[List[float]] = None # Optional: if features are explicitly passed
     map_coords: Optional[List[float]] = Field(None, description="Projected [X, Y] coordinates on the map. Null if not available.")
+    search_roi: Optional[Dict[str, Any]] = Field(None, description="ROI payload for spatial search.")
+    transformation_quality: Optional[float] = Field(None, description="Quality score for world-plane projection.")
+    geometric_match: Optional[Dict[str, Any]] = Field(None, description="Geometric match metadata.")
 
     class Config:
         arbitrary_types_allowed = True

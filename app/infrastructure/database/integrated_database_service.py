@@ -21,6 +21,7 @@ from app.infrastructure.database.repositories.analytics_totals_repository import
     AnalyticsTotalsRepository,
     DEFAULT_BUCKET_SECONDS,
 )
+from app.infrastructure.database.repositories.geometric_metrics_repository import GeometricMetricsRepository
 from app.infrastructure.database.base import get_db, get_session_factory, check_database_connection
 from typing import Any
 from app.domains.mapping.entities.coordinate import Coordinate
@@ -125,6 +126,20 @@ class IntegratedDatabaseService:
         db = session_factory()
         try:
             yield AnalyticsTotalsRepository(db)
+        finally:
+            db.close()
+    
+    @asynccontextmanager
+    async def get_geometric_metrics_repository(self):
+        """Context manager yielding geometric metrics repository when DB enabled."""
+        session_factory = get_session_factory()
+        if session_factory is None:
+            yield None
+            return
+
+        db = session_factory()
+        try:
+            yield GeometricMetricsRepository(db)
         finally:
             db.close()
     
@@ -443,6 +458,40 @@ class IntegratedDatabaseService:
             unique_entities=unique_entities,
             bucket_size_seconds=bucket_size_seconds,
         )
+
+    async def record_geometric_metrics(
+        self,
+        *,
+        environment_id: str,
+        camera_id: Optional[str],
+        extraction_total_attempts: int,
+        extraction_validation_failures: int,
+        extraction_success_rate: float,
+        transformation_total_attempts: Optional[int],
+        transformation_validation_failures: Optional[int],
+        transformation_success_rate: Optional[float],
+        roi_total_created: int,
+        event_timestamp: datetime,
+    ) -> None:
+        """Persist geometric pipeline metrics snapshot for analytics."""
+        try:
+            async with self.get_geometric_metrics_repository() as repo:
+                if repo is None:
+                    return
+                repo.insert_metric(
+                    event_timestamp=event_timestamp,
+                    environment_id=environment_id,
+                    camera_id=camera_id,
+                    extraction_total_attempts=extraction_total_attempts,
+                    extraction_validation_failures=extraction_validation_failures,
+                    extraction_success_rate=extraction_success_rate,
+                    transformation_total_attempts=transformation_total_attempts,
+                    transformation_validation_failures=transformation_validation_failures,
+                    transformation_success_rate=transformation_success_rate,
+                    roi_total_created=roi_total_created,
+                )
+        except Exception as exc:
+            logger.warning(f"Failed to record geometric metrics snapshot: {exc}")
 
     async def get_dashboard_snapshot(
         self,
