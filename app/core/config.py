@@ -524,6 +524,11 @@ class Settings(BaseSettings):
     DISTANCE_PENALTY_FACTOR: float = Field(default=0.1, description="Confidence reduction per meter of separation")
     MIN_MATCH_CONFIDENCE: float = Field(default=0.5, description="Minimum confidence required to accept geometric match")
     HIGH_CONFIDENCE_THRESHOLD: float = Field(default=0.8, description="Threshold for counting matches as high-confidence")
+    ENABLE_DEBUG_REPROJECTION: bool = Field(default=True, description="Enable reprojection debugging overlays")
+    DEBUG_OVERLAY_RADIUS_PX: int = Field(default=6, description="Radius (px) for predicted marker visualization")
+    DEBUG_REPROJECTION_OUTPUT_DIR: str = Field(default="app/debug_outputs", description="Directory for saved reprojection frames")
+    DEBUG_FRAME_SAMPLING_RATE: int = Field(default=1, description="Persist every Nth frame for reprojection debugging")
+    DEBUG_MAX_FRAMES_PER_CAMERA: int = Field(default=500, description="Maximum saved debug frames per camera per run")
 
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379

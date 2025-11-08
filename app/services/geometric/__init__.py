@@ -5,6 +5,9 @@ from .world_plane_transformer import WorldPlaneTransformer, WorldPoint
 from .roi_calculator import ROICalculator, SearchROI, ROIShape
 from .geometric_matcher import GeometricMatcher, MatchResult, MatchType
 from .metrics_collector import MetricsCollector, GeometricMatchingMetrics
+from .inverse_projector import InverseHomographyProjector, ProjectedImagePoint
+from .debug_overlay import DebugOverlay
+from .reprojection_debugger import ReprojectionDebugger
 
 __all__ = [
     "BottomPointExtractor",
@@ -19,4 +22,8 @@ __all__ = [
     "MatchType",
     "MetricsCollector",
     "GeometricMatchingMetrics",
+    "InverseHomographyProjector",
+    "ProjectedImagePoint",
+    "DebugOverlay",
+    "ReprojectionDebugger",
 ]

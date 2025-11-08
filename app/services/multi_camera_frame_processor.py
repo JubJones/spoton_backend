@@ -33,6 +33,10 @@ from app.services.geometric import (
     ROIShape,
     GeometricMatcher,
     MetricsCollector,
+    InverseHomographyProjector,
+    ProjectedImagePoint,
+    DebugOverlay,
+    ReprojectionDebugger,
 )
 from app.core.config import settings
 from app.tracing import analytics_event_tracer
@@ -81,6 +85,37 @@ class MultiCameraFrameProcessor:
         self.metrics_collector = MetricsCollector(
             high_confidence_threshold=getattr(settings, "HIGH_CONFIDENCE_THRESHOLD", 0.8),
         )
+
+        self.enable_debug_reprojection = bool(getattr(settings, "ENABLE_DEBUG_REPROJECTION", False))
+        self.inverse_projector: Optional[InverseHomographyProjector] = None
+        self.debug_overlay: Optional[DebugOverlay] = None
+        self.reprojection_debugger: Optional[ReprojectionDebugger] = None
+        self._frame_store: Dict[str, np.ndarray] = {}
+
+        if self.enable_debug_reprojection:
+            try:
+                self.debug_overlay = DebugOverlay(
+                    radius_px=getattr(settings, "DEBUG_OVERLAY_RADIUS_PX", 6)
+                )
+                self.reprojection_debugger = ReprojectionDebugger(
+                    frame_provider=self._provide_frame_for_debug,
+                    output_dir=getattr(settings, "DEBUG_REPROJECTION_OUTPUT_DIR", "app/debug_outputs"),
+                    sampling_rate=getattr(settings, "DEBUG_FRAME_SAMPLING_RATE", 1),
+                    max_frames_per_camera=getattr(settings, "DEBUG_MAX_FRAMES_PER_CAMERA", 500),
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize reprojection debugger: %s", exc)
+                self.enable_debug_reprojection = False
+
+            if self.enable_debug_reprojection and self.world_plane_transformer:
+                try:
+                    self.inverse_projector = InverseHomographyProjector(
+                        world_plane_transformer=self.world_plane_transformer
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to initialize inverse projector: %s", exc)
+                    self.inverse_projector = None
+
         logger.info("MultiCameraFrameProcessor initialized (expects pre-loaded components).")
 
 
@@ -129,37 +164,57 @@ class MultiCameraFrameProcessor:
         self,
         final_batch_results: Dict[CameraID, List[TrackedObjectData]],
         processed_frame_count: int,
+        camera_frame_shapes: Dict[CameraID, Tuple[int, int]],
+        camera_homographies: Dict[CameraID, Optional[np.ndarray]],
+        environment_id: str,
     ) -> None:
         """Perform cross-camera geometric matching using ROIs and world coordinates."""
         min_confidence = getattr(settings, "MIN_MATCH_CONFIDENCE", 0.5)
-        cameras = list(final_batch_results.keys())
-        if len(cameras) < 2:
+        if len(final_batch_results) < 2:
             return
 
         timestamp_value = float(processed_frame_count)
+        debug_enabled = bool(self.enable_debug_reprojection and self.reprojection_debugger and self.debug_overlay)
 
-        # Pre-compute candidate world points per camera
         candidates_by_camera: Dict[CameraID, List[WorldPoint]] = {}
+        track_lookup_by_camera: Dict[str, Dict[int, TrackedObjectData]] = {}
+
         for cam_id, track_data in final_batch_results.items():
-            candidates: List[WorldPoint] = []
+            candidate_points: List[WorldPoint] = []
+            track_lookup: Dict[int, TrackedObjectData] = {}
+
             for track in track_data:
+                try:
+                    track_lookup[int(track.track_id)] = track
+                except (TypeError, ValueError):
+                    continue
+
                 if track.map_coords is None:
                     continue
+
                 try:
-                    world_point = WorldPoint(
-                        x=float(track.map_coords[0]),
-                        y=float(track.map_coords[1]),
-                        camera_id=str(cam_id),
-                        person_id=int(track.track_id),
-                        original_image_point=(0.0, 0.0),
-                        frame_number=processed_frame_count,
-                        timestamp=timestamp_value,
-                        transformation_quality=float(track.transformation_quality or 1.0),
+                    candidate_points.append(
+                        WorldPoint(
+                            x=float(track.map_coords[0]),
+                            y=float(track.map_coords[1]),
+                            camera_id=str(cam_id),
+                            person_id=int(track.track_id),
+                            original_image_point=(0.0, 0.0),
+                            frame_number=processed_frame_count,
+                            timestamp=timestamp_value,
+                            transformation_quality=float(track.transformation_quality or 1.0),
+                        )
                     )
-                    candidates.append(world_point)
                 except Exception as exc:
-                    logger.debug("Skipping candidate creation for camera %s track %s: %s", cam_id, track.track_id, exc)
-            candidates_by_camera[cam_id] = candidates
+                    logger.debug(
+                        "Skipping candidate creation for camera %s track %s: %s",
+                        cam_id,
+                        track.track_id,
+                        exc,
+                    )
+
+            candidates_by_camera[cam_id] = candidate_points
+            track_lookup_by_camera[str(cam_id)] = track_lookup
 
         for source_camera, tracks in final_batch_results.items():
             for track in tracks:
@@ -180,7 +235,12 @@ class MultiCameraFrameProcessor:
                         timestamp=track.search_roi.get("timestamp"),
                     )
                 except Exception as exc:
-                    logger.debug("Failed to rehydrate ROI for camera %s track %s: %s", source_camera, track.track_id, exc)
+                    logger.debug(
+                        "Failed to rehydrate ROI for camera %s track %s: %s",
+                        source_camera,
+                        track.track_id,
+                        exc,
+                    )
                     continue
 
                 source_world_point = WorldPoint(
@@ -201,16 +261,62 @@ class MultiCameraFrameProcessor:
                     if dest_camera == source_camera or not candidates:
                         continue
 
-                    roi.dest_camera = str(dest_camera)
+                    dest_camera_str = str(dest_camera)
+                    roi.dest_camera = dest_camera_str
+
                     start_time = time.perf_counter()
-                    match_result = self.geometric_matcher.match_person(source_world_point, candidates, roi)
+                    match_result = self.geometric_matcher.match_person(
+                        source_world_point,
+                        candidates,
+                        roi,
+                    )
                     elapsed_ms = (time.perf_counter() - start_time) * 1000.0
 
                     self.metrics_collector.record_match(
                         match_result=match_result,
                         processing_time_ms=elapsed_ms,
-                        transformation_quality=transformation_quality if transformation_quality is not None else 0.0,
+                        transformation_quality=source_world_point.transformation_quality,
                     )
+
+                    if debug_enabled:
+                        projected_point = None
+                        if self.inverse_projector:
+                            projected_point = self.inverse_projector.project(source_world_point, dest_camera_str)
+                        else:
+                            projected_point = self._project_world_to_image(
+                                dest_camera=dest_camera_str,
+                                world_point=source_world_point,
+                                camera_homographies=camera_homographies,
+                                environment_id=environment_id,
+                            )
+
+                        if projected_point:
+                            actual_point_tuple: Optional[Tuple[float, float]] = None
+                            if match_result.matched_person_id is not None:
+                                dest_lookup = track_lookup_by_camera.get(dest_camera_str, {})
+                                matched_track = dest_lookup.get(match_result.matched_person_id)
+                                if matched_track:
+                                    frame_shape = camera_frame_shapes.get(dest_camera)
+                                    actual_point_tuple = self._bottom_center_from_bbox(
+                                        matched_track.bbox_xyxy,
+                                        frame_shape,
+                                    )
+
+                            has_actual = actual_point_tuple is not None
+                            self.metrics_collector.record_reprojection_event(has_actual)
+                            if has_actual and actual_point_tuple is not None:
+                                error_px = self._compute_pixel_error(projected_point, actual_point_tuple)
+                                projected_point.reprojection_error_px = error_px
+                                self.metrics_collector.record_reprojection_error(error_px)
+
+                            if self.reprojection_debugger and self.debug_overlay:
+                                self.reprojection_debugger.emit(
+                                    dest_camera_str,
+                                    processed_frame_count,
+                                    self.debug_overlay,
+                                    projected_point,
+                                    actual_point_tuple,
+                                )
 
                     if not match_result.is_successful():
                         continue
@@ -236,8 +342,11 @@ class MultiCameraFrameProcessor:
                     "roi_radius": best_match.roi_radius,
                 }
 
-                # annotate destination track
-                dest_tracks = final_batch_results.get(CameraID(best_match.dest_camera))
+                dest_camera_id = best_match.dest_camera
+                if not dest_camera_id:
+                    continue
+
+                dest_tracks = final_batch_results.get(CameraID(dest_camera_id))
                 if dest_tracks:
                     for dest_track in dest_tracks:
                         if int(dest_track.track_id) == best_match.matched_person_id:
@@ -252,6 +361,82 @@ class MultiCameraFrameProcessor:
                                 "roi_radius": best_match.roi_radius,
                             }
                             break
+
+    @staticmethod
+    def _compute_pixel_error(predicted_point: ProjectedImagePoint, actual_point: Tuple[float, float]) -> float:
+        dx = predicted_point.x - actual_point[0]
+        dy = predicted_point.y - actual_point[1]
+        return float((dx ** 2 + dy ** 2) ** 0.5)
+
+    @staticmethod
+    def _bottom_center_from_bbox(
+        bbox_xyxy: BoundingBoxXYXY,
+        frame_shape: Optional[Tuple[int, int]],
+    ) -> Tuple[float, float]:
+        x1, y1, x2, y2 = map(float, bbox_xyxy)
+        center_x = (x1 + x2) / 2.0
+        bottom_y = y2
+
+        if frame_shape:
+            height, width = frame_shape
+            center_x = max(0.0, min(center_x, width - 1))
+            bottom_y = max(0.0, min(bottom_y, height - 1))
+
+        return (center_x, bottom_y)
+
+    def _project_world_to_image(
+        self,
+        dest_camera: str,
+        world_point: WorldPoint,
+        camera_homographies: Dict[CameraID, Optional[np.ndarray]],
+        environment_id: str,
+    ) -> Optional[ProjectedImagePoint]:
+        cam_id = CameraID(dest_camera)
+        matrix = camera_homographies.get(cam_id)
+
+        if matrix is None and self.homography_service:
+            try:
+                matrix = self.homography_service.get_homography_matrix(environment_id, cam_id)
+                camera_homographies[cam_id] = matrix
+            except Exception:
+                matrix = None
+
+        if matrix is None:
+            return None
+
+        try:
+            inverse_matrix = np.linalg.inv(matrix)
+        except np.linalg.LinAlgError:
+            return None
+
+        input_world = np.array([[[world_point.x, world_point.y]]], dtype=np.float32)
+        try:
+            projected = cv2.perspectiveTransform(input_world, inverse_matrix)
+        except cv2.error:
+            return None
+
+        x_px = float(projected[0, 0, 0])
+        y_px = float(projected[0, 0, 1])
+
+        if not np.isfinite(x_px) or not np.isfinite(y_px):
+            return None
+
+        return ProjectedImagePoint(
+            x=x_px,
+            y=y_px,
+            camera_id=dest_camera,
+            person_id=world_point.person_id,
+            source_camera_id=str(world_point.camera_id),
+            world_point=(world_point.x, world_point.y),
+            frame_number=world_point.frame_number,
+            timestamp=world_point.timestamp,
+        )
+
+    def _provide_frame_for_debug(self, camera_id: str, frame_number: int) -> Optional[np.ndarray]:
+        frame = self._frame_store.get(camera_id)
+        if frame is None:
+            return None
+        return frame.copy()
 
     def _parse_raw_tracker_output(
         self, task_id: uuid.UUID, camera_id: CameraID, tracker_output_np: np.ndarray
@@ -409,10 +594,20 @@ class MultiCameraFrameProcessor:
         active_track_keys_this_batch_set: Set[TrackKey] = set()
         all_handoff_triggers_this_batch: List[HandoffTriggerInfo] = []
         camera_frame_shapes: Dict[CameraID, Tuple[int, int]] = {} 
+        camera_homographies: Dict[CameraID, Optional[np.ndarray]] = {}
         confidences_map: Dict[TrackKey, float] = {}
 
         per_camera_detections_tasks = []
         valid_cam_ids_in_batch = [cam_id for cam_id, data in frame_batch.items() if data is not None]
+
+        if self.enable_debug_reprojection:
+            self._frame_store = {}
+            for cam_id_loop in valid_cam_ids_in_batch:
+                frame_data_loop = frame_batch.get(cam_id_loop)
+                if frame_data_loop and frame_data_loop[0] is not None:
+                    self._frame_store[str(cam_id_loop)] = frame_data_loop[0]
+        else:
+            self._frame_store = {}
 
         async def detect_for_camera(cam_id_local: CameraID, frame_image_np_local: np.ndarray) -> Tuple[CameraID, List[RawDetection]]:
             raw_model_detections = await self.detector.detect(frame_image_np_local) 
@@ -500,6 +695,7 @@ class MultiCameraFrameProcessor:
             map_coords_output: Optional[List[float]] = None
             transformation_quality: Optional[float] = None
             homography_matrix_current_cam = self.homography_service.get_homography_matrix(environment_id, cam_id_active)
+            camera_homographies[cam_id_active] = homography_matrix_current_cam
             frame_shape_for_cam = camera_frame_shapes.get(cam_id_active)
             bottom_point: Optional[ImagePoint] = None
 
@@ -592,7 +788,15 @@ class MultiCameraFrameProcessor:
             f"Features for association: {len(features_for_assoc_input)}. "
             f"Handoff Triggers: {len(all_handoff_triggers_this_batch)}."
         )
-        self._apply_geometric_matching(final_batch_results, processed_frame_count)
+        self._apply_geometric_matching(
+            final_batch_results,
+            processed_frame_count,
+            camera_frame_shapes,
+            camera_homographies,
+            environment_id,
+        )
+        if self.enable_debug_reprojection:
+            self._frame_store.clear()
         await self._emit_geometric_metrics(environment_id)
         return dict(final_batch_results) 
 

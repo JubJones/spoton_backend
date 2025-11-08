@@ -43,6 +43,12 @@ class GeometricMatchingMetrics:
     transformation_success_rate: float = 0.0
     avg_transformation_quality: float = 0.0
 
+    avg_reprojection_error_px: float = 0.0
+    max_reprojection_error_px: float = 0.0
+    reprojection_samples: int = 0
+    reprojection_events: int = 0
+    reprojection_missing_actual: int = 0
+
     camera_pair_stats: Dict[str, int] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -67,6 +73,11 @@ class GeometricMatchingMetrics:
             "total_processing_time_ms": self.total_processing_time_ms,
             "transformation_success_rate": self.transformation_success_rate,
             "avg_transformation_quality": self.avg_transformation_quality,
+            "avg_reprojection_error_px": self.avg_reprojection_error_px,
+            "max_reprojection_error_px": self.max_reprojection_error_px,
+            "reprojection_samples": self.reprojection_samples,
+            "reprojection_events": self.reprojection_events,
+            "reprojection_missing_actual": self.reprojection_missing_actual,
             "camera_pair_stats": dict(self.camera_pair_stats),
         }
 
@@ -79,6 +90,9 @@ class MetricsCollector:
         self.logger = logging.getLogger(__name__)
         self._records: List[Dict[str, Any]] = []
         self.camera_pair_counts: Dict[str, int] = {}
+        self._reprojection_errors: List[float] = []
+        self._reprojection_events: int = 0
+        self._reprojection_missing_actual: int = 0
 
     def record_match(
         self,
@@ -166,6 +180,15 @@ class MetricsCollector:
             avg_trans_quality = 0.0
             transformation_success_rate = 0.0
 
+        if self._reprojection_errors:
+            avg_reprojection_error = statistics.mean(self._reprojection_errors)
+            max_reprojection_error = max(self._reprojection_errors)
+            reprojection_samples = len(self._reprojection_errors)
+        else:
+            avg_reprojection_error = 0.0
+            max_reprojection_error = 0.0
+            reprojection_samples = 0
+
         filtered_pairs: Dict[str, int] = {}
         for m in match_results:
             key = f"{m.source_camera}→{m.dest_camera}"
@@ -192,8 +215,24 @@ class MetricsCollector:
             total_processing_time_ms=total_processing_time,
             transformation_success_rate=transformation_success_rate,
             avg_transformation_quality=avg_trans_quality,
+            avg_reprojection_error_px=avg_reprojection_error,
+            max_reprojection_error_px=max_reprojection_error,
+            reprojection_samples=reprojection_samples,
+            reprojection_events=self._reprojection_events,
+            reprojection_missing_actual=self._reprojection_missing_actual,
             camera_pair_stats=filtered_pairs,
         )
+
+    def record_reprojection_error(self, error_px: float) -> None:
+        """Record pixel-space reprojection error for debugging."""
+        if error_px >= 0:
+            self._reprojection_errors.append(float(error_px))
+
+    def record_reprojection_event(self, has_actual: bool) -> None:
+        """Track when a projected point was rendered and whether a destination detection existed."""
+        self._reprojection_events += 1
+        if not has_actual:
+            self._reprojection_missing_actual += 1
 
     def get_camera_pair_performance(self, source_camera: str, dest_camera: str) -> Dict[str, Any]:
         """Get performance metrics for specific camera pair."""
@@ -247,5 +286,15 @@ class MetricsCollector:
         self.logger.info("\nPerformance:")
         self.logger.info("  - Avg Processing Time: %.1fms", metrics.avg_processing_time_ms)
         self.logger.info("  - Transformation Success Rate: %.1f%%", metrics.transformation_success_rate * 100)
+
+        self.logger.info("\nReprojection Debug:")
+        self.logger.info(
+            "  - Events: %d (missing actual detection: %d)",
+            metrics.reprojection_events,
+            metrics.reprojection_missing_actual,
+        )
+        self.logger.info("  - Samples: %d", metrics.reprojection_samples)
+        self.logger.info("  - Avg Pixel Error: %.1fpx", metrics.avg_reprojection_error_px)
+        self.logger.info("  - Max Pixel Error: %.1fpx", metrics.max_reprojection_error_px)
 
         self.logger.info("=" * 60)

@@ -42,9 +42,13 @@ from app.services.geometric import (
     WorldPoint,
     ROICalculator,
     ROIShape,
+    InverseHomographyProjector,
+    ProjectedImagePoint,
+    DebugOverlay,
+    ReprojectionDebugger,
 )
 from app.tracing import analytics_event_tracer
-from app.shared.types import CameraID
+from app.shared.types import CameraID, TrackID
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,36 @@ class DetectionVideoService(RawVideoService):
             min_radius=getattr(settings, "ROI_MIN_RADIUS", 0.5),
             max_radius=getattr(settings, "ROI_MAX_RADIUS", 10.0),
         )
+        self.enable_debug_reprojection = bool(getattr(settings, "ENABLE_DEBUG_REPROJECTION", False))
+        self.debug_overlay: Optional[DebugOverlay] = None
+        self.reprojection_debugger: Optional[ReprojectionDebugger] = None
+        self.inverse_projector: Optional[InverseHomographyProjector] = None
+        self._inverse_homography_cache: Dict[Tuple[str, str], np.ndarray] = {}
+        self._debug_frame_store: Dict[Tuple[str, int], np.ndarray] = {}
+
+        if self.enable_debug_reprojection:
+            try:
+                self.debug_overlay = DebugOverlay(
+                    radius_px=getattr(settings, "DEBUG_OVERLAY_RADIUS_PX", 6)
+                )
+                self.reprojection_debugger = ReprojectionDebugger(
+                    frame_provider=self._provide_debug_frame,
+                    output_dir=getattr(settings, "DEBUG_REPROJECTION_OUTPUT_DIR", "app/debug_outputs"),
+                    sampling_rate=getattr(settings, "DEBUG_FRAME_SAMPLING_RATE", 1),
+                    max_frames_per_camera=getattr(settings, "DEBUG_MAX_FRAMES_PER_CAMERA", 500),
+                )
+            except Exception as exc:
+                logger.warning("Failed to initialize detection reprojection debugger: %s", exc)
+                self.enable_debug_reprojection = False
+
+            if self.enable_debug_reprojection and self.world_plane_transformer:
+                try:
+                    self.inverse_projector = InverseHomographyProjector(
+                        world_plane_transformer=self.world_plane_transformer
+                    )
+                except Exception as exc:
+                    logger.warning("Failed to initialize inverse projector for detection pipeline: %s", exc)
+                    self.inverse_projector = None
         
         # Detection statistics (enhanced for Phase 2)
         self.detection_stats = {
@@ -1469,7 +1503,7 @@ class DetectionVideoService(RawVideoService):
             
             # Process frames with detection only
             await self._update_task_status(task_id, "PROCESSING", 0.60, "Processing frames with RT-DETR detection")
-            success = await self._process_frames_simple_detection(task_id, video_data)
+            success = await self._process_frames_simple_detection(task_id, environment_id, video_data)
             if self._task_marked_stopped(task_id):
                 logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
                 return
@@ -1501,7 +1535,7 @@ class DetectionVideoService(RawVideoService):
             self._clear_client_watch(task_id)
             await self._cleanup_playback_task(task_id)
     
-    async def _process_frames_simple_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
+    async def _process_frames_simple_detection(self, task_id: uuid.UUID, environment_id: str, video_data: Dict[str, Any]) -> bool:
         """
         Process frames with simple RT-DETR detection only.
         
@@ -1541,16 +1575,28 @@ class DetectionVideoService(RawVideoService):
                 
                 # Process all cameras for current frame
                 any_frame_processed = False
+                frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                 
                 for camera_id, data in video_data.items():
                     cap = data.get("video_capture")
                     if cap and cap.isOpened():
                         ret, frame = cap.read()
                         if ret:
+                            if self.enable_debug_reprojection:
+                                self._debug_frame_store[(camera_id, frame_index)] = frame.copy()
+
                             # Run enhanced flow stub on frame (routes to detection + tracking)
                             detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
+                            if self.enable_debug_reprojection:
+                                world_points = self._collect_world_points(
+                                    detection_data=detection_data,
+                                    camera_id=camera_id,
+                                    frame_number=frame_index,
+                                )
+                                if world_points:
+                                    frame_debug_payload[camera_id] = {"world_points": world_points}
                             
                             # Send WebSocket update with detection results
                             await self.send_detection_update(
@@ -1571,6 +1617,19 @@ class DetectionVideoService(RawVideoService):
                 if not any_frame_processed:
                     logger.info(f"🔍 SIMPLE DETECTION: All cameras finished at frame {frame_index}")
                     break
+
+                if self.enable_debug_reprojection and frame_debug_payload:
+                    self._emit_reprojection_debug_frame(
+                        environment_id=environment_id,
+                        frame_number=frame_index,
+                        frame_payload=frame_debug_payload,
+                    )
+                    for cam_key in frame_debug_payload.keys():
+                        self._debug_frame_store.pop((cam_key, frame_index), None)
+                elif self.enable_debug_reprojection:
+                    for key in list(self._debug_frame_store.keys()):
+                        if key[1] == frame_index:
+                            self._debug_frame_store.pop(key, None)
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:
@@ -1606,6 +1665,201 @@ class DetectionVideoService(RawVideoService):
             logger.error(f"❌ SIMPLE DETECTION: Error in frame processing: {e}")
             return False
     
+    def _collect_world_points(
+        self,
+        detection_data: Dict[str, Any],
+        camera_id: str,
+        frame_number: int,
+    ) -> List[WorldPoint]:
+        results: List[WorldPoint] = []
+
+        tracks = detection_data.get("tracks") or []
+        for track in tracks:
+            map_coords = track.get("map_coords")
+            bbox = track.get("bbox_xyxy")
+            if not map_coords or not bbox or len(map_coords) < 2 or len(bbox) < 4:
+                continue
+
+            try:
+                person_id = TrackID(int(track.get("track_id")))
+            except (TypeError, ValueError):
+                person_id = None
+
+            x1, y1, x2, y2 = map(float, bbox[:4])
+            center_x = (x1 + x2) / 2.0
+            bottom_y = y2
+
+            try:
+                results.append(
+                    WorldPoint(
+                        x=float(map_coords[0]),
+                        y=float(map_coords[1]),
+                        camera_id=CameraID(camera_id),
+                        person_id=person_id,
+                        original_image_point=(center_x, bottom_y),
+                        frame_number=frame_number,
+                        timestamp=float(frame_number),
+                        transformation_quality=float(track.get("transformation_quality") or 1.0),
+                    )
+                )
+            except Exception:
+                continue
+
+        detections = detection_data.get("detections") or []
+        for det in detections:
+            map_coords = det.get("map_coords") or {}
+            if not map_coords:
+                continue
+
+            bbox_meta = det.get("bbox") or {}
+            x1 = float(bbox_meta.get("x1", 0.0))
+            y1 = float(bbox_meta.get("y1", 0.0))
+            x2 = float(bbox_meta.get("x2", x1))
+            y2 = float(bbox_meta.get("y2", y1))
+            center_x = (x1 + x2) / 2.0
+            bottom_y = y2
+
+            spatial = det.get("spatial_data") or {}
+            quality = spatial.get("transformation_quality")
+            try:
+                results.append(
+                    WorldPoint(
+                        x=float(map_coords.get("map_x")),
+                        y=float(map_coords.get("map_y")),
+                        camera_id=CameraID(camera_id),
+                        person_id=None,
+                        original_image_point=(center_x, bottom_y),
+                        frame_number=frame_number,
+                        timestamp=float(frame_number),
+                        transformation_quality=float(quality) if quality is not None else 1.0,
+                    )
+                )
+            except Exception:
+                continue
+
+        return results
+
+    def _emit_reprojection_debug_frame(
+        self,
+        environment_id: str,
+        frame_number: int,
+        frame_payload: Dict[str, Dict[str, Any]],
+    ) -> None:
+        if not (
+            self.enable_debug_reprojection
+            and self.reprojection_debugger
+            and self.debug_overlay
+        ):
+            return
+
+        for source_camera, payload in frame_payload.items():
+            world_points: List[WorldPoint] = payload.get("world_points", [])
+            if not world_points:
+                continue
+
+            for world_point in world_points:
+                for dest_camera in frame_payload.keys():
+                    if dest_camera == source_camera:
+                        continue
+
+                    projected = self._project_world_point_to_camera(
+                        environment_id=environment_id,
+                        dest_camera=dest_camera,
+                        world_point=world_point,
+                    )
+                    if not projected:
+                        continue
+
+                    self.reprojection_debugger.emit(
+                        camera_id=dest_camera,
+                        frame_number=frame_number,
+                        overlay=self.debug_overlay,
+                        predicted_point=projected,
+                        actual_point=None,
+                    )
+
+    def _project_world_point_to_camera(
+        self,
+        environment_id: str,
+        dest_camera: str,
+        world_point: WorldPoint,
+    ) -> Optional[ProjectedImagePoint]:
+        if self.inverse_projector:
+            projected = self.inverse_projector.project(world_point, dest_camera)
+            if projected:
+                return projected
+
+        inverse_matrix = self._get_inverse_homography_matrix(environment_id, dest_camera)
+        if inverse_matrix is None:
+            return None
+
+        input_world = np.array([[[world_point.x, world_point.y]]], dtype=np.float32)
+        try:
+            projected = cv2.perspectiveTransform(input_world, inverse_matrix)
+        except cv2.error:
+            return None
+
+        x_px = float(projected[0, 0, 0])
+        y_px = float(projected[0, 0, 1])
+        if not np.isfinite(x_px) or not np.isfinite(y_px):
+            return None
+
+        return ProjectedImagePoint(
+            x=x_px,
+            y=y_px,
+            camera_id=dest_camera,
+            person_id=world_point.person_id,
+            source_camera_id=str(world_point.camera_id),
+            world_point=(world_point.x, world_point.y),
+            frame_number=world_point.frame_number,
+            timestamp=world_point.timestamp,
+        )
+
+    def _get_inverse_homography_matrix(
+        self,
+        environment_id: str,
+        camera_id: str,
+    ) -> Optional[np.ndarray]:
+        cache_key = (environment_id, camera_id)
+        if cache_key in self._inverse_homography_cache:
+            return self._inverse_homography_cache[cache_key]
+
+        if not self.homography_service:
+            return None
+
+        try:
+            matrix = self.homography_service.get_homography_matrix(environment_id, CameraID(camera_id))
+        except Exception as exc:
+            logger.debug(
+                "Homography lookup failed for env %s camera %s: %s",
+                environment_id,
+                camera_id,
+                exc,
+            )
+            return None
+
+        if matrix is None:
+            return None
+
+        try:
+            inverse = np.linalg.inv(matrix)
+        except np.linalg.LinAlgError:
+            logger.debug(
+                "Homography matrix for env %s camera %s is not invertible",
+                environment_id,
+                camera_id,
+            )
+            return None
+
+        self._inverse_homography_cache[cache_key] = inverse
+        return inverse
+
+    def _provide_debug_frame(self, camera_id: str, frame_number: int) -> Optional[np.ndarray]:
+        frame = self._debug_frame_store.get((camera_id, frame_number))
+        if frame is None:
+            return None
+        return frame.copy()
+
     async def _process_frames_with_realtime_streaming(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """
         Process frames with real-time detection and WebSocket streaming.
