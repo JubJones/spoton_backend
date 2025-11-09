@@ -254,7 +254,12 @@ async def health_check(request: Request):
     # Detector is initialized per task (RT-DETR). Do not require preload for health.
     detector_ready = True
     tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
-    homography_ready = homography_service_state and homography_service_state._preloaded
+    homography_ready = False
+    if homography_service_state is not None:
+        try:
+            homography_ready = bool(homography_service_state.json_homography_matrices)
+        except Exception:
+            homography_ready = False
 
     status_report = {
         "status": "healthy",

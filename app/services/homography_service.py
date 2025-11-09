@@ -13,16 +13,16 @@ Features:
 - Backwards compatibility with existing preload system
 """
 import logging
-from typing import Dict, Optional, Tuple
-from pathlib import Path
-import asyncio
 import json
+import re
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
-import cv2 # For cv2.findHomography
+import cv2  # For cv2.findHomography
 
-from app.core.config import Settings # Use the main Settings class
-from app.shared.types import CameraID, CameraHandoffDetailConfig
+from app.core.config import Settings  # Use the main Settings class
+from app.shared.types import CameraID
 
 logger = logging.getLogger(__name__)
 
@@ -33,257 +33,210 @@ class HomographyService:
     """
 
     def __init__(self, settings: Settings, homography_dir: str = "homography_data/"):
-        """
-        Initializes the HomographyService with both existing and Phase 4 capabilities.
-
-        Args:
-            settings: The application settings instance.
-            homography_dir: Directory containing Phase 4 JSON homography files
-        """
+        """Initialize the homography service using a single consolidated JSON file."""
         self._settings = settings
-        self._homography_matrices: Dict[Tuple[str, CameraID], Optional[np.ndarray]] = {}
-        self._preloaded = False
-        
-        # Phase 4: Additional storage for JSON-based homography data
         self.homography_dir = Path(homography_dir)
+
+        # Phase 4: JSON-driven calibration storage
         self.json_homography_matrices: Dict[str, np.ndarray] = {}
-        self.calibration_points: Dict[str, Dict] = {}
+        self.calibration_points: Dict[str, Dict[str, Any]] = {}
         self.ransac_threshold = 5.0  # Maximum allowed reprojection error
         self._warned_cameras: set = set()  # Track warned cameras to avoid spam
-        
-        # Load homography data per configured source preference
-        source_pref = str(getattr(self._settings, 'HOMOGRAPHY_SOURCE', 'auto')).lower()
-        if source_pref == 'json':
-            self.load_json_homography_data()
-        elif source_pref == 'npz':
-            self.load_npz_homography_data()
-        else:  # 'auto' (default) → JSON first, then NPZ to fill gaps
-            self.load_json_homography_data()
-            self.load_npz_homography_data()
-        
-        logger.info("HomographyService initialized with Phase 4 enhancements.")
 
-    async def preload_all_homography_matrices(self):
-        """
-        Loads all homography point files specified in settings,
-        computes the matrices, and caches them.
-        This method is intended to be called once at application startup.
-        """
-        if self._preloaded:
-            logger.info("Homography matrices already preloaded.")
+        # Configuration
+        self.homography_file_path = self._resolve_homography_file_path()
+        self._loaded = False
+
+        source_pref = str(getattr(self._settings, "HOMOGRAPHY_SOURCE", "json")).lower()
+        if source_pref != "json":
+            logger.warning(
+                "HOMOGRAPHY_SOURCE='%s' is no longer supported. Falling back to single JSON file.",
+                source_pref,
+            )
+
+        # Load matrices immediately so the service is ready for use.
+        self.load_json_homography_data()
+
+        logger.info(
+            "HomographyService initialized. Loaded %d camera matrices from %s",
+            len(self.json_homography_matrices),
+            self.homography_file_path,
+        )
+
+    def _resolve_homography_file_path(self) -> Optional[Path]:
+        """Resolve the configured homography JSON file path."""
+        configured = getattr(self._settings, "HOMOGRAPHY_FILE_PATH", None)
+        if not configured:
+            return None
+
+        path = Path(configured)
+        if not path.is_absolute():
+            # Resolve relative to the project root (current working directory)
+            path = (Path.cwd() / path).resolve()
+
+        return path
+
+    def _ingest_consolidated_payload(self, payload: Dict[str, Any]) -> int:
+        """Populate local caches from the consolidated homography JSON payload."""
+        cameras = payload.get("cameras")
+        loaded_count = 0
+
+        if isinstance(cameras, list):
+            for entry in cameras:
+                if not isinstance(entry, dict):
+                    continue
+
+                try:
+                    camera_id = self._resolve_camera_id(entry)
+                except ValueError as exc:
+                    logger.warning("Skipping homography entry without camera id: %s", exc)
+                    continue
+
+                matrix_list = entry.get("homography")
+                if matrix_list is not None:
+                    matrix = np.array(matrix_list, dtype=np.float64)
+                    if matrix.shape == (3, 3):
+                        self.json_homography_matrices[camera_id] = matrix
+                    else:
+                        logger.warning(
+                            "Invalid homography shape for %s: expected (3, 3), got %s",
+                            camera_id,
+                            matrix.shape,
+                        )
+
+                image_points = entry.get("source_points") or entry.get("image_points")
+                map_points = entry.get("destination_points") or entry.get("map_points")
+                if image_points and map_points and len(image_points) >= 4 and len(map_points) >= 4:
+                    self.calibration_points[camera_id] = {
+                        "image_points": image_points,
+                        "map_points": map_points,
+                    }
+
+                loaded_count += 1
+
+        else:
+            # Fallback to legacy format with top-level H_<cam>_to_world keys
+            for key, matrix_list in payload.items():
+                if not (isinstance(key, str) and key.startswith("H_") and key.endswith("_to_world")):
+                    continue
+                camera_id = key[2:-9]
+                try:
+                    matrix = np.array(matrix_list, dtype=np.float64)
+                except (TypeError, ValueError):
+                    logger.warning("Invalid matrix data for key %s", key)
+                    continue
+
+                if matrix.shape != (3, 3):
+                    logger.warning(
+                        "Matrix for camera %s has invalid shape %s (expected 3x3)",
+                        camera_id,
+                        matrix.shape,
+                    )
+                    continue
+
+                self.json_homography_matrices[camera_id] = matrix
+                loaded_count += 1
+
+        return loaded_count
+
+    @staticmethod
+    def _resolve_camera_id(entry: Dict[str, Any]) -> str:
+        """Attempt to resolve a camera identifier from a JSON entry."""
+        # Preferred: explicit camera_id field
+        candidate = entry.get("camera_id") or entry.get("id")
+        if isinstance(candidate, str):
+            candidate = candidate.strip()
+            if candidate.startswith("c") and candidate[1:].isdigit():
+                return candidate
+
+        # Try to parse from frame path (e.g., .../c03/....png)
+        frame_path = entry.get("frame_path")
+        if isinstance(frame_path, str):
+            match = re.search(r"/(c\d{2})/", frame_path)
+            if match:
+                return match.group(1)
+
+        # Fall back to numeric suffix in id (e.g., "Cam 3" -> c03)
+        if isinstance(candidate, str):
+            digits = re.findall(r"\d+", candidate)
+            if digits:
+                return f"c{int(digits[0]):02d}"
+
+        raise ValueError("Unable to determine camera identifier")
+
+    def _ensure_loaded(self) -> None:
+        """Reload the homography data if it has not been loaded yet."""
+        if not self._loaded:
+            self.load_json_homography_data()
+
+    async def preload_all_homography_matrices(self) -> None:
+        """Ensure homography matrices are available before processing begins."""
+        if self._loaded:
+            logger.info(
+                "Homography matrices already loaded from %s", self.homography_file_path
+            )
             return
 
-        logger.info("Preloading all homography matrices...")
-        base_homography_path = self._settings.resolved_homography_base_path
-        
-        # Create tasks for each homography calculation
-        # Note: cv2.findHomography is CPU-bound, so asyncio.to_thread is appropriate
-        # But loading files and preparing data can be concurrent.
-        
-        load_tasks = []
-        for (env_id, cam_id_str), cam_config in self._settings.CAMERA_HANDOFF_DETAILS.items():
-            cam_id = CameraID(cam_id_str)
-            if cam_config.homography_matrix_path:
-                file_path = base_homography_path / cam_config.homography_matrix_path
-                # Prepare a coroutine for each computation
-                load_tasks.append(self._compute_and_cache_matrix(env_id, cam_id, file_path))
-            else:
-                # Cache as None if no path is configured
-                self._homography_matrices[(env_id, cam_id)] = None
-                logger.debug(f"No homography path for env '{env_id}', cam '{cam_id}'. Cached as None.")
-
-        # Execute all computations concurrently
-        results = await asyncio.gather(*load_tasks, return_exceptions=True)
-
-        num_successful = 0
-        for i, result in enumerate(results):
-            # Extract env_id, cam_id from the original list based on task order, if needed for logging errors
-            # For simplicity, errors are logged within _compute_and_cache_matrix
-            if isinstance(result, np.ndarray): # Assuming _compute_and_cache_matrix returns matrix on success
-                num_successful += 1
-            elif result is None and not isinstance(result, Exception): # Successfully processed as "no matrix"
-                pass # Already handled by _compute_and_cache_matrix logging or was intentional None
-            elif isinstance(result, Exception):
-                logger.error(f"Error during homography preloading task {i}: {result}")
-
-
-        self._preloaded = True
-        logger.info(f"Homography matrices preloading complete. {num_successful} matrices computed and cached.")
-
-
-    async def _compute_and_cache_matrix(
-        self, env_id: str, cam_id: CameraID, file_path: Path
-    ) -> Optional[np.ndarray]:
-        """
-        Computes a single homography matrix from a file and caches it.
-        Helper for preload_all_homography_matrices.
-        """
-        matrix: Optional[np.ndarray] = None
-        if not file_path.is_file():
-            logger.warning(f"Homography file not found for env '{env_id}', cam '{cam_id}': {file_path}")
-            self._homography_matrices[(env_id, cam_id)] = None
-            return None
-        
-        try:
-            # np.load is blocking, run in thread
-            data = await asyncio.to_thread(np.load, str(file_path))
-            image_points = data.get('image_points')
-            map_points = data.get('map_points')
-
-            if image_points is not None and map_points is not None and \
-               len(image_points) >= 4 and len(map_points) >= 4 and \
-               len(image_points) == len(map_points):
-                
-                # cv2.findHomography is CPU-bound
-                h_matrix, _ = await asyncio.to_thread(
-                    cv2.findHomography, image_points, map_points, cv2.RANSAC, 5.0
-                )
-                if h_matrix is not None:
-                    matrix = h_matrix
-                    logger.info(f"Successfully computed homography for env '{env_id}', cam '{cam_id}'.")
-                else:
-                    logger.warning(f"Homography calculation failed for env '{env_id}', cam '{cam_id}'.")
-            else:
-                logger.warning(f"Insufficient/mismatched points in homography file for env '{env_id}', cam '{cam_id}': {file_path}")
-        except Exception as e:
-            logger.error(f"Error computing homography for env '{env_id}', cam '{cam_id}': {e}", exc_info=True)
-        
-        self._homography_matrices[(env_id, cam_id)] = matrix
-        return matrix
+        self.load_json_homography_data()
+        logger.info(
+            "Homography matrices preloaded from %s (%d cameras)",
+            self.homography_file_path,
+            len(self.json_homography_matrices),
+        )
 
 
     def get_homography_matrix(self, environment_id: str, camera_id: CameraID) -> Optional[np.ndarray]:
-        """
-        Retrieves a pre-computed homography matrix.
+        """Return the homography matrix for the requested camera."""
+        del environment_id  # Environment-scoped matrices are replaced by a global JSON.
 
-        Args:
-            environment_id: The environment ID.
-            camera_id: The camera ID.
+        self._ensure_loaded()
 
-        Returns:
-            The pre-computed NumPy array for the homography matrix, or None if not available.
-        
-        Raises:
-            RuntimeError: If matrices have not been preloaded.
-        """
-        if not self._preloaded:
-            # This case should ideally not be hit if startup logic is correct.
-            # Fallback to on-demand loading could be an option here, but goal is preloading.
-            logger.error("Attempted to get homography matrix before preloading. This indicates a startup logic issue.")
-            # For robustness, you could try to load it on-demand here, but it defeats the purpose.
-            # For now, raise error or return None.
-            # await self.preload_all_homography_matrices() # NOT ideal to call here, should be done at startup.
-            raise RuntimeError("HomographyService: Matrices not preloaded. Call preload_all_homography_matrices() at startup.")
+        camera_key = str(camera_id)
+        matrix = self.json_homography_matrices.get(camera_key)
+        if matrix is not None:
+            return matrix
 
-        return self._homography_matrices.get((environment_id, camera_id))
+        # Attempt lazy computation from calibration points if a matrix was not provided
+        if camera_key not in self.calibration_points:
+            if camera_key not in self._warned_cameras:
+                logger.warning("No homography data available for camera %s", camera_key)
+                self._warned_cameras.add(camera_key)
+            return None
+
+        return self.compute_homography(camera_key)
     
     # Phase 4: Spatial Intelligence Methods
     
-    def load_json_homography_data(self):
-        """
-        Load homography matrices and calibration points from JSON files (Phase 4).
-        
-        Expected file format: {camera_id}_homography.json
-        JSON structure:
-        {
-            "matrix": [[...], [...], [...]],  # 3x3 homography matrix (optional)
-            "calibration_points": {
-                "image_points": [[x1, y1], [x2, y2], ...],
-                "map_points": [[mx1, my1], [mx2, my2], ...]
-            }
-        }
-        """
-        if not self.homography_dir.exists():
-            logger.warning(f"Phase 4 homography directory {self.homography_dir} does not exist")
+    def load_json_homography_data(self) -> None:
+        """Load homography matrices and calibration points from the consolidated JSON file."""
+        self.json_homography_matrices.clear()
+        self.calibration_points.clear()
+
+        path = self.homography_file_path
+        if path is None:
+            logger.warning("HOMOGRAPHY_FILE_PATH is not configured; unable to load homography data.")
+            self._loaded = False
             return
-        
-        loaded_count = 0
-        for camera_file in self.homography_dir.glob("*_homography.json"):
-            camera_id = camera_file.stem.replace("_homography", "")
-            
-            try:
-                with open(camera_file, 'r') as f:
-                    data = json.load(f)
-                
-                # Load pre-computed matrix if available
-                if 'matrix' in data and data['matrix']:
-                    matrix_data = np.array(data['matrix'], dtype=np.float64)
-                    if matrix_data.shape == (3, 3):
-                        self.json_homography_matrices[camera_id] = matrix_data
-                        logger.debug(f"Loaded JSON homography matrix for camera {camera_id}")
-                    else:
-                        logger.warning(f"Invalid matrix shape for camera {camera_id}: {matrix_data.shape}")
-                
-                # Load calibration points for on-demand computation
-                if 'calibration_points' in data and data['calibration_points']:
-                    calib_data = data['calibration_points']
-                    if ('image_points' in calib_data and 'map_points' in calib_data and
-                        len(calib_data['image_points']) >= 4 and 
-                        len(calib_data['map_points']) >= 4):
-                        self.calibration_points[camera_id] = calib_data
-                        logger.debug(f"Loaded calibration points for camera {camera_id}")
-                    else:
-                        logger.warning(f"Invalid calibration points for camera {camera_id}")
-                
-                loaded_count += 1
-                
-            except Exception as e:
-                logger.error(f"Error loading JSON homography data for {camera_id}: {e}")
-        
-        logger.info(f"Loaded Phase 4 JSON homography data for {loaded_count} cameras")
-    
-    def load_npz_homography_data(self):
-        """
-        Load homography calibration points from NPZ files (legacy format).
-        
-        Expected file format: homography_points_{camera_id}_scene_{scene_id}.npz
-        NPZ structure:
-        - 'image_points': array of image coordinates
-        - 'map_points': array of map coordinates
-        """
-        if not self.homography_dir.exists():
-            logger.warning(f"Homography directory {self.homography_dir} does not exist")
+
+        try:
+            with path.open("r", encoding="utf-8") as fh:
+                payload = json.load(fh)
+        except FileNotFoundError:
+            logger.warning("Homography JSON file not found: %s", path)
+            self._loaded = False
             return
-        
-        loaded_count = 0
-        for npz_file in self.homography_dir.glob("homography_points_*.npz"):
-            # Extract camera_id from filename like "homography_points_c02_scene_s47.npz"
-            filename_parts = npz_file.stem.split('_')
-            if len(filename_parts) >= 3:
-                camera_id = filename_parts[2]  # c02, c09, etc.
-                
-                try:
-                    # Load NPZ file
-                    npz_data = np.load(npz_file)
-                    
-                    if 'image_points' in npz_data and 'map_points' in npz_data:
-                        image_points = npz_data['image_points']
-                        map_points = npz_data['map_points']
-                        
-                        # Validate minimum number of points
-                        if len(image_points) >= 4 and len(map_points) >= 4:
-                            # Convert to list format expected by calibration_points
-                            calib_data = {
-                                'image_points': image_points.tolist(),
-                                'map_points': map_points.tolist()
-                            }
-                            
-                            # Only add if not already loaded from JSON
-                            if camera_id not in self.calibration_points:
-                                self.calibration_points[camera_id] = calib_data
-                                logger.debug(f"Loaded NPZ calibration points for camera {camera_id}")
-                                loaded_count += 1
-                            else:
-                                logger.debug(f"Skipping NPZ data for camera {camera_id} - JSON data already loaded")
-                        else:
-                            logger.warning(f"Insufficient calibration points in {npz_file}: image={len(image_points)}, map={len(map_points)}")
-                    else:
-                        logger.warning(f"Missing required arrays in {npz_file}")
-                        
-                except Exception as e:
-                    logger.error(f"Error loading NPZ homography data from {npz_file}: {e}")
-        
-        logger.info(f"Loaded {loaded_count} NPZ homography configurations")
+        except json.JSONDecodeError as exc:
+            logger.error("Invalid homography JSON %s: %s", path, exc)
+            self._loaded = False
+            return
+
+        loaded_count = self._ingest_consolidated_payload(payload)
+        self._loaded = loaded_count > 0
+
+        if self._loaded:
+            logger.info("Loaded homography data for %d cameras from %s", loaded_count, path)
+        else:
+            logger.warning("No homography matrices were loaded from %s", path)
     
     def compute_homography(self, camera_id: str) -> Optional[np.ndarray]:
         """
@@ -295,14 +248,18 @@ class HomographyService:
         Returns:
             3x3 homography matrix or None if computation fails
         """
-        if camera_id not in self.calibration_points:
+        self._ensure_loaded()
+
+        camera_key = str(camera_id)
+
+        if camera_key not in self.calibration_points:
             # Only warn once per camera to avoid log spam
-            if camera_id not in self._warned_cameras:
-                logger.warning(f"No calibration points available for camera {camera_id}")
-                self._warned_cameras.add(camera_id)
+            if camera_key not in self._warned_cameras:
+                logger.warning("No calibration points available for camera %s", camera_key)
+                self._warned_cameras.add(camera_key)
             return None
-        
-        calib_data = self.calibration_points[camera_id]
+
+        calib_data = self.calibration_points[camera_key]
         
         try:
             # Convert points to numpy arrays
@@ -311,11 +268,16 @@ class HomographyService:
             
             # Validate minimum number of points
             if len(image_points) < 4 or len(map_points) < 4:
-                logger.error(f"Insufficient calibration points for camera {camera_id}: {len(image_points)}")
+                logger.error("Insufficient calibration points for camera %s: %d", camera_key, len(image_points))
                 return None
-            
+
             if len(image_points) != len(map_points):
-                logger.error(f"Mismatched calibration points for camera {camera_id}: {len(image_points)} vs {len(map_points)}")
+                logger.error(
+                    "Mismatched calibration points for camera %s: %d vs %d",
+                    camera_key,
+                    len(image_points),
+                    len(map_points),
+                )
                 return None
             
             # Compute homography using RANSAC for robust estimation
@@ -325,44 +287,53 @@ class HomographyService:
                 method=cv2.RANSAC,
                 ransacReprojThreshold=self.ransac_threshold
             )
-            
+
             if matrix is not None and matrix.shape == (3, 3):
                 # Store computed matrix for future use
-                self.json_homography_matrices[camera_id] = matrix
-                
+                self.json_homography_matrices[camera_key] = matrix
+
                 # Log computation details
                 inliers = np.sum(mask) if mask is not None else len(image_points)
-                logger.info(f"Computed homography for camera {camera_id}: {inliers}/{len(image_points)} inliers")
-                
+                logger.info(
+                    "Computed homography for camera %s: %s/%s inliers",
+                    camera_key,
+                    inliers,
+                    len(image_points),
+                )
+
                 return matrix
             else:
-                logger.error(f"Failed to compute valid homography matrix for camera {camera_id}")
+                logger.error("Failed to compute valid homography matrix for camera %s", camera_key)
                 return None
                 
         except Exception as e:
-            logger.error(f"Error computing homography for camera {camera_id}: {e}")
+            logger.error("Error computing homography for camera %s: %s", camera_key, e)
             return None
     
     def project_to_map(self, camera_id: str, image_point: Tuple[float, float]) -> Optional[Tuple[float, float]]:
         """
         Project image coordinates to map coordinates using homography (Phase 4).
-        
+
         Args:
             camera_id: Camera identifier
             image_point: (x, y) coordinates in image space
-            
+
         Returns:
             (map_x, map_y) coordinates in map space or None if projection fails
         """
+        self._ensure_loaded()
+
+        camera_key = str(camera_id)
+
         # Get or compute homography matrix from JSON data
-        if camera_id not in self.json_homography_matrices:
-            logger.debug(f"No cached JSON matrix for camera {camera_id}, attempting to compute")
-            matrix = self.compute_homography(camera_id)
+        if camera_key not in self.json_homography_matrices:
+            logger.debug("No cached JSON matrix for camera %s, attempting to compute", camera_key)
+            matrix = self.compute_homography(camera_key)
             if matrix is None:
                 return None
         else:
-            matrix = self.json_homography_matrices[camera_id]
-        
+            matrix = self.json_homography_matrices[camera_key]
+
         try:
             # Prepare point for perspective transformation
             # OpenCV expects shape (1, 1, 2) for single point transformation
@@ -374,17 +345,23 @@ class HomographyService:
             
             # Extract transformed coordinates
             map_x, map_y = transformed[0, 0]
-            logger.debug(f"Homography projection for camera {camera_id}: image_point={image_point} -> map=({map_x:.4f}, {map_y:.4f})")
-            
+            logger.debug(
+                "Homography projection for camera %s: image_point=%s -> map=(%.4f, %.4f)",
+                camera_key,
+                image_point,
+                map_x,
+                map_y,
+            )
+
             # Validate transformed coordinates
             if np.isfinite(map_x) and np.isfinite(map_y):
                 return float(map_x), float(map_y)
             else:
-                logger.warning(f"Invalid projection result for camera {camera_id}: ({map_x}, {map_y})")
+                logger.warning("Invalid projection result for camera %s: (%.4f, %.4f)", camera_key, map_x, map_y)
                 return None
-                
+
         except Exception as e:
-            logger.error(f"Error projecting point for camera {camera_id}: {e}")
+            logger.error("Error projecting point for camera %s: %s", camera_key, e)
             return None
     
     def get_homography_data(self, camera_id: str) -> Dict:
@@ -397,19 +374,22 @@ class HomographyService:
         Returns:
             Dictionary containing matrix availability, matrix data, and calibration points
         """
+        self._ensure_loaded()
+
+        camera_key = str(camera_id)
         data = {
-            "matrix_available": camera_id in self.json_homography_matrices,
+            "matrix_available": camera_key in self.json_homography_matrices,
             "matrix": None,
             "calibration_points": None
         }
         
         # Include matrix data if available
-        if camera_id in self.json_homography_matrices:
-            data["matrix"] = self.json_homography_matrices[camera_id].tolist()
+        if camera_key in self.json_homography_matrices:
+            data["matrix"] = self.json_homography_matrices[camera_key].tolist()
         
         # Include calibration points if available
-        if camera_id in self.calibration_points:
-            data["calibration_points"] = self.calibration_points[camera_id]
+        if camera_key in self.calibration_points:
+            data["calibration_points"] = self.calibration_points[camera_key]
         
         return data
 
@@ -420,9 +400,13 @@ class HomographyService:
         Returns (min_x, max_x, min_y, max_y) or None if unavailable.
         """
         try:
-            if camera_id not in self.calibration_points:
+            self._ensure_loaded()
+
+            camera_key = str(camera_id)
+
+            if camera_key not in self.calibration_points:
                 return None
-            map_points = self.calibration_points[camera_id].get("map_points")
+            map_points = self.calibration_points[camera_key].get("map_points")
             if not map_points:
                 return None
             arr = np.array(map_points, dtype=np.float64)
@@ -435,7 +419,7 @@ class HomographyService:
             pad_y = max(1.0, 0.1 * max(abs(min_y), abs(max_y)))
             return (min_x - pad_x, max_x + pad_x, min_y - pad_y, max_y + pad_y)
         except Exception as e:
-            logger.debug(f"Failed computing map bounds for {camera_id}: {e}")
+            logger.debug("Failed computing map bounds for %s: %s", camera_id, e)
             return None
 
     def validate_map_coordinate(self, camera_id: str, map_x: float, map_y: float) -> bool:

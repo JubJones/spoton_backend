@@ -523,6 +523,7 @@ class Settings(BaseSettings):
     CLOSEST_MATCH_CONFIDENCE: float = Field(default=0.70, description="Base confidence when choosing closest candidate")
     DISTANCE_PENALTY_FACTOR: float = Field(default=0.1, description="Confidence reduction per meter of separation")
     MIN_MATCH_CONFIDENCE: float = Field(default=0.5, description="Minimum confidence required to accept geometric match")
+    MIN_TRACK_CONFIDENCE_FOR_MATCHING: float = Field(default=0.3, description="Minimum track confidence to include in geometric matching and debug visualization")
     HIGH_CONFIDENCE_THRESHOLD: float = Field(default=0.8, description="Threshold for counting matches as high-confidence")
     ENABLE_DEBUG_REPROJECTION: bool = Field(default=True, description="Enable reprojection debugging overlays")
     DEBUG_OVERLAY_RADIUS_PX: int = Field(default=6, description="Radius (px) for predicted marker visualization")

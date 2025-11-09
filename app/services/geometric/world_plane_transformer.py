@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -107,28 +108,106 @@ class WorldPlaneTransformer:
             raise ValueError(f"Invalid JSON in homography file {self.homography_file_path}: {exc}") from exc
 
         matrices: Dict[CameraID, np.ndarray] = {}
-        for key, matrix_list in data.items():
-            if not (isinstance(key, str) and key.startswith("H_") and key.endswith("_to_world")):
-                continue
-            camera_id = CameraID(key[2:-9])
-            try:
-                matrix = np.array(matrix_list, dtype=np.float32)
-            except (TypeError, ValueError) as exc:
-                raise ValueError(f"Invalid matrix data for camera {camera_id}: {exc}") from exc
+        if isinstance(data, dict) and isinstance(data.get("cameras"), list):
+            for entry in data["cameras"]:
+                if not isinstance(entry, dict):
+                    continue
 
-            if matrix.shape != (3, 3):
-                raise ValueError(f"Matrix for camera {camera_id} has invalid shape {matrix.shape}, expected 3x3")
+                try:
+                    camera_id = self._resolve_camera_id(entry)
+                except ValueError as exc:
+                    self.logger.warning("Skipping homography entry without camera id: %s", exc)
+                    continue
 
-            det = float(np.linalg.det(matrix))
-            if abs(det) < 1e-6:
-                self.logger.warning("Homography matrix for camera %s may be singular (det=%s)", camera_id, det)
+                matrix_list = entry.get("homography")
+                matrix: Optional[np.ndarray] = None
 
-            matrices[camera_id] = matrix
+                if matrix_list is not None:
+                    try:
+                        matrix = np.array(matrix_list, dtype=np.float32)
+                    except (TypeError, ValueError) as exc:
+                        raise ValueError(f"Invalid matrix data for camera {camera_id}: {exc}") from exc
+
+                if matrix is None:
+                    source_points = entry.get("source_points") or entry.get("image_points")
+                    dest_points = entry.get("destination_points") or entry.get("map_points")
+                    if source_points and dest_points and len(source_points) >= 4 and len(dest_points) >= 4:
+                        try:
+                            matrix, _ = cv2.findHomography(
+                                np.array(source_points, dtype=np.float32),
+                                np.array(dest_points, dtype=np.float32),
+                                method=cv2.RANSAC,
+                                ransacReprojThreshold=5.0,
+                            )
+                        except cv2.error as exc:
+                            raise ValueError(
+                                f"Failed to compute homography for camera {camera_id}: {exc}"
+                            ) from exc
+
+                if matrix is None:
+                    raise ValueError(f"Homography matrix unavailable for camera {camera_id}")
+
+                if matrix.shape != (3, 3):
+                    raise ValueError(
+                        f"Matrix for camera {camera_id} has invalid shape {matrix.shape}, expected 3x3"
+                    )
+
+                if matrix.dtype != np.float32:
+                    matrix = matrix.astype(np.float32)
+
+                det = float(np.linalg.det(matrix))
+                if abs(det) < 1e-6:
+                    self.logger.warning("Homography matrix for camera %s may be singular (det=%s)", camera_id, det)
+
+                matrices[camera_id] = matrix
+        else:
+            for key, matrix_list in data.items():
+                if not (isinstance(key, str) and key.startswith("H_") and key.endswith("_to_world")):
+                    continue
+                camera_id = CameraID(key[2:-9])
+                try:
+                    matrix = np.array(matrix_list, dtype=np.float32)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"Invalid matrix data for camera {camera_id}: {exc}") from exc
+
+                if matrix.shape != (3, 3):
+                    raise ValueError(f"Matrix for camera {camera_id} has invalid shape {matrix.shape}, expected 3x3")
+
+                if matrix.dtype != np.float32:
+                    matrix = matrix.astype(np.float32)
+
+                det = float(np.linalg.det(matrix))
+                if abs(det) < 1e-6:
+                    self.logger.warning("Homography matrix for camera %s may be singular (det=%s)", camera_id, det)
+
+                matrices[camera_id] = matrix
 
         if not matrices:
             raise ValueError(f"No valid homography matrices found in {self.homography_file_path}")
 
         return matrices
+
+    @staticmethod
+    def _resolve_camera_id(entry: Dict[str, object]) -> CameraID:
+        """Resolve a CameraID from a consolidated homography entry."""
+        candidate = entry.get("camera_id") or entry.get("id")
+        if isinstance(candidate, str):
+            candidate = candidate.strip()
+            if candidate.startswith("c") and candidate[1:].isdigit():
+                return CameraID(candidate)
+
+        frame_path = entry.get("frame_path")
+        if isinstance(frame_path, str):
+            match = re.search(r"/(c\d{2})/", frame_path)
+            if match:
+                return CameraID(match.group(1))
+
+        if isinstance(candidate, str):
+            digits = re.findall(r"\d+", candidate)
+            if digits:
+                return CameraID(f"c{int(digits[0]):02d}")
+
+        raise ValueError("Unable to determine camera identifier")
 
     def get_available_cameras(self) -> List[CameraID]:
         """Return camera IDs with available homography matrices."""

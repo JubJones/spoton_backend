@@ -179,6 +179,8 @@ class MultiCameraFrameProcessor:
         candidates_by_camera: Dict[CameraID, List[WorldPoint]] = {}
         track_lookup_by_camera: Dict[str, Dict[int, TrackedObjectData]] = {}
 
+        min_track_confidence = getattr(settings, "MIN_TRACK_CONFIDENCE_FOR_MATCHING", 0.3)
+
         for cam_id, track_data in final_batch_results.items():
             candidate_points: List[WorldPoint] = []
             track_lookup: Dict[int, TrackedObjectData] = {}
@@ -190,6 +192,17 @@ class MultiCameraFrameProcessor:
                     continue
 
                 if track.map_coords is None:
+                    continue
+
+                # Filter out low-confidence tracks to prevent stale detections from being visualized
+                if track.confidence is not None and track.confidence < min_track_confidence:
+                    logger.debug(
+                        "Skipping low-confidence track for camera %s track %s: confidence=%.2f < %.2f",
+                        cam_id,
+                        track.track_id,
+                        track.confidence,
+                        min_track_confidence,
+                    )
                     continue
 
                 try:
@@ -219,6 +232,10 @@ class MultiCameraFrameProcessor:
         for source_camera, tracks in final_batch_results.items():
             for track in tracks:
                 if track.map_coords is None or not track.search_roi:
+                    continue
+
+                # Skip low-confidence source tracks to avoid projecting stale detections
+                if track.confidence is not None and track.confidence < min_track_confidence:
                     continue
 
                 try:

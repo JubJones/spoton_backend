@@ -243,7 +243,7 @@ class DetectionVideoService(RawVideoService):
             self.handoff_service = HandoffDetectionService()
             
             # Validate spatial intelligence configuration
-            homography_validation = len(self.homography_service._homography_matrices) > 0
+            homography_validation = bool(getattr(self.homography_service, "json_homography_matrices", {}))
             handoff_validation = self.handoff_service.validate_configuration()
             
             logger.info(f"🗺️ SPATIAL INTELLIGENCE: Homography matrices loaded: {homography_validation}")
@@ -2006,7 +2006,7 @@ class DetectionVideoService(RawVideoService):
             "spatial_intelligence": {
                 "homography_service_loaded": self.homography_service is not None,
                 "handoff_service_loaded": self.handoff_service is not None,
-                "homography_matrices_count": len(self.homography_service._homography_matrices) if self.homography_service else 0,
+                "homography_matrices_count": len(getattr(self.homography_service, "json_homography_matrices", {})) if self.homography_service else 0,
                 "handoff_configuration_valid": all(self.handoff_service.validate_configuration().values()) if self.handoff_service else False
             },
             # Trail management statistics for 2D mapping
