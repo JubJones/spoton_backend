@@ -110,6 +110,26 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
+        # Log RT-DETR model path configuration and a resolved sample (campus)
+        try:
+            logger.info(
+                "RT-DETR configuration: default=%s, campus_override=%s, factory_override=%s",
+                settings.RTDETR_MODEL_PATH,
+                settings.RTDETR_MODEL_PATH_CAMPUS or "None",
+                settings.RTDETR_MODEL_PATH_FACTORY or "None",
+            )
+            try:
+                resolved_campus = detection_video_service._resolve_rtdetr_weights_for_environment("campus")
+                exists_str = "present" if Path(resolved_campus).exists() else "missing"
+                logger.info(
+                    "RT-DETR resolved weights for 'campus': %s (%s)",
+                    resolved_campus,
+                    exists_str,
+                )
+            except Exception as e:
+                logger.warning(f"Could not resolve RT-DETR weights for 'campus': {e}")
+        except Exception as e:
+            logger.debug(f"RT-DETR configuration logging skipped: {e}")
 
         # Initialize Environment Configuration Service so camera/env endpoints work
         try:

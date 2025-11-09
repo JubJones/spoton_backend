@@ -554,7 +554,7 @@ class Settings(BaseSettings):
     DETECTION_USE_AMP: bool = False
     
     # RT-DETR Configuration (Phase 1)
-    RTDETR_MODEL_PATH: str = "weights/rtdetr-l.pt"
+    RTDETR_MODEL_PATH: str = "weights/campus.pt"
     # Optional per-environment model overrides. If provided and file exists,
     # detection will use these weights for the corresponding environment.
     RTDETR_MODEL_PATH_CAMPUS: Optional[str] = None

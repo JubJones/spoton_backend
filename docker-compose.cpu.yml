@@ -23,6 +23,7 @@ services:
       - ./app:/app/app  # Mount local code for development
       - ./data:/app/data  # Mount calibration and data files
       - ./homography_data:/app/homography_data  # Mount homography calibration files
+      - ./weights:/app/weights:ro  # Mount model weights (includes campus.pt)
       - ./videos:/app/videos:ro  # Mount local videos directory for playback instead of S3
       - ./scripts:/app/scripts  # Expose scripts for setup tasks
       # Remove these volume mounts for production deployment

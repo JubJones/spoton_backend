@@ -78,6 +78,7 @@ class RTDETRDetector(AbstractDetector):
         
         try:
             # Load RT-DETR model
+            logger.info("RT-DETR weights path: %s", self.model_name)
             self.model = RTDETR(self.model_name)
             
             # Set device
