@@ -273,6 +273,29 @@ class VideoDataManagerService:
                 downloaded_video_paths[CameraID(cam_config.cam_id)] = chosen
                 logger.info(f"[Task {task_id}][{cam_config.cam_id}] Using local video: {chosen}")
             else:
+                # Debug logging: List all files in local_base to help user debug
+                logger.error(f"[Task {task_id}] --- DEBUG VIDEO SEARCH --- listing contents of {local_base}:")
+                try:
+                    if local_base.exists():
+                        found_any = False
+                        for root, dirs, files in os.walk(str(local_base)):
+                            for name in files:
+                                if name.lower().endswith(('.mp4', '.avi', '.mov', '.mkv')):
+                                    found_any = True
+                                    fpath = Path(root) / name
+                                    # Log relative path for readability
+                                    try:
+                                        rel_p = fpath.relative_to(local_base)
+                                        logger.error(f"  FOUND FILE: {rel_p} (Size: {fpath.stat().st_size} bytes)")
+                                    except ValueError:
+                                        logger.error(f"  FOUND FILE (outside base?): {fpath}")
+                        if not found_any:
+                            logger.error("  NO VIDEO FILES FOUND in directory tree.")
+                    else:
+                        logger.error(f"  Directory {local_base} DOES NOT EXIST.")
+                except Exception as e:
+                    logger.error(f"  Error during debug listing: {e}")
+
                 logger.error(
                     f"[Task {task_id}][{cam_config.cam_id}] Local video not found in expected locations under {local_base}. "
                     f"Tried: {local_video_path}, {fallback_path}, {alt_direct_file}, {alt_env_direct_file}, <dir scans>, <rglob>"

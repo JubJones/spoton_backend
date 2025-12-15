@@ -72,7 +72,8 @@ async def create_tables():
         # Import models to register them
         from app.infrastructure.database.models.tracking_models import (
             TrackingEvent, DetectionEvent, PersonTrajectory, 
-            PersonIdentity, AnalyticsAggregation, SessionRecord
+            PersonIdentity, AnalyticsAggregation, SessionRecord,
+            AnalyticsTotals, AnalyticsUptimeDaily, GeometricMetricsEvent
         )
         
         # Create tables
@@ -131,7 +132,8 @@ async def create_indexes():
         if engine is None:
             logger.info("Index creation skipped (DB disabled)")
             return
-        with engine.connect() as conn:
+        # Use AUTOCOMMIT for concurrent index creation
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
             # Additional indexes for performance
             index_queries = [
                 # Composite indexes for common queries
@@ -140,8 +142,8 @@ async def create_indexes():
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_person_trajectories_person_seq ON person_trajectories(global_person_id, sequence_number, timestamp);",
                 
                 # GIN indexes for JSON columns
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracking_events_metadata_gin ON tracking_events USING GIN(metadata);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_detection_events_metadata_gin ON detection_events USING GIN(metadata);",
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracking_events_metadata_gin ON tracking_events USING GIN(event_metadata);",
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_detection_events_metadata_gin ON detection_events USING GIN(detection_metadata);",
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_person_identities_embedding_gin ON person_identities USING GIN(primary_embedding);",
                 
                 # Performance indexes

@@ -137,7 +137,12 @@ async def lifespan(app_instance: FastAPI):
             db_session = None
             if getattr(settings, "DB_ENABLED", True):
                 try:
-                    from app.infrastructure.database.base import get_session_factory
+                    from app.infrastructure.database.base import get_session_factory, setup_database
+                    
+                    # Ensure database tables exist
+                    logger.info("Setting up database tables and indexes...")
+                    await setup_database()
+                    
                     SessionLocal = get_session_factory()
                     if SessionLocal is not None:
                         db_session = SessionLocal()

@@ -28,6 +28,8 @@ services:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - POSTGRES_SERVER=timescaledb
       # The application inside will check torch.cuda.is_available()
       # To enable GPU access for the container, uncomment 'deploy' section.
       # This requires NVIDIA Container Toolkit on the host.
@@ -51,7 +53,6 @@ services:
   redis:
     image: redis:7.2.4-alpine # Updated to a recent stable version
     container_name: spoton_redis
-    profiles: ["infra"]
     ports:
       - "6379:6379"
     volumes:
@@ -68,7 +69,6 @@ services:
   timescaledb:
     image: timescale/timescaledb:latest-pg17
     container_name: spoton_timescaledb
-    profiles: ["infra"]
     ports:
       - "${POSTGRES_HOST_PORT:-5432}:5432" # Allow host port override via .env
     volumes:

@@ -496,7 +496,7 @@ class DetectionVideoService(RawVideoService):
                 except ValueError as exc:
                     logger.debug(
                         "Bottom point validation failed for detection %s in camera %s: %s",
-                        detection.id,
+                        i,
                         camera_id,
                         exc,
                     )
@@ -512,7 +512,7 @@ class DetectionVideoService(RawVideoService):
                         logger.debug(
                             "World-plane transform failed for camera %s detection %s: %s",
                             camera_id,
-                            detection.id,
+                            i,
                             exc,
                         )
 
@@ -556,7 +556,7 @@ class DetectionVideoService(RawVideoService):
                     except Exception as exc:
                         logger.debug(
                             "ROI calculation failed for detection %s in camera %s: %s",
-                            detection.id,
+                            i,
                             camera_id,
                             exc,
                         )
