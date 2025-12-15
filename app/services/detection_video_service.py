@@ -786,6 +786,33 @@ class DetectionVideoService(RawVideoService):
                     logger.info(f"🔍 DETECTION PROCESSING: End of video reached at frame {frame_index}")
                     break
                 
+                # --- Phase 4 Debug: Reprojection ---
+                if self.enable_debug_reprojection and self.reprojection_debugger:
+                    # 1. Populate debug store
+                    for cid, frm in camera_frames.items():
+                        self._debug_frame_store[(cid, frame_index)] = frm
+                    
+                    # 2. Collect world points
+                    debug_payload = {}
+                    for cid, det_data in camera_detections.items():
+                         w_points = self._collect_world_points(det_data, cid, frame_index)
+                         debug_payload[cid] = {"world_points": w_points}
+                    
+                    # 3. Resolve environment (heuristic)
+                    sample_env_id = "default"
+                    for d in video_data.values():
+                        cfg = d.get("config")
+                        if cfg and getattr(cfg, "env_id", None):
+                            sample_env_id = cfg.env_id
+                            break
+
+                    # 4. Emit debug frame
+                    self._emit_reprojection_debug_frame(sample_env_id, frame_index, debug_payload)
+
+                    # 5. Cleanup
+                    for cid in camera_frames.keys():
+                        self._debug_frame_store.pop((cid, frame_index), None)
+
                 # Log progress periodically
                 if frame_index % 30 == 0:  # Every 30 frames
                     progress = 0.50 + (frame_index / total_frames) * 0.25  # 0.50-0.75 range
