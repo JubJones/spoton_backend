@@ -507,7 +507,7 @@ class Settings(BaseSettings):
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
-    HOMOGRAPHY_SOURCE: str = Field(default="auto", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
+    HOMOGRAPHY_SOURCE: str = Field(default="json", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
     HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
     WORLD_BOUNDS_X_MIN: float = Field(default=-2000.0, description="Minimum world X coordinate (meters)")
     WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
@@ -529,10 +529,10 @@ class Settings(BaseSettings):
     
     # Phase 1: Space-Based Matching (Spatial Intelligence)
     SPATIAL_MATCH_ENABLED: bool = Field(default=True, description="Enable space-based cross-camera matching")
-    SPATIAL_MATCH_THRESHOLD: float = Field(default=1.0, description="Max world distance (meters) to consider a potential match")
+    SPATIAL_MATCH_THRESHOLD: float = Field(default=300.0, description="Max world distance (units/pixels) to consider a potential match. (E.g. 300 = 3 meters at 100px/m)")
     SPATIAL_EDGE_MARGIN: float = Field(default=0.05, description="Margin (0.0-1.0) to ignore detections near frame edges")
     SPATIAL_VELOCITY_GATE: bool = Field(default=True, description="Prevent matching tracks moving in opposite directions")
-    SPATIAL_MATCH_MIN_OVERLAP_FRAMES: int = Field(default=5, description="Require N consecutive frames of proximity before merging IDs")
+    SPATIAL_MATCH_MIN_OVERLAP_FRAMES: int = Field(default=3, description="Require N consecutive frames of proximity before merging IDs")
 
     ENABLE_DEBUG_REPROJECTION: bool = Field(default=True, description="Enable reprojection debugging overlays")
     DEBUG_OVERLAY_RADIUS_PX: int = Field(default=6, description="Radius (px) for predicted marker visualization")

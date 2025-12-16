@@ -33,6 +33,7 @@ class ProjectedImagePoint:
     timestamp: Optional[float]
     global_id: Optional[str] = None
     reprojection_error_px: Optional[float] = None
+    is_matched: bool = False
 
 
 class InverseHomographyProjector:

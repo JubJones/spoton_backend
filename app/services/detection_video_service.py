@@ -1921,6 +1921,10 @@ class DetectionVideoService(RawVideoService):
         if not np.isfinite(x_px) or not np.isfinite(y_px):
             return None
 
+        is_matched = False
+        if world_point.global_id and self.space_based_matcher:
+             is_matched = self.space_based_matcher.is_global_id_shared(world_point.global_id)
+
         return ProjectedImagePoint(
             x=x_px,
             y=y_px,
@@ -1931,6 +1935,7 @@ class DetectionVideoService(RawVideoService):
             frame_number=world_point.frame_number,
             timestamp=world_point.timestamp,
             global_id=world_point.global_id,
+            is_matched=is_matched,
         )
 
     def _get_inverse_homography_matrix(

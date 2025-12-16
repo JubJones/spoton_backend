@@ -170,11 +170,16 @@ class SpaceBasedMatcher:
                     for idx_b, track_b in enumerate(tracks_b):
                         dist = self._calculate_distance(track_a, track_b)
                         
-                        if dist is not None and dist <= self.threshold_meters:
-                            # Optional: Velocity gate check (future Phase)
-                            # if self.velocity_gate and opposite_direction(track_a, track_b): continue
-                            
-                            cost_matrix[idx_a, idx_b] = dist
+                        if dist is not None:
+                             # AUDIT LOG: Print distance if relatively close, to debug threshold issues
+                            if dist < 5000.0:
+                                logger.info(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
+
+                            if dist <= self.threshold_meters:
+                                # Optional: Velocity gate check (future Phase)
+                                # if self.velocity_gate and opposite_direction(track_a, track_b): continue
+                                
+                                cost_matrix[idx_a, idx_b] = dist
                             
                 # Solve Assignment Problem (Hungarian Algorithm)
                 # rows (a_indices) assigned to cols (b_indices) with minimal cost
@@ -203,8 +208,8 @@ class SpaceBasedMatcher:
                         current_frame_pairs.add(key)
                         self.potential_matches[key] += 1
                         
-                        if self.potential_matches[key] >= self.min_overlap_frames:
-                            confirmed_matches.append(key)
+                        # if self.potential_matches[key] >= self.min_overlap_frames:
+                        confirmed_matches.append(key)
 
         # Decay/Clean potential matches not seen in this frame
         self._update_match_counters(current_frame_pairs)
@@ -302,3 +307,13 @@ class SpaceBasedMatcher:
         """Remove global ID mappings for tracks that have disappeared (optional)."""
         # Future: Implement cleanup based on time-to-live
         pass
+
+    def is_global_id_shared(self, global_id: str) -> bool:
+        """Check if a global ID is currently assigned to tracks in multiple cameras."""
+        if not global_id:
+            return False
+        
+        assignments = self.global_id_assignments.get(global_id, set())
+        # Count unique cameras in the assignments
+        unique_cameras = {cam_id for cam_id, _ in assignments}
+        return len(unique_cameras) > 1

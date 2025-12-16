@@ -56,8 +56,15 @@ class DebugOverlay:
         # Prefer global_id if available
         display_id = getattr(predicted_point, "global_id", None) or predicted_point.person_id or "?"
         
-        # Determine color based on ID
-        color = self._id_to_color(str(display_id))
+        # Check if matched across cameras
+        is_matched = getattr(predicted_point, "is_matched", False)
+
+        if not is_matched:
+             # Default GREEN for unmatched tracks
+             color = (0, 255, 0)
+        else:
+            # Consistent hashed color for matched (shared) IDs
+            color = self._id_to_color(str(display_id))
 
         pred_center = (int(round(predicted_point.x)), int(round(predicted_point.y)))
         
