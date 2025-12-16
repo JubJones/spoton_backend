@@ -39,7 +39,12 @@ class ReprojectionDebugger:
         self.sampling_rate = max(1, sampling_rate)
         self.max_frames_per_camera = max(1, max_frames_per_camera)
 
-        self.output_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            # If we can't create the debug dir, we essentially disable debugging
+            logging.getLogger(__name__).warning("Failed to create debug output dir %s: %s", self.output_dir, e)
+            self.output_dir = None
         self.frame_counts = {}
 
         self.logger = logging.getLogger(__name__)
@@ -59,13 +64,21 @@ class ReprojectionDebugger:
         actual_point: Optional[Tuple[float, float]],
     ) -> None:
         """Render and persist an overlay for a given camera frame."""
+        if self.output_dir is None:
+            return
+
         if frame_number % self.sampling_rate != 0:
             return
 
         count = self.frame_counts.get(camera_id, 0)
 
         camera_dir = self.output_dir / camera_id
-        camera_dir.mkdir(exist_ok=True)
+        try:
+            camera_dir.mkdir(exist_ok=True)
+        except OSError as e:
+            logger.warning("Failed to create camera dir %s: %s", camera_dir, e)
+            return
+
         output_path = camera_dir / f"{frame_number:06d}.png"
         is_existing_output = output_path.exists()
 
@@ -88,8 +101,12 @@ class ReprojectionDebugger:
 
         overlay.draw_prediction(frame=frame, predicted_point=predicted_point, actual_point=actual_point)
 
-        if not cv2.imwrite(str(output_path), frame):
-            logger.debug("Failed to write reprojection debug frame to %s", output_path)
+        try:
+            if not cv2.imwrite(str(output_path), frame):
+                logger.debug("Failed to write reprojection debug frame to %s", output_path)
+                return
+        except OSError as e:
+            logger.warning("Permission error writing debug frame to %s: %s", output_path, e)
             return
 
         if not is_existing_output:

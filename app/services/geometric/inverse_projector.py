@@ -31,6 +31,7 @@ class ProjectedImagePoint:
     world_point: Tuple[float, float]
     frame_number: Optional[int]
     timestamp: Optional[float]
+    global_id: Optional[str] = None
     reprojection_error_px: Optional[float] = None
 
 
@@ -128,4 +129,5 @@ class InverseHomographyProjector:
             world_point=(world_point.x, world_point.y),
             frame_number=world_point.frame_number,
             timestamp=world_point.timestamp,
+            global_id=getattr(world_point, "global_id", None),
         )

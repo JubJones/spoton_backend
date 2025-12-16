@@ -458,7 +458,8 @@ def _build_camera_handoff_zones_from_templates(
 class Settings(BaseSettings):
     APP_NAME: str = "SpotOn Backend"
     API_V1_PREFIX: str = "/api/v1"
-    DEBUG: bool = True
+    DEBUG: bool = True # Controls application debug mode (e.g. detailed errors), separate from logging level.
+    # LOG_LEVEL is read directly by logging config or uvicorn, not defined here as a setting.
     
     # Production Endpoint Control
     ENABLE_ANALYTICS_ENDPOINTS: bool = Field(default=True, description="Enable analytics API endpoints")
@@ -508,10 +509,10 @@ class Settings(BaseSettings):
     HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
     HOMOGRAPHY_SOURCE: str = Field(default="auto", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
     HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
-    WORLD_BOUNDS_X_MIN: float = Field(default=-50.0, description="Minimum world X coordinate (meters)")
-    WORLD_BOUNDS_X_MAX: float = Field(default=50.0, description="Maximum world X coordinate (meters)")
-    WORLD_BOUNDS_Y_MIN: float = Field(default=-50.0, description="Minimum world Y coordinate (meters)")
-    WORLD_BOUNDS_Y_MAX: float = Field(default=50.0, description="Maximum world Y coordinate (meters)")
+    WORLD_BOUNDS_X_MIN: float = Field(default=-2000.0, description="Minimum world X coordinate (meters)")
+    WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
+    WORLD_BOUNDS_Y_MIN: float = Field(default=-2000.0, description="Minimum world Y coordinate (meters)")
+    WORLD_BOUNDS_Y_MAX: float = Field(default=2000.0, description="Maximum world Y coordinate (meters)")
     ENABLE_POINT_VALIDATION: bool = Field(default=True, description="Enable image-space point validation checks")
     ENABLE_BOUNDS_VALIDATION: bool = Field(default=True, description="Enable world bounds validation after homography projection")
     ROI_BASE_RADIUS: float = Field(default=1.5, description="Base ROI radius in meters")
@@ -525,6 +526,14 @@ class Settings(BaseSettings):
     MIN_MATCH_CONFIDENCE: float = Field(default=0.5, description="Minimum confidence required to accept geometric match")
     MIN_TRACK_CONFIDENCE_FOR_MATCHING: float = Field(default=0.3, description="Minimum track confidence to include in geometric matching and debug visualization")
     HIGH_CONFIDENCE_THRESHOLD: float = Field(default=0.8, description="Threshold for counting matches as high-confidence")
+    
+    # Phase 1: Space-Based Matching (Spatial Intelligence)
+    SPATIAL_MATCH_ENABLED: bool = Field(default=True, description="Enable space-based cross-camera matching")
+    SPATIAL_MATCH_THRESHOLD: float = Field(default=1.0, description="Max world distance (meters) to consider a potential match")
+    SPATIAL_EDGE_MARGIN: float = Field(default=0.05, description="Margin (0.0-1.0) to ignore detections near frame edges")
+    SPATIAL_VELOCITY_GATE: bool = Field(default=True, description="Prevent matching tracks moving in opposite directions")
+    SPATIAL_MATCH_MIN_OVERLAP_FRAMES: int = Field(default=5, description="Require N consecutive frames of proximity before merging IDs")
+
     ENABLE_DEBUG_REPROJECTION: bool = Field(default=True, description="Enable reprojection debugging overlays")
     DEBUG_OVERLAY_RADIUS_PX: int = Field(default=6, description="Radius (px) for predicted marker visualization")
     DEBUG_REPROJECTION_OUTPUT_DIR: str = Field(default="app/debug_outputs", description="Directory for saved reprojection frames")

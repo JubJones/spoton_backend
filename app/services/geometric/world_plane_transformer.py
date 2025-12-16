@@ -35,6 +35,7 @@ class WorldPoint:
     frame_number: Optional[int]
     timestamp: Optional[float]
     transformation_quality: float  # 0..1
+    global_id: Optional[str] = None
 
 
 class WorldPlaneTransformer:

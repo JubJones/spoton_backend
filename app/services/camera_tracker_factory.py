@@ -79,7 +79,14 @@ class CameraTrackerFactory:
         cache_key = (task_id, camera_id)
         if cache_key not in self._tracker_instances:
             logger.info(f"Creating new ByteTrack tracker for task '{task_id}', camera '{camera_id}'.")
-            tracker = ByteTrackTracker()
+            try:
+                tracker = ByteTrackTracker()
+            except ImportError as e:
+                logger.error(f"Failed to import/instantiate ByteTrackTracker: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Unexpected error instantiating ByteTrackTracker: {e}")
+                raise
             
             try:
                 # The tracker's load_model method should handle device placement.

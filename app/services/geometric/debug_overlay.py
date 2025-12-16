@@ -42,7 +42,9 @@ class DebugOverlay:
             thickness=2,
         )
 
-        label = f"{predicted_point.person_id or '?'} {predicted_point.source_camera_id}→{predicted_point.camera_id}"
+        # Prefer global_id if available
+        display_id = getattr(predicted_point, "global_id", None) or predicted_point.person_id or "?"
+        label = f"{display_id} {predicted_point.source_camera_id}→{predicted_point.camera_id}"
         cv2.putText(
             frame,
             label,

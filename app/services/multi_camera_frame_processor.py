@@ -447,6 +447,7 @@ class MultiCameraFrameProcessor:
             world_point=(world_point.x, world_point.y),
             frame_number=world_point.frame_number,
             timestamp=world_point.timestamp,
+            global_id=world_point.global_id
         )
 
     def _provide_frame_for_debug(self, camera_id: str, frame_number: int) -> Optional[np.ndarray]:

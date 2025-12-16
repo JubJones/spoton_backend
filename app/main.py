@@ -5,6 +5,7 @@ import logging
 from pathlib import Path
 from typing import Callable # For ASGIApp type hint
 import asyncio
+import os
 
 from app.core.config import settings
 from app.core.security_config import configure_security_middleware, get_cors_config
@@ -22,7 +23,7 @@ from app.services.environment_configuration_service import (
 )
 from app.services.analytics_engine import analytics_engine
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class HeaderLoggingMiddleware:

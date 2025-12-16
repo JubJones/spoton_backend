@@ -47,6 +47,7 @@ from app.services.geometric import (
     DebugOverlay,
     ReprojectionDebugger,
 )
+from app.services.space_based_matcher import SpaceBasedMatcher
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
 
@@ -141,6 +142,9 @@ class DetectionVideoService(RawVideoService):
                 except Exception as exc:
                     logger.warning("Failed to initialize inverse projector for detection pipeline: %s", exc)
                     self.inverse_projector = None
+        
+        # Phase 1: Space-Based Matching
+        self.space_based_matcher = SpaceBasedMatcher()
         
         # Detection statistics (enhanced for Phase 2)
         self.detection_stats = {
@@ -316,6 +320,9 @@ class DetectionVideoService(RawVideoService):
 
             # Determine cameras for environment from config
             camera_ids = [vc.cam_id for vc in settings.VIDEO_SETS if vc.env_id == environment_id]
+            logger.info(f"Cameras found in config for env {environment_id}: {camera_ids}")
+            if not camera_ids:
+                 logger.warning(f"No cameras found for env {environment_id} in settings.VIDEO_SETS")
 
             # Create trackers for each camera (keyed by the real task_id)
             self.camera_trackers = {}
@@ -323,6 +330,7 @@ class DetectionVideoService(RawVideoService):
                 try:
                     tracker = await self.tracker_factory.get_tracker(task_id=task_id, camera_id=camera_id)
                     self.camera_trackers[camera_id] = tracker
+                    logger.info(f"Initialized tracker for {camera_id}")
                 except Exception as e:
                     logger.warning(f"Failed to initialize tracker for camera {camera_id}: {e}")
 
@@ -343,9 +351,22 @@ class DetectionVideoService(RawVideoService):
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
 
         # Step 2: Tracking integration (via tracker factory)
+        # Step 2: Tracking integration (via tracker factory)
         tracks: List[Dict[str, Any]] = []
         tracker_used = False
         try:
+            if settings.TRACKING_ENABLED:
+                # Lazy initialization check
+                if camera_id not in self.camera_trackers:
+                    try:
+                        logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
+                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                        if tracker:
+                            self.camera_trackers[camera_id] = tracker
+                            logger.info(f"Lazy initialization successful for {camera_id}")
+                    except Exception as e:
+                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+
             if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
                 tracker = self.camera_trackers.get(camera_id)
                 # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
@@ -369,15 +390,18 @@ class DetectionVideoService(RawVideoService):
                 if tracks:
                     logger.info("Tracker produced %s tracks for %s", len(tracks), camera_id)
                 # Enhance with spatial intelligence (map coords + short trajectory)
+                if frame_number % 30 == 0:
+                     logger.info(f"Preparing to call enhance_tracks for {camera_id} with {len(tracks)} tracks")
                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
                 tracker_used = True
             else:
-                logger.debug(
-                    "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
-                    camera_id,
-                    settings.TRACKING_ENABLED,
-                    camera_id in self.camera_trackers,
-                )
+                if frame_number % 30 == 0:
+                    logger.info(
+                        "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
+                        camera_id,
+                        settings.TRACKING_ENABLED,
+                        camera_id in self.camera_trackers
+                    )
         except Exception as e:
             logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
             tracks = []
@@ -509,7 +533,7 @@ class DetectionVideoService(RawVideoService):
                         map_coords = {"map_x": world_point.x, "map_y": world_point.y}
                         projection_success = transformation_quality >= 0.5
                     except (KeyError, ValueError) as exc:
-                        logger.debug(
+                        logger.info(
                             "World-plane transform failed for camera %s detection %s: %s",
                             camera_id,
                             i,
@@ -533,7 +557,7 @@ class DetectionVideoService(RawVideoService):
                                 candidate_map_y,
                             )
                         else:
-                            logger.debug(
+                            logger.info(
                                 "Fallback projected coords out of bounds for %s: (%.4f, %.4f)",
                             camera_id,
                             candidate_map_x,
@@ -744,7 +768,9 @@ class DetectionVideoService(RawVideoService):
                                 frame, camera_id, frame_index
                             )
 
-                            # Persist aggregated analytics counters for dashboard views
+                            camera_detections[camera_id] = detection_data
+                            
+                            # Log analytics (moved logic here to ensure we have data)
                             environment_id = None
                             camera_config = data.get("config")
                             if camera_config is not None:
@@ -768,16 +794,35 @@ class DetectionVideoService(RawVideoService):
                                 trace_id=str(task_id),
                                 timestamp=datetime.now(timezone.utc),
                             )
-                            camera_detections[camera_id] = detection_data
-                            
-                            # Phase 2: Send real-time detection update via WebSocket
-                            await self.send_detection_update(task_id, camera_id, frame, detection_data, frame_index)
-                            # Emit auxiliary events tied to this task
-                            if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
-                                await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
+
                         else:
                             all_frames_valid = False
                             break
+                    else:
+                        all_frames_valid = False
+                        break
+                
+                if not all_frames_valid or not camera_frames:
+                    logger.info(f"🔍 DETECTION PROCESSING: End of video reached at frame {frame_index}")
+                    break
+                
+                # --- Phase 1: Cross-Camera Space-Based Matching ---
+                # Run matching algorithm on checking all cameras for this frame
+                try:
+                    self.space_based_matcher.match_across_cameras(camera_detections)
+                except Exception as e:
+                    logger.error(f"Space-based matching failed: {e}")
+
+                # --- Send Updates Loop ---
+                # Now that global_ids are injected, send updates to frontend
+                for camera_id, detection_data in camera_detections.items():
+                    frame = camera_frames.get(camera_id)
+                    if frame is not None:
+                        # Phase 2: Send real-time detection update via WebSocket
+                        await self.send_detection_update(task_id, camera_id, frame, detection_data, frame_index)
+                        # Emit auxiliary events tied to this task
+                        if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                            await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
                     else:
                         all_frames_valid = False
                         break
@@ -1467,6 +1512,10 @@ class DetectionVideoService(RawVideoService):
 
     async def _enhance_tracks_with_spatial_intelligence(self, tracks: List[Dict[str, Any]], camera_id: str, frame_number: int) -> List[Dict[str, Any]]:
         """Compute map coordinates and short trajectories for tracks using homography and trail service."""
+        # DEBUG TRACE: Verify execution
+        if frame_number % 30 == 0:
+             logger.info(f"EnhanceTracks: Processing {len(tracks)} tracks for {camera_id}. HomographyService? {self.homography_service is not None}")
+        
         if not tracks:
             return []
         enhanced: List[Dict[str, Any]] = []
@@ -1481,7 +1530,7 @@ class DetectionVideoService(RawVideoService):
                     if projected:
                         mx, my = projected
                         if self.homography_service.validate_map_coordinate(camera_id, mx, my):
-                            map_coords = [mx, my]
+                            map_coords = {"map_x": mx, "map_y": my}
                             # Update trajectory trail keyed by track
                             trail = await self.trail_service.update_trail(
                                 camera_id=camera_id,
@@ -1491,6 +1540,9 @@ class DetectionVideoService(RawVideoService):
                             )
                             trajectory = [[p.map_x, p.map_y] for p in trail[:3]]
                             track["trajectory"] = trajectory
+                        else:
+                            # DEBUG TRACE: Log rejection
+                            logger.info(f"SpatialEnhancement: Rejected coords for cam {camera_id}: ({mx:.2f}, {my:.2f})")
                 track["map_coords"] = map_coords
                 enhanced.append(track)
             except Exception as e:
@@ -1601,9 +1653,11 @@ class DetectionVideoService(RawVideoService):
                     break
                 
                 # Process all cameras for current frame
-                any_frame_processed = False
+                frame_camera_data = {} # Buffer for (frame, detection_data)
                 frame_debug_payload: Dict[str, Dict[str, Any]] = {}
+                any_frame_processed = False
                 
+                # 1. Collect detections from all cameras
                 for camera_id, data in video_data.items():
                     cap = data.get("video_capture")
                     if cap and cap.isOpened():
@@ -1616,23 +1670,7 @@ class DetectionVideoService(RawVideoService):
                             detection_data = await self.process_frame_with_tracking(
                                 frame, camera_id, frame_index
                             )
-                            if self.enable_debug_reprojection:
-                                world_points = self._collect_world_points(
-                                    detection_data=detection_data,
-                                    camera_id=camera_id,
-                                    frame_number=frame_index,
-                                )
-                                if world_points:
-                                    frame_debug_payload[camera_id] = {"world_points": world_points}
-                            
-                            # Send WebSocket update with detection results
-                            await self.send_detection_update(
-                                task_id, camera_id, frame, detection_data, frame_index
-                            )
-                            if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
-                                await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
-                            
-                            frames_processed += 1
+                            frame_camera_data[camera_id] = (frame, detection_data)
                             any_frame_processed = True
                         else:
                             logger.debug(f"End of video reached for camera {camera_id}")
@@ -1645,6 +1683,37 @@ class DetectionVideoService(RawVideoService):
                     logger.info(f"🔍 SIMPLE DETECTION: All cameras finished at frame {frame_index}")
                     break
 
+                # 2. Run Space-Based Matching (Cross-Camera)
+                if self.space_based_matcher and self.space_based_matcher.enabled:
+                    try:
+                        # Extract detection dicts for matcher
+                        camera_detections_map = {cid: ddata for cid, (_, ddata) in frame_camera_data.items()}
+                        self.space_based_matcher.match_across_cameras(camera_detections_map)
+                    except Exception as e:
+                         logger.error(f"Space-based matching failed in simple loop: {e}")
+
+                # 3. Send Updates and Emit Debug
+                for camera_id, (frame, detection_data) in frame_camera_data.items():
+                    # Collect debug points (now with global_ids injected)
+                    if self.enable_debug_reprojection:
+                        world_points = self._collect_world_points(
+                            detection_data=detection_data,
+                            camera_id=camera_id,
+                            frame_number=frame_index,
+                        )
+                        if world_points:
+                            frame_debug_payload[camera_id] = {"world_points": world_points}
+                    
+                    # Send WebSocket update
+                    await self.send_detection_update(
+                        task_id, camera_id, frame, detection_data, frame_index
+                    )
+                    if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                         await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
+                    
+                    frames_processed += 1
+
+                # 4. Emit Debug Frame
                 if self.enable_debug_reprojection and frame_debug_payload:
                     self._emit_reprojection_debug_frame(
                         environment_id=environment_id,
@@ -1701,6 +1770,12 @@ class DetectionVideoService(RawVideoService):
         results: List[WorldPoint] = []
 
         tracks = detection_data.get("tracks") or []
+        
+        # DEBUG TRACE
+        if self.enable_debug_reprojection and frame_number % 30 == 0 and len(tracks) > 0:
+             has_gid = sum(1 for t in tracks if t.get("global_id"))
+             logging.info(f"CollectWorldPoints Cam={camera_id}: {len(tracks)} tracks, {has_gid} have global_id")
+
         for track in tracks:
             map_coords = track.get("map_coords")
             bbox = track.get("bbox_xyxy")
@@ -1717,15 +1792,25 @@ class DetectionVideoService(RawVideoService):
             bottom_y = y2
 
             try:
+                if isinstance(map_coords, dict):
+                    wx = float(map_coords.get("map_x", 0.0))
+                    wy = float(map_coords.get("map_y", 0.0))
+                elif isinstance(map_coords, (list, tuple)) and len(map_coords) >= 2:
+                    wx = float(map_coords[0])
+                    wy = float(map_coords[1])
+                else:
+                    continue
+
                 results.append(
                     WorldPoint(
-                        x=float(map_coords[0]),
-                        y=float(map_coords[1]),
+                        x=wx,
+                        y=wy,
                         camera_id=CameraID(camera_id),
                         person_id=person_id,
                         original_image_point=(center_x, bottom_y),
                         frame_number=frame_number,
                         timestamp=float(frame_number),
+                        global_id=track.get("global_id"),
                         transformation_quality=float(track.get("transformation_quality") or 1.0),
                     )
                 )
@@ -1758,6 +1843,7 @@ class DetectionVideoService(RawVideoService):
                         original_image_point=(center_x, bottom_y),
                         frame_number=frame_number,
                         timestamp=float(frame_number),
+                        global_id=det.get("global_id"),
                         transformation_quality=float(quality) if quality is not None else 1.0,
                     )
                 )
@@ -1840,6 +1926,7 @@ class DetectionVideoService(RawVideoService):
             world_point=(world_point.x, world_point.y),
             frame_number=world_point.frame_number,
             timestamp=world_point.timestamp,
+            global_id=world_point.global_id,
         )
 
     def _get_inverse_homography_matrix(

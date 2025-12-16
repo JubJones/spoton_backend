@@ -330,6 +330,7 @@ class HomographyService:
             logger.debug("No cached JSON matrix for camera %s, attempting to compute", camera_key)
             matrix = self.compute_homography(camera_key)
             if matrix is None:
+                logger.info(f"ProjectToMap: No matrix found for {camera_key}")
                 return None
         else:
             matrix = self.json_homography_matrices[camera_key]
