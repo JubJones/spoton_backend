@@ -15,13 +15,33 @@ class DebugOverlay:
 
     def __init__(
         self,
-        radius_px: int = 6,
+        radius_px: int = 8,  # Increased from 6
         color_pred: Tuple[int, int, int] = (0, 255, 255),
         color_actual: Tuple[int, int, int] = (0, 0, 255),
     ) -> None:
         self.radius_px = max(1, radius_px)
         self.color_pred = color_pred
         self.color_actual = color_actual
+
+    def _id_to_color(self, id_str: str) -> Tuple[int, int, int]:
+        """Generate a consistent unique color from an ID string."""
+        if not id_str or id_str == "?":
+            return self.color_pred  # Default yellow for unknown
+        
+        # Simple hash to RGB
+        hash_val = hash(id_str)
+        r = (hash_val & 0xFF0000) >> 16
+        g = (hash_val & 0x00FF00) >> 8
+        b = hash_val & 0x0000FF
+        
+        # Ensure high visibility (bright colors)
+        # Verify it's not too dark: if sum is low, adding offset
+        if r + g + b < 200:
+            r = (r + 100) % 255
+            g = (g + 100) % 255
+            b = (b + 100) % 255
+
+        return (int(b), int(g), int(r)) # OpenCV uses BGR
 
     def draw_prediction(
         self,
@@ -33,26 +53,56 @@ class DebugOverlay:
         if frame is None:
             return
 
+        # Prefer global_id if available
+        display_id = getattr(predicted_point, "global_id", None) or predicted_point.person_id or "?"
+        
+        # Determine color based on ID
+        color = self._id_to_color(str(display_id))
+
         pred_center = (int(round(predicted_point.x)), int(round(predicted_point.y)))
+        
+        # Draw target circle
         cv2.circle(
             frame,
             center=pred_center,
             radius=self.radius_px,
-            color=self.color_pred,
+            color=color,
             thickness=2,
         )
+        # Add a white rim for contrast
+        cv2.circle(
+            frame,
+            center=pred_center,
+            radius=self.radius_px + 2,
+            color=(255, 255, 255),
+            thickness=1,
+        )
 
-        # Prefer global_id if available
-        display_id = getattr(predicted_point, "global_id", None) or predicted_point.person_id or "?"
-        label = f"{display_id} {predicted_point.source_camera_id}→{predicted_point.camera_id}"
+        label = f"{display_id} {predicted_point.source_camera_id}->{predicted_point.camera_id}"
+        
+        # Calculate text size for background box
+        font_scale = 0.8  # Increased from 0.4
+        thickness = 2     # Increased from 1
+        (text_w, text_h), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, font_scale, thickness)
+        
+        # Draw background rectangle for text readability
+        text_origin = (pred_center[0] + 10, pred_center[1])
+        cv2.rectangle(
+            frame, 
+            (text_origin[0], text_origin[1] - text_h - baseline), 
+            (text_origin[0] + text_w, text_origin[1] + baseline), 
+            (0, 0, 0), 
+            cv2.FILLED
+        )
+        
         cv2.putText(
             frame,
             label,
-            (pred_center[0] + 8, pred_center[1] - 8),
+            text_origin,
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.4,
-            self.color_pred,
-            1,
+            font_scale,
+            color,
+            thickness,
             cv2.LINE_AA,
         )
 

@@ -1819,6 +1819,10 @@ class DetectionVideoService(RawVideoService):
 
         detections = detection_data.get("detections") or []
         for det in detections:
+            # Skip if this detection is already covered by a track
+            if det.get("track_id"):
+                continue
+
             map_coords = det.get("map_coords") or {}
             if not map_coords:
                 continue
