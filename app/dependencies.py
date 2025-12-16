@@ -18,18 +18,8 @@ from app.core.config import settings
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
 # Legacy pipeline orchestrator removed with Re-ID deprecation.
-class PipelineOrchestratorService:
-    def __init__(self, *args, **kwargs):
-        pass
-    async def initialize_task(self, *args, **kwargs):
-        raise NotImplementedError("Pipeline orchestrator has been removed.")
-    async def run_processing_pipeline(self, *args, **kwargs):
-        raise NotImplementedError("Pipeline orchestrator has been removed.")
-    async def get_task_status(self, *args, **kwargs):
-        return None
-from app.services.notification_service import NotificationService
+# Legacy pipeline orchestrator removed with Re-ID deprecation.
 from app.services.camera_tracker_factory import CameraTrackerFactory
-from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
 from app.services.homography_service import HomographyService
 from app.services.playback_status_store import PlaybackStatusStore
 from app.services.task_runtime_registry import TaskRuntimeRegistry
@@ -96,10 +86,6 @@ def get_video_data_manager_service(
     """Dependency provider for VideoDataManagerService."""
     return VideoDataManagerService(asset_downloader=asset_downloader)
 
-@lru_cache()
-def get_notification_service() -> NotificationService:
-    """Dependency provider for NotificationService (singleton)."""
-    return NotificationService(manager=websocket_manager)
 
 
 @lru_cache()
@@ -131,31 +117,3 @@ def get_playback_control_service(
 
 # --- Services that depend on preloaded components ---
 
-@lru_cache()
-def get_multi_camera_frame_processor(
-    detector: AbstractDetector = Depends(get_detector),
-    tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
-    homography_service: HomographyService = Depends(get_homography_service),
-    notification_service: NotificationService = Depends(get_notification_service),
-    device: torch.device = Depends(get_compute_device)
-) -> MultiCameraFrameProcessor:
-    """Dependency provider for MultiCameraFrameProcessor."""
-    logger.debug("Initializing MultiCameraFrameProcessor instance (or returning cached).")
-    return MultiCameraFrameProcessor(
-        detector=detector,
-        tracker_factory=tracker_factory,
-        homography_service=homography_service,
-        notification_service=notification_service,
-        device=device
-    )
-
-@lru_cache()
-def get_pipeline_orchestrator(
-    video_data_manager: VideoDataManagerService = Depends(get_video_data_manager_service),
-    multi_camera_processor: MultiCameraFrameProcessor = Depends(get_multi_camera_frame_processor),
-    tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
-    notification_service: NotificationService = Depends(get_notification_service)
-) -> PipelineOrchestratorService:
-    """Deprecated: Pipeline orchestrator removed; this returns a stub."""
-    logger.debug("PipelineOrchestratorService requested but has been removed.")
-    return PipelineOrchestratorService()

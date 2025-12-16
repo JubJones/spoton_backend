@@ -33,25 +33,6 @@ class Detection:
         ], dtype=np.float32)
 
 
-class TrackedObject:
-    """Represents a tracked object within a single camera view."""
-    def __init__(self,
-                 track_id: int,
-                 bbox: BoundingBox,
-                 confidence: Optional[float] = None,
-                 class_id: Optional[Any] = None,
-                 global_id: Optional[int] = None, # Added Global ID
-                 feature_embedding: Optional[np.ndarray] = None, # Can be populated by tracker
-                 state: Optional[str] = None, # e.g., 'active', 'lost' (if tracker provides)
-                 age: Optional[int] = None): # Number of frames tracked (if tracker provides)
-        self.track_id = track_id # Changed from temporary_track_id for clarity
-        self.bbox = bbox
-        self.confidence = confidence
-        self.class_id = class_id
-        self.global_id = global_id # Store the assigned global ID
-        self.feature_embedding = feature_embedding
-        self.state = state
-        self.age = age
 
 
 class AbstractDetector(ABC):
@@ -111,29 +92,3 @@ class AbstractTracker(ABC):
         pass
 
 
-class AbstractFeatureExtractor(ABC):
-    """Abstract base class for feature extractors (Strategy Pattern)."""
-
-    @abstractmethod
-    async def load_model(self):
-        """
-        Loads the feature extraction model into memory.
-        Should handle device placement.
-        """
-        pass
-
-    @abstractmethod
-    async def extract_features(self, image: np.ndarray, bboxes: List[BoundingBox]) -> List[Optional[np.ndarray]]:
-        """
-        Extracts feature embeddings from image regions defined by bounding boxes.
-
-        Args:
-            image: A NumPy array representing the image (e.g., in BGR or RGB format).
-            bboxes: A list of BoundingBox objects defining the regions of interest.
-
-        Returns:
-            A list of NumPy arrays, where each array is the feature embedding
-            for the corresponding bounding box. If feature extraction fails for a
-            bbox, the corresponding entry should be None.
-        """
-        pass

@@ -89,18 +89,14 @@ async def lifespan(app_instance: FastAPI):
                 logger.warning(f"Homography preload failed (non-fatal): {e}")
         # Startup validation hints for homography and weights
         try:
-            homography_base = settings.resolved_homography_base_path
-            if not homography_base.exists():
+            homography_json = Path(settings.HOMOGRAPHY_FILE_PATH)
+            if not homography_json.exists():
                 logger.warning(
-                    f"Homography base directory not found: {homography_base}. "
-                    f"Mount or create 'homography_data/' with NPZ/JSON calibration files."
+                    f"Homography JSON file not found: {homography_json}. "
+                    f"Ensure valid calibration file is present."
                 )
             else:
-                json_count = len(list(homography_base.glob("*_homography.json")))
-                npz_count = len(list(homography_base.glob("homography_points_*.npz")))
-                logger.info(
-                    f"Homography directory ready: {homography_base} (json={json_count}, npz={npz_count})."
-                )
+                logger.info(f"Homography configuration found: {homography_json}")
             weights_dir = Path(settings.WEIGHTS_DIR).resolve()
             if not weights_dir.exists():
                 logger.warning(

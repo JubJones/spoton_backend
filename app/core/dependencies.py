@@ -18,9 +18,7 @@ from app.core.config import settings
 # )
 from app.utils.asset_downloader import AssetDownloader
 from app.services.video_data_manager_service import VideoDataManagerService
-from app.services.notification_service import NotificationService
 from app.services.camera_tracker_factory import CameraTrackerFactory
-from app.services.multi_camera_frame_processor import MultiCameraFrameProcessor
 from app.services.homography_service import HomographyService
 
 from app.models.base_models import AbstractDetector
@@ -29,7 +27,6 @@ from app.infrastructure.cache.redis_client import RedisClient
 from app.services.analytics_engine import AnalyticsEngine
 
 from app.api.websockets import binary_websocket_manager as websocket_manager
-from app.services.raw_video_service import raw_video_service, RawVideoService
 from app.services.detection_video_service import detection_video_service, DetectionVideoService
 from app.services.playback_status_store import PlaybackStatusStore
 from app.services.task_runtime_registry import TaskRuntimeRegistry
@@ -42,64 +39,8 @@ logger = logging.getLogger(__name__)
 
 
 # Mock classes for graceful fallback when services are unavailable
-class MockTrackingRepository:
-    """Mock tracking repository for fallback scenarios."""
-    
-    async def get_tracking_data_by_range(self, **kwargs):
-        """Return empty tracking data."""
-        return []
 
 
-class MockRedisClient:
-    """Mock Redis client for fallback scenarios."""
-    
-    async def setex(self, key: str, timeout: int, value: str):
-        """Mock setex operation."""
-        pass
-    
-    async def get(self, key: str):
-        """Mock get operation."""
-        return None
-
-
-class MockAnalyticsEngine:
-    """Mock analytics engine for fallback scenarios."""
-    
-    async def generate_comprehensive_report(self, **kwargs):
-        """Return mock analytics report."""
-        return {
-            "total_persons": 0,
-            "unique_persons": 0,
-            "avg_dwell_time": 0,
-            "peak_occupancy": 0,
-            "zone_analytics": {},
-            "camera_analytics": {},
-            "movement_patterns": []
-        }
-
-
-@dataclass
-class User:
-    """Simple user model for export endpoints."""
-    username: str
-    user_id: str = None
-    
-    def __post_init__(self):
-        if self.user_id is None:
-            self.user_id = str(uuid.uuid4())
-
-
-def get_current_user(authorization: Optional[str] = Header(None)) -> User:
-    """Simple authentication dependency. In production, this would validate JWT tokens."""
-    # For development/demo purposes, create a default user
-    # In production, this would validate the authorization header and extract user info
-    if authorization:
-        # Extract user info from token (simplified)
-        username = "admin"  # Would extract from JWT
-    else:
-        username = "anonymous"
-    
-    return User(username=username)
 
 
 # --- Accessing Preloaded Components from app.state ---
@@ -156,31 +97,10 @@ def get_video_data_manager_service(
     """Dependency provider for VideoDataManagerService."""
     return VideoDataManagerService(asset_downloader=asset_downloader)
 
-@lru_cache()
-def get_notification_service() -> NotificationService:
-    """Dependency provider for NotificationService (singleton)."""
-    return NotificationService(manager=websocket_manager)
 
 
 # --- Services that depend on preloaded components ---
 
-@lru_cache()
-def get_multi_camera_frame_processor(
-    detector: AbstractDetector = Depends(get_detector),
-    tracker_factory: CameraTrackerFactory = Depends(get_camera_tracker_factory),
-    homography_service: HomographyService = Depends(get_homography_service),
-    notification_service: NotificationService = Depends(get_notification_service),
-    device: torch.device = Depends(get_compute_device)
-) -> MultiCameraFrameProcessor:
-    """Dependency provider for MultiCameraFrameProcessor."""
-    logger.debug("Initializing MultiCameraFrameProcessor instance (or returning cached).")
-    return MultiCameraFrameProcessor(
-        detector=detector,
-        tracker_factory=tracker_factory,
-        homography_service=homography_service,
-        notification_service=notification_service,
-        device=device
-    )
 
 # Note: Legacy PipelineOrchestrator removed with Re-ID pipeline deprecation.
 
@@ -193,7 +113,6 @@ def get_tracking_repository() -> TrackingRepository:
         return TrackingRepository()
     except Exception as e:
         logger.warning(f"Failed to create TrackingRepository, using mock: {e}")
-        return MockTrackingRepository()
 
 @lru_cache()
 def get_redis_client() -> RedisClient:
@@ -202,31 +121,9 @@ def get_redis_client() -> RedisClient:
         return RedisClient()
     except Exception as e:
         logger.warning(f"Failed to create RedisClient, using mock: {e}")
-        return MockRedisClient()
-
-@lru_cache()
-def get_analytics_service() -> AnalyticsEngine:
-    """Dependency provider for AnalyticsEngine."""
-    try:
-        return AnalyticsEngine()
-    except Exception as e:
-        logger.warning(f"Failed to create AnalyticsEngine, using mock: {e}")
-        return MockAnalyticsEngine()
 
 
-@lru_cache()
-def get_raw_video_service(
-    playback_status_store: PlaybackStatusStore = Depends(global_playback_status_store),
-    playback_runtime_registry: TaskRuntimeRegistry = Depends(global_task_runtime_registry),
-) -> RawVideoService:
-    """Dependency provider for RawVideoService."""
-    logger.debug("Initializing RawVideoService instance (or returning cached).")
-    service = raw_video_service
-    service.attach_playback_interfaces(
-        status_store=playback_status_store,
-        runtime_registry=playback_runtime_registry,
-    )
-    return service
+
 
 
 @lru_cache()

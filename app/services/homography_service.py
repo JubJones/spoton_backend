@@ -47,13 +47,6 @@ class HomographyService:
         self.homography_file_path = self._resolve_homography_file_path()
         self._loaded = False
 
-        source_pref = str(getattr(self._settings, "HOMOGRAPHY_SOURCE", "json")).lower()
-        if source_pref != "json":
-            logger.warning(
-                "HOMOGRAPHY_SOURCE='%s' is no longer supported. Falling back to single JSON file.",
-                source_pref,
-            )
-
         # Load matrices immediately so the service is ready for use.
         self.load_json_homography_data()
 

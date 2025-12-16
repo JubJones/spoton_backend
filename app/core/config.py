@@ -112,7 +112,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 60.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c01_scene_s47.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "upper_right",
@@ -134,7 +133,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 60.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c02_scene_s47.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "upper_right",
@@ -156,7 +154,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 60.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c03_scene_s47.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "bottom_left",
@@ -185,7 +182,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 60.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c05_scene_s47.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "upper_left",
@@ -287,7 +283,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c09_scene_s14.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "lower_left",
@@ -315,7 +310,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c12_scene_s14.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "upper_left",
@@ -344,7 +338,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c13_scene_s14.npz",
                 "handoff_exit_rules": [
                     {
                         "source_exit_quadrant": "upper_right",
@@ -385,7 +378,6 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
                 "orientation": 0.0,
-                "homography_matrix_path": "homography_points_c16_scene_s14.npz",
                 "handoff_exit_rules": [],
                 "handoff_zones": [
                     {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0}
@@ -506,8 +498,7 @@ class Settings(BaseSettings):
     CAMERA_HANDOFF_ZONES: Dict[str, List[Dict[str, float]]] = Field(default_factory=dict)
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
-    HOMOGRAPHY_DATA_DIR: str = Field(default="./homography_data")
-    HOMOGRAPHY_SOURCE: str = Field(default="json", description="Homography source selection: 'auto' (JSON then NPZ), 'json', or 'npz'")
+    MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
     WORLD_BOUNDS_X_MIN: float = Field(default=-2000.0, description="Minimum world X coordinate (meters)")
     WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
@@ -666,9 +657,7 @@ class Settings(BaseSettings):
 
     # (Re-ID weights path removed)
     
-    @property
-    def resolved_homography_base_path(self) -> Path:
-        return Path(self.HOMOGRAPHY_DATA_DIR).resolve()
+
 
     @property
     def normalized_possible_camera_overlaps(self) -> Set[Tuple[CameraID, CameraID]]:

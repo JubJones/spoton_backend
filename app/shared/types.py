@@ -20,11 +20,6 @@ TrackKey = Tuple[CameraID, TrackID]
 FrameData = Tuple[np.ndarray, str] # (frame_image_np, frame_path_str)
 FrameBatch = Dict[CameraID, Optional[FrameData]]
 
-class RawDetection(BaseModel):
-    """Represents a raw detection before tracking."""
-    bbox_xyxy: BoundingBoxXYXY
-    confidence: float
-    class_id: int
 
 class TrackedObjectData(BaseModel):
     """Data for a single tracked object, enriched with global ID."""
@@ -68,13 +63,6 @@ class CameraHandoffDetailConfig(BaseModel):
     homography_matrix_path: Optional[str] = Field(None, description="Path to the .npz file containing homography points for this camera and scene, relative to HOMOGRAPHY_DATA_DIR.")
     # Homography matrix itself will be loaded and cached by HomographyService
 
-class HandoffTriggerInfo(NamedTuple):
-    """
-    Holds information about a triggered handoff event for a specific track.
-    """
-    source_track_key: TrackKey
-    rule: ExitRuleModel # Use the Pydantic model
-    source_bbox: BoundingBoxXYXY # BBox that triggered the rule in the source camera
 
 
 # --- Map for Quadrant Calculation ---
