@@ -3,6 +3,7 @@ Module for managing and providing application dependencies.
 Leverages FastAPI's dependency injection system and app.state for preloaded components.
 """
 from functools import lru_cache
+import logging
 from fastapi import Depends, Request, HTTPException, status
 import torch
 
