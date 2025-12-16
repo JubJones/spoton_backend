@@ -131,4 +131,5 @@ class InverseHomographyProjector:
             frame_number=world_point.frame_number,
             timestamp=world_point.timestamp,
             global_id=getattr(world_point, "global_id", None),
+            is_matched=getattr(world_point, "is_matched", False),
         )

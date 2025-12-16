@@ -813,6 +813,24 @@ class DetectionVideoService(RawVideoService):
                 except Exception as e:
                     logger.error(f"Space-based matching failed: {e}")
 
+                # Update 'is_matched' flag for correct coloring
+                # precise timing: MUST be done after match_across_cameras updates global IDs
+                if self.space_based_matcher:
+                    # logger.warning("DEBUG: Updating is_matched flags...") # Confirm block entry
+                    for camera_id, detection_data in camera_detections.items():
+                        for track in detection_data.get("tracks", []):
+                            gid = track.get("global_id")
+                            if gid:
+                                is_shared = self.space_based_matcher.is_global_id_shared(gid)
+                                track["is_matched"] = is_shared
+                                
+                                # Log visibility status (WARNING to ensure visibility)
+                                if is_shared:
+                                    logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=True -> COLORING")
+                                else:
+                                    # Log unmatched too (limited to avoid infinite spam if possible, but for short test it is fine)
+                                    logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=False -> GREEN")
+
                 # --- Send Updates Loop ---
                 # Now that global_ids are injected, send updates to frontend
                 for camera_id, detection_data in camera_detections.items():
@@ -1692,6 +1710,18 @@ class DetectionVideoService(RawVideoService):
                     except Exception as e:
                          logger.error(f"Space-based matching failed in simple loop: {e}")
 
+                # Update 'is_matched' flag for correct coloring (Fix for Simple Loop)
+                if self.space_based_matcher:
+                    for camera_id, (frame, detection_data) in frame_camera_data.items():
+                         for track in detection_data.get("tracks", []):
+                            gid = track.get("global_id")
+                            if gid:
+                                is_shared = self.space_based_matcher.is_global_id_shared(gid)
+                                track["is_matched"] = is_shared
+                                # DEBUG LOG (Temporary)
+                                logger.warning(f"COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
+                                logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
+
                 # 3. Send Updates and Emit Debug
                 for camera_id, (frame, detection_data) in frame_camera_data.items():
                     # Collect debug points (now with global_ids injected)
@@ -1812,6 +1842,7 @@ class DetectionVideoService(RawVideoService):
                         timestamp=float(frame_number),
                         global_id=track.get("global_id"),
                         transformation_quality=float(track.get("transformation_quality") or 1.0),
+                        is_matched=track.get("is_matched", False),
                     )
                 )
             except Exception:

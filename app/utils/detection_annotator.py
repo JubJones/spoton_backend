@@ -134,10 +134,12 @@ class DetectionAnnotator:
         x1 = max(0, min(x1, w - 1)); y1 = max(0, min(y1, h - 1))
         x2 = max(x1 + 1, min(x2, w)); y2 = max(y1 + 1, min(y2, h))
 
-        # Choose color: default green; if global_id present, choose deterministic non-green color
+        # Choose color: default green; if is_matched is True and global_id present, choose deterministic non-green color
         color = self.style.box_color
         global_id = track.get("global_id")
-        if global_id:
+        is_matched = track.get("is_matched", False)
+        
+        if global_id and is_matched:
             color = self._color_for_global_id(global_id)
 
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, max(2, self.style.box_thickness))

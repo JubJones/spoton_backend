@@ -36,6 +36,7 @@ class WorldPoint:
     timestamp: Optional[float]
     transformation_quality: float  # 0..1
     global_id: Optional[str] = None
+    is_matched: bool = False
 
 
 class WorldPlaneTransformer:
