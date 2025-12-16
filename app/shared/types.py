@@ -2,7 +2,7 @@
 """
 Module for shared type aliases and data structures used across the application.
 """
-from typing import Dict, Tuple, Optional, List, NewType, NamedTuple, Callable, Any
+from typing import Dict, Tuple, Optional, List, NewType, Callable, Any
 import numpy as np
 from pydantic import BaseModel, Field
 

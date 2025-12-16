@@ -10,12 +10,11 @@ integrating with all Phase 5 production readiness components:
 - Deep system diagnostics and readiness assessment
 """
 
-import asyncio
 import time
 import logging
 from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, asdict
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
 # Phase 5 Production Components

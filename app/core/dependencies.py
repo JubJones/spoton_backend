@@ -3,12 +3,7 @@ Module for managing and providing application dependencies.
 Leverages FastAPI's dependency injection system and app.state for preloaded components.
 """
 from functools import lru_cache
-from typing import Optional
-import logging
-import uuid
-from dataclasses import dataclass
-
-from fastapi import Depends, Request, HTTPException, status, Header
+from fastapi import Depends, Request, HTTPException, status
 import torch
 
 from app.core.config import settings
@@ -24,9 +19,7 @@ from app.services.homography_service import HomographyService
 from app.models.base_models import AbstractDetector
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.infrastructure.cache.redis_client import RedisClient
-from app.services.analytics_engine import AnalyticsEngine
 
-from app.api.websockets import binary_websocket_manager as websocket_manager
 from app.services.detection_video_service import detection_video_service, DetectionVideoService
 from app.services.playback_status_store import PlaybackStatusStore
 from app.services.task_runtime_registry import TaskRuntimeRegistry

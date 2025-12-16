@@ -3,9 +3,6 @@ Module for managing and providing application dependencies.
 Leverages FastAPI's dependency injection system and app.state for preloaded components.
 """
 from functools import lru_cache
-from typing import Optional
-import logging
-import uuid
 
 from fastapi import Depends, Request, HTTPException, status
 import torch
@@ -27,7 +24,6 @@ from app.services.playback_control_service import PlaybackControlService
 
 from app.models.base_models import AbstractDetector
 
-from app.api.websockets import binary_websocket_manager as websocket_manager
 
 logger = logging.getLogger(__name__)
 
