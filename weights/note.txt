@@ -1,3 +1,4 @@
-"campus.pt", "factory.pt": "https://drive.google.com/drive/folders/1dSn2EMceUlRLpJ-etsH_6_sDb0B62r9k?usp=sharing"
+"campus.pt": "https://drive.google.com/drive/folders/1dSn2EMceUlRLpJ-etsH_6_sDb0B62r9k?usp=sharing"
+"factory.pt": "https://drive.google.com/file/d/1ho5vMOlpkDCNMYkiJ_ssaH_L6i8G6apq/view?usp=sharing"
 "clip_market1501.pt": "https://drive.google.com/uc?id=1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7",
 named as clip_market1501.pt
