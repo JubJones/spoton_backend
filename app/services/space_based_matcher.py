@@ -11,6 +11,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+from app.services.global_person_registry import GlobalPersonRegistry
+
 class SpaceBasedMatcher:
     """
     Service for matching tracks across cameras based on spatial proximity.
@@ -20,7 +22,7 @@ class SpaceBasedMatcher:
     Uses Hungarian Algorithm (linear assignment) for robust 1-to-1 matching.
     """
     
-    def __init__(self):
+    def __init__(self, registry: Optional[GlobalPersonRegistry] = None):
         self.threshold_meters = settings.SPATIAL_MATCH_THRESHOLD
         self.min_overlap_frames = settings.SPATIAL_MATCH_MIN_OVERLAP_FRAMES
         self.enabled = settings.SPATIAL_MATCH_ENABLED
@@ -31,12 +33,13 @@ class SpaceBasedMatcher:
         # Key: (camera_id_a, track_id_a, camera_id_b, track_id_b) -> consecutive_frames
         self.potential_matches: Dict[Tuple[str, str, str, str], int] = defaultdict(int)
         
-        # Confirmed local-to-global mappings
-        # Key: (camera_id, local_track_id) -> global_id
-        self.global_id_map: Dict[Tuple[str, str], str] = {}
+        # Dependency: Global Person Registry
+        self.registry = registry or GlobalPersonRegistry() # Fallback useful? Maybe better to require injection.
+        # Note: If fallback creates new instance, it won't share state. 
+        # But detection_video_service creates both, so it will pass the shared one.
         
-        # Inverse map for quick lookups: global_id -> Set[(camera_id, local_track_id)]
-        self.global_id_assignments: Dict[str, Set[Tuple[str, str]]] = defaultdict(set)
+        # Removed internal maps in favor of self.registry
+
 
         # Track history for velocity calculation (optional for later phases, kept effectively stateless per frame group here)
         
@@ -82,9 +85,10 @@ class SpaceBasedMatcher:
                 track_id = track.get("track_id")
                 if track_id is not None:
                     key = (camera_id, str(track_id))
-                    if key not in self.global_id_map:
-                         new_global_id = f"global_{uuid.uuid4().hex[:8]}"
-                         self._assign_global_id(key, new_global_id)
+                    existing_gid = self.registry.get_global_id(camera_id, int(track_id))
+                    if not existing_gid:
+                         new_global_id = self.registry.allocate_new_id()
+                         self.registry.assign_identity(camera_id, int(track_id), new_global_id)
                          logger.debug(f"Created new global ID {new_global_id} for UNMATCHED track {camera_id}:{track_id}")
         
         # 4. Inject global IDs back into the detection results
@@ -250,47 +254,33 @@ class SpaceBasedMatcher:
             key_a = (cam_a, str(track_a_id)) # Ensure string track ID
             key_b = (cam_b, str(track_b_id))
             
-            existing_global_a = self.global_id_map.get(key_a)
-            existing_global_b = self.global_id_map.get(key_b)
+            # Retrieve current global IDs from registry
+            existing_global_a = self.registry.get_global_id(*key_a)
+            existing_global_b = self.registry.get_global_id(*key_b)
             
             if existing_global_a and existing_global_b:
                 if existing_global_a != existing_global_b:
-                    # MERGE: Priority to OLDER ID (lexicographically smaller usually implies creation order with UUIDs? No.)
-                    # Logic: "Winner" ID is typically the one established longer.
-                    # Since we don't store age, we'll pick the one that has *more* assignments (larger cluster).
-                    # Or just simple string comparison for determinism.
+                    # MERGE
                     if existing_global_a < existing_global_b:
-                         self._merge_identities(existing_global_a, existing_global_b)
+                         self.registry.merge_identities(target_global_id=existing_global_a, source_global_id=existing_global_b)
                     else:
-                         self._merge_identities(existing_global_b, existing_global_a)
+                         self.registry.merge_identities(target_global_id=existing_global_b, source_global_id=existing_global_a)
             
             elif existing_global_a:
-                self._assign_global_id(key_b, existing_global_a)
+                self.registry.assign_identity(cam_b, track_b_id, existing_global_a)
                 
             elif existing_global_b:
-                self._assign_global_id(key_a, existing_global_b)
+                self.registry.assign_identity(cam_a, track_a_id, existing_global_b)
                 
             else:
-                new_global_id = f"global_{uuid.uuid4().hex[:8]}"
-                self._assign_global_id(key_a, new_global_id)
-                self._assign_global_id(key_b, new_global_id)
+                new_global_id = self.registry.allocate_new_id()
+                self.registry.assign_identity(cam_a, track_a_id, new_global_id)
+                self.registry.assign_identity(cam_b, track_b_id, new_global_id)
                 logger.debug(f"Created new global ID {new_global_id} for match {cam_a}:{track_a_id} <-> {cam_b}:{track_b_id}")
 
-    def _assign_global_id(self, key: Tuple[str, str], global_id: str):
-        self.global_id_map[key] = global_id
-        self.global_id_assignments[global_id].add(key)
+    # Removed internal _assign_global_id and _merge_identities helpers as they are now in registry
 
-    def _merge_identities(self, target_global_id: str, source_global_id: str):
-        """Migrate all tracks from source_global_id to target_global_id."""
-        logger.info(f"Merging global identity {source_global_id} into {target_global_id}")
-        
-        tracks_to_move = list(self.global_id_assignments[source_global_id]) # Copy list
-        
-        for key in tracks_to_move:
-            self.global_id_map[key] = target_global_id
-            self.global_id_assignments[target_global_id].add(key)
-        
-        del self.global_id_assignments[source_global_id]
+
 
     def _inject_global_ids(self, camera_detections: Dict[str, Dict[str, Any]]):
         """Write the global IDs into the track dictionaries."""
@@ -299,9 +289,9 @@ class SpaceBasedMatcher:
             for track in tracks:
                 track_id = track.get("track_id")
                 if track_id is not None:
-                    key = (camera_id, str(track_id))
-                    if key in self.global_id_map:
-                        track["global_id"] = self.global_id_map[key]
+                    global_id = self.registry.get_global_id(camera_id, int(track_id))
+                    if global_id:
+                        track["global_id"] = global_id
                         
     def _cleanup_state(self, current_valid_tracks: Dict[str, List[Dict[str, Any]]]):
         """Remove global ID mappings for tracks that have disappeared (optional)."""
@@ -310,10 +300,4 @@ class SpaceBasedMatcher:
 
     def is_global_id_shared(self, global_id: str) -> bool:
         """Check if a global ID is currently assigned to tracks in multiple cameras."""
-        if not global_id:
-            return False
-        
-        assignments = self.global_id_assignments.get(global_id, set())
-        # Count unique cameras in the assignments
-        unique_cameras = {cam_id for cam_id, _ in assignments}
-        return len(unique_cameras) > 1
+        return self.registry.is_global_id_shared(global_id)

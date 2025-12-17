@@ -2,3 +2,7 @@
 "factory.pt": "https://drive.google.com/file/d/1ho5vMOlpkDCNMYkiJ_ssaH_L6i8G6apq/view?usp=sharing"
 "clip_market1501.pt": "https://drive.google.com/uc?id=1GnyAVeNOg3Yug1KBBWMKKbT2x43O5Ch7",
 named as clip_market1501.pt
+
+--
+Alternative from Nota
+"market_aic_sbs_R50-ibn.pth": "https://drive.google.com/file/d/17e9fuLWWorTEPweZJwnM0_4on0cLjiBb/view?usp=sharing"

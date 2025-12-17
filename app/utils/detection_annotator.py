@@ -45,13 +45,15 @@ class DetectionAnnotator:
         
         logger.info("DetectionAnnotator initialized for Phase 2 detection pipeline")
     
-    def annotate_frame(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None) -> np.ndarray:
+    def annotate_frame(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None, handoff_zones: Optional[List[any]] = None) -> np.ndarray:
         """
-        Annotate frame with detection bounding boxes and confidence scores.
+        Annotate frame with detection bounding boxes, confidence scores, and optional handoff zones.
         
         Args:
             frame: Input frame as numpy array (BGR format)
             detections: List of detection dictionaries with bbox and confidence
+            tracks: Optional list of tracking data
+            handoff_zones: Optional list of CameraZone objects or dicts to visualize
             
         Returns:
             Annotated frame as numpy array
@@ -63,6 +65,10 @@ class DetectionAnnotator:
         try:
             annotated_frame = frame.copy()
             
+            # Draw Handoff Zones (Background layer)
+            if handoff_zones:
+                self._draw_handoff_zones(annotated_frame, handoff_zones)
+
             if detections:
                 for i, detection in enumerate(detections):
                     try:
@@ -88,6 +94,49 @@ class DetectionAnnotator:
         except Exception as e:
             logger.error(f"Error in frame annotation: {e}")
             return frame.copy()  # Return original frame on error
+    
+    def _draw_handoff_zones(self, frame: np.ndarray, zones: List[any]):
+        """Draw handoff zones as semi-transparent overlays or outlines."""
+        h, w = frame.shape[:2]
+        overlay = frame.copy()
+        
+        # Cyan color for handoff zones
+        zone_color = (255, 255, 0) 
+        
+        for zone in zones:
+            try:
+                # Handle both dict (from config) and CameraZone object (from service)
+                if hasattr(zone, 'x_min'):
+                    x1 = int(zone.x_min * w)
+                    x2 = int(zone.x_max * w)
+                    y1 = int(zone.y_min * h)
+                    y2 = int(zone.y_max * h)
+                elif isinstance(zone, dict):
+                     x1 = int(zone.get('x_min', 0) * w)
+                     x2 = int(zone.get('x_max', 1) * w)
+                     y1 = int(zone.get('y_min', 0) * h)
+                     y2 = int(zone.get('y_max', 1) * h)
+                else:
+                    continue
+
+                # Draw filled rectangle on overlay
+                cv2.rectangle(overlay, (x1, y1), (x2, y2), zone_color, -1)
+                
+                # Draw border on original frame
+                cv2.rectangle(frame, (x1, y1), (x2, y2), zone_color, 2)
+                
+                # Add label
+                cv2.putText(frame, "Handoff Zone", (x1 + 5, y1 + 20), 
+                           self.font, 0.5, (0, 0, 0), 2)
+                cv2.putText(frame, "Handoff Zone", (x1 + 5, y1 + 20), 
+                           self.font, 0.5, zone_color, 1)
+                           
+            except Exception as e:
+                logger.warning(f"Error drawing zone: {e}")
+                
+        # Blend overlay for transparency effect
+        alpha = 0.2
+        cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0, frame)
     
     def _draw_detection_box(self, frame: np.ndarray, detection: Dict, detection_idx: int):
         """Draw individual detection bounding box with label."""
@@ -259,13 +308,15 @@ class DetectionAnnotator:
             logger.error(f"Error encoding frame to base64: {e}")
             return ""
     
-    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None) -> Dict[str, str]:
+    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None, handoff_zones: Optional[List[any]] = None) -> Dict[str, str]:
         """
         Create both original and annotated frame encodings for WebSocket streaming.
         
         Args:
             frame: Input frame as numpy array
             detections: List of detection dictionaries
+            tracks: Optional list of tracks
+            handoff_zones: Optional list of zones to visualize
             
         Returns:
             Dictionary with 'original_b64' and 'annotated_b64' keys
@@ -275,7 +326,7 @@ class DetectionAnnotator:
             original_b64 = self.frame_to_base64(frame)
             
             # Create and encode annotated frame
-            annotated_frame = self.annotate_frame(frame, detections, tracks)
+            annotated_frame = self.annotate_frame(frame, detections, tracks, handoff_zones)
             annotated_b64 = self.frame_to_base64(annotated_frame)
             
             return {

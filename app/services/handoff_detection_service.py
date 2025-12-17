@@ -140,6 +140,19 @@ class HandoffDetectionService:
 
                 if camera_zone_defs:
                     zones[camera_id] = camera_zone_defs
+                else:
+                    # Generate default matching zones (4 sides) if none configured
+                    # This ensures "Boundary Triggers" work out-of-the-box
+                    default_margin = 0.1 # 10%
+                    defaults = [
+                        CameraZone(camera_id, 0.0, default_margin, 0.0, 1.0), # Left
+                        CameraZone(camera_id, 1.0 - default_margin, 1.0, 0.0, 1.0), # Right
+                        CameraZone(camera_id, 0.0, 1.0, 0.0, default_margin), # Top
+                        CameraZone(camera_id, 0.0, 1.0, 1.0 - default_margin, 1.0) # Bottom
+                    ]
+                    zones[camera_id] = defaults
+                    total_zones += 4
+                    logger.info(f"Generated 4 default handoff zones for camera {camera_id}")
 
             logger.info(f"Defined {total_zones} handoff zones across {len(zones)} cameras")
             return zones
@@ -181,8 +194,16 @@ class HandoffDetectionService:
             
             # Check if camera has defined zones
             if camera_id not in self.camera_zones:
-                logger.debug(f"No handoff zones defined for camera {camera_id}")
-                return False, []
+                # Lazy-load default zones (4 sides) if not configured
+                logger.info(f"Initializing default handoff zones (4 edges) for camera {camera_id}")
+                default_margin = 0.1 # 10%
+                defaults = [
+                    CameraZone(camera_id, 0.0, default_margin, 0.0, 1.0), # Left
+                    CameraZone(camera_id, 1.0 - default_margin, 1.0, 0.0, 1.0), # Right
+                    CameraZone(camera_id, 0.0, 1.0, 0.0, default_margin), # Top
+                    CameraZone(camera_id, 0.0, 1.0, 1.0 - default_margin, 1.0) # Bottom
+                ]
+                self.camera_zones[camera_id] = defaults
             
             # Check each zone for this camera
             for zone in self.camera_zones[camera_id]:
