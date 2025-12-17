@@ -100,6 +100,16 @@ class HandoffDetectionService:
         logger.debug(f"Handoff rules: {self.handoff_rules}")
         logger.debug(f"Overlap threshold: {self.overlap_threshold}")
     
+    def _create_default_zones(self, camera_id: str) -> List[CameraZone]:
+        """Generate default 4-sided zones (top/bottom/left/right) with 5% margin."""
+        default_margin = 0.05 # 5% margin (reduced from 10%)
+        return [
+            CameraZone(camera_id, 0.0, default_margin, 0.0, 1.0), # Left
+            CameraZone(camera_id, 1.0 - default_margin, 1.0, 0.0, 1.0), # Right
+            CameraZone(camera_id, 0.0, 1.0, 0.0, default_margin), # Top
+            CameraZone(camera_id, 0.0, 1.0, 1.0 - default_margin, 1.0) # Bottom
+        ]
+
     def _define_camera_zones(self) -> Dict[str, List[CameraZone]]:
         """
         Define handoff zones for each camera based on typical campus layout.
@@ -138,21 +148,16 @@ class HandoffDetectionService:
                             f"Skipping invalid handoff zone config for camera {camera_id}: {zone_error}"
                         )
 
-                if camera_zone_defs:
-                    zones[camera_id] = camera_zone_defs
-                else:
-                    # Generate default matching zones (4 sides) if none configured
-                    # This ensures "Boundary Triggers" work out-of-the-box
-                    default_margin = 0.1 # 10%
-                    defaults = [
-                        CameraZone(camera_id, 0.0, default_margin, 0.0, 1.0), # Left
-                        CameraZone(camera_id, 1.0 - default_margin, 1.0, 0.0, 1.0), # Right
-                        CameraZone(camera_id, 0.0, 1.0, 0.0, default_margin), # Top
-                        CameraZone(camera_id, 0.0, 1.0, 1.0 - default_margin, 1.0) # Bottom
-                    ]
-                    zones[camera_id] = defaults
-                    total_zones += 4
-                    logger.info(f"Generated 4 default handoff zones for camera {camera_id}")
+                # Always append default matching zones (4 sides)
+                # This guarantees "Boundary Triggers" on all axes regardless of custom config
+                defaults = self._create_default_zones(camera_id)
+                
+                # Combine configured zones with defaults
+                final_zones = camera_zone_defs + defaults
+                zones[camera_id] = final_zones
+                total_zones += len(final_zones)
+                
+                logger.info(f"Defined {len(final_zones)} handoff zones for camera {camera_id} (Config: {len(camera_zone_defs)} + Default: 4)")
 
             logger.info(f"Defined {total_zones} handoff zones across {len(zones)} cameras")
             return zones
@@ -196,14 +201,7 @@ class HandoffDetectionService:
             if camera_id not in self.camera_zones:
                 # Lazy-load default zones (4 sides) if not configured
                 logger.info(f"Initializing default handoff zones (4 edges) for camera {camera_id}")
-                default_margin = 0.1 # 10%
-                defaults = [
-                    CameraZone(camera_id, 0.0, default_margin, 0.0, 1.0), # Left
-                    CameraZone(camera_id, 1.0 - default_margin, 1.0, 0.0, 1.0), # Right
-                    CameraZone(camera_id, 0.0, 1.0, 0.0, default_margin), # Top
-                    CameraZone(camera_id, 0.0, 1.0, 1.0 - default_margin, 1.0) # Bottom
-                ]
-                self.camera_zones[camera_id] = defaults
+                self.camera_zones[camera_id] = self._create_default_zones(camera_id)
             
             # Check each zone for this camera
             for zone in self.camera_zones[camera_id]:

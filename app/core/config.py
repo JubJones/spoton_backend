@@ -120,9 +120,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": None
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c02": {
                 "display_name": "Campus Plaza Camera",
@@ -141,9 +139,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": None
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c03": {
                 "display_name": "Campus Walkway Camera",
@@ -168,10 +164,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": None
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c05": {
                 "display_name": "Campus Commons Camera",
@@ -196,9 +189,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": None
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             }
         }
     },
@@ -297,9 +288,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": "wait; overlap c13/c16 possible"
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c12": {
                 "display_name": "Factory Main Area Camera",
@@ -324,10 +313,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": "overlap c13 possible"
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c13": {
                 "display_name": "Factory Corridor Camera",
@@ -364,10 +350,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                         "notes": "overlap c12 possible"
                     }
                 ],
-                "handoff_zones": [
-                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0},
-                    {"x_min": 0.7, "x_max": 1.0, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             },
             "c16": {
                 "display_name": "Factory Exit Camera",
@@ -379,9 +362,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
                 "field_of_view": 70.0,
                 "orientation": 0.0,
                 "handoff_exit_rules": [],
-                "handoff_zones": [
-                    {"x_min": 0.0, "x_max": 0.3, "y_min": 0.0, "y_max": 1.0}
-                ]
+
             }
         }
     }
