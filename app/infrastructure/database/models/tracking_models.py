@@ -115,7 +115,8 @@ class DetectionEvent(Base):
     object_class = Column(String(50), nullable=False, default='person')
     
     # Associated tracking event
-    tracking_event_id = Column(UUID(as_uuid=True), ForeignKey('tracking_events.id'), nullable=True)
+    # Associated tracking event
+    tracking_event_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     
     # Session context
     session_id = Column(String(100), nullable=True, index=True)
@@ -124,7 +125,11 @@ class DetectionEvent(Base):
     detection_metadata = Column(JSONB, nullable=True)
     
     # Relationship
-    tracking_event = relationship("TrackingEvent", back_populates="detection_events")
+    tracking_event = relationship(
+        "TrackingEvent", 
+        back_populates="detection_events",
+        primaryjoin="foreign(DetectionEvent.tracking_event_id) == remote(TrackingEvent.id)"
+    )
     
     # Indexes
     __table_args__ = (
@@ -365,7 +370,11 @@ class SessionRecord(Base):
 
 
 # Add relationships
-TrackingEvent.detection_events = relationship("DetectionEvent", back_populates="tracking_event")
+TrackingEvent.detection_events = relationship(
+    "DetectionEvent", 
+    back_populates="tracking_event",
+    primaryjoin="TrackingEvent.id == foreign(DetectionEvent.tracking_event_id)"
+)
 TrackingEvent.person_identity = relationship(
     "PersonIdentity", 
     back_populates="tracking_events",
