@@ -29,6 +29,9 @@ services:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
+    depends_on:
+      timescaledb:
+        condition: service_healthy
       # The application inside will check torch.cuda.is_available()
       # To enable GPU access for the container, uncomment 'deploy' section.
       # This requires NVIDIA Container Toolkit on the host.

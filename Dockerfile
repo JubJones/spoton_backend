@@ -109,7 +109,7 @@ ARG PYTORCH_VARIANT=cpu
 
 # Install runtime dependencies including CUDA runtime for GPU support
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 libopenblas-base \
+  libgl1-mesa-glx libglib2.0-0 libsm6 libxext6 libxrender1 libopenblas-base curl \
   && if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
   apt-get install -y --no-install-recommends wget gnupg2 software-properties-common && \
   wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \

@@ -337,6 +337,14 @@ class DetectionVideoService(RawVideoService):
         if not self.feature_extraction_service or not self.handoff_manager:
             return tracks
 
+        # Initialize cooldown tracker if not present
+        if not hasattr(self, "_reid_cooldowns"):
+             self._reid_cooldowns: Dict[str, float] = {}
+        
+        # Cooldown configuration (hardcoded for now, could be in settings)
+        COOLDOWN_SECONDS = 0.5 
+        now = time.time()
+
         current_track_ids = set()
         if camera_id not in self.active_track_ids:
             self.active_track_ids[camera_id] = set()
@@ -347,6 +355,9 @@ class DetectionVideoService(RawVideoService):
             track_id = int(track['track_id'])
             current_track_ids.add(track_id)
             bbox = track['bbox']
+            
+            # Unique key for this track in this camera
+            track_key = f"{camera_id}_{track_id}"
             
             # Check if this is a NEW track (Entry Event)
             if track_id not in previous_track_ids:
@@ -383,6 +394,9 @@ class DetectionVideoService(RawVideoService):
                                     
                                     track['global_id'] = match_global_id
                                     match_found = True
+                                    
+                                    # Set cooldown to prevent immediate re-extraction
+                                    self._reid_cooldowns[track_key] = now
                                 else:
                                      logger.debug(f"[RE-ID] ⚪ No match for new Track {track_id} in {camera_id}. Assigned temporary ID.")
                     else:
@@ -397,30 +411,46 @@ class DetectionVideoService(RawVideoService):
                      camera_id, bbox, frame_width, frame_height
                 )
                 if is_handoff:
-                     # This person is leaving? Extract and Register
-                     try:
-                        x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-                        x1, y1 = max(0, x1), max(0, y1)
-                        x2, y2 = min(frame_width, x2), min(frame_height, y2)
-                        
-                        if x2 > x1 and y2 > y1:
-                            patch = frame[y1:y2, x1:x2]
-                            embedding = self.feature_extraction_service.extract(patch)
-                            if embedding is not None:
-                                # Use current global_id if available, else track_id as temporary global_id
-                                # Phase 3: Get from registry first
-                                current_gid = self.global_registry.get_global_id(camera_id, track_id)
-                                gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
-                                
-                                logger.info(f"[RE-ID] 🚪 Track {track_id} (Global: {gid}) entered Handoff Zone in {camera_id}. Registering exit.")
-                                self.handoff_manager.register_exit(gid, embedding, camera_id)
-                                logger.debug(f"[RE-ID] 📤 Registered {gid} for handoff. Embedding size: {embedding.shape}.")
-                     except Exception as e:
-                        logger.error(f"Re-ID Exit Error: {e}")
+                     # Check Cooldown
+                     last_time = self._reid_cooldowns.get(track_key, 0.0)
+                     if (now - last_time) >= COOLDOWN_SECONDS:
+                         # This person is leaving? Extract and Register
+                         try:
+                            x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                            x1, y1 = max(0, x1), max(0, y1)
+                            x2, y2 = min(frame_width, x2), min(frame_height, y2)
+                            
+                            if x2 > x1 and y2 > y1:
+                                patch = frame[y1:y2, x1:x2]
+                                embedding = self.feature_extraction_service.extract(patch)
+                                if embedding is not None:
+                                    # Use current global_id if available, else track_id as temporary global_id
+                                    # Phase 3: Get from registry first
+                                    current_gid = self.global_registry.get_global_id(camera_id, track_id)
+                                    gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
+                                    
+                                    logger.info(f"[RE-ID] 🚪 Track {track_id} (Global: {gid}) entered Handoff Zone in {camera_id}. Registering exit.")
+                                    self.handoff_manager.register_exit(gid, embedding, camera_id)
+                                    logger.debug(f"[RE-ID] 📤 Registered {gid} for handoff. Embedding size: {embedding.shape}.")
+                                    
+                                    # Update cooldown
+                                    self._reid_cooldowns[track_key] = now
+                         except Exception as e:
+                            logger.error(f"Re-ID Exit Error: {e}")
+                     # else: logger.debug("Skipping Re-ID due to cooldown") 
 
         # Update active tracks
         self.active_track_ids[camera_id] = current_track_ids
         
+        # Cleanup cooldowns for stale tracks (simple version: strict memory management would be better)
+        # For now, just let it grow slightly or clean periodically? 
+        # Let's do a quick lazy cleanup if dict gets too big
+        if len(self._reid_cooldowns) > 1000:
+             # Keep only keys in current active list across all cameras (simplified)
+             # Actually active_track_ids is structured by camera.
+             active_keys = {f"{c}_{t}" for c, t_set in self.active_track_ids.items() for t in t_set}
+             self._reid_cooldowns = {k: v for k, v in self._reid_cooldowns.items() if k in active_keys}
+
         # Final pass: Ensure all tracks have their assigned global_id from registry
         for track in tracks:
             t_id = int(track['track_id'])
