@@ -107,6 +107,7 @@ RUN --mount=type=cache,target=/root/.cache/pip /opt/venv/bin/python -m pip insta
 FROM base AS runtime
 
 ARG PYTORCH_VARIANT=cpu
+ARG CUDA_APT_VER=12-1
 
 # Install runtime dependencies including CUDA runtime for GPU support
 RUN apt-get update && apt-get install -y --no-install-recommends \
