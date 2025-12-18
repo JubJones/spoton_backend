@@ -41,7 +41,7 @@ services:
       #       devices:
       #         - driver: nvidia
       #           count: all # 1 or 'all' to pass all GPUs
-      #           capabilities: [gpu] # 'gpu' is equivalent to 'utility,compute'
+      #           capabilities: [ gpu ] # 'gpu' is equivalent to 'utility,compute'
       # No hard dependency on Redis; enable with `--profile infra` when needed
     command: uvicorn app.main:app --host 0.0.0.0 --port 3847 --reload # --reload for dev
     healthcheck: *backend-healthcheck
