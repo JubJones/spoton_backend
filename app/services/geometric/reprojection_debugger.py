@@ -87,7 +87,11 @@ class ReprojectionDebugger:
 
         frame: Optional[np.ndarray] = None
         if is_existing_output:
-            frame = cv2.imread(str(output_path))
+            try:
+                frame = cv2.imread(str(output_path))
+            except Exception as e:
+                logger.warning(f"Failed to read existing debug frame {output_path}: {e}")
+                frame = None
 
         if frame is None:
             frame = self.frame_provider(camera_id, frame_number)

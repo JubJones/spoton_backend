@@ -177,7 +177,7 @@ class SpaceBasedMatcher:
                         if dist is not None:
                              # AUDIT LOG: Print distance if relatively close, to debug threshold issues
                             if dist < 5000.0:
-                                logger.info(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
+                                logger.debug(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
 
                             if dist <= self.threshold_meters:
                                 # Optional: Velocity gate check (future Phase)

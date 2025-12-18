@@ -290,6 +290,14 @@ class DetectionAnnotator:
             # Validate quality parameter
             quality = max(1, min(100, quality))
             
+            # Performance Optimization: Resize large frames before encoding
+            # This drastically reduces Base64 string size and WebSocket payload
+            h, w = frame.shape[:2]
+            if w > 640:
+                scale = 640 / w
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (640, new_h), interpolation=cv2.INTER_AREA)
+            
             # Encode frame as JPEG
             encode_params = [cv2.IMWRITE_JPEG_QUALITY, quality]
             success, buffer = cv2.imencode('.jpg', frame, encode_params)
