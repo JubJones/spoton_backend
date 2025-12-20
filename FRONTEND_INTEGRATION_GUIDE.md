@@ -20,7 +20,7 @@ const ws = new WebSocket(`ws://localhost:3847/ws/tracking/${task.task_id}`);
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   if (data.type === 'tracking_update') {
-    handleTrackingUpdate(data.payload);
+    handleTrackingUpdate(data);
   }
 };
 ```
@@ -219,26 +219,26 @@ renderUptimeTrend(charts.uptime_trend);
 
 **Server → Client**:
 ```javascript
-// Tracking update with detection results
+// Tracking update with detection results (Per-Camera Message)
 {
   "type": "tracking_update",
-  "payload": {
-    "global_frame_index": 123,
-    "timestamp_processed_utc": "2025-01-01T10:30:05.456Z",
-    "cameras": {
-      "c09": {
-        "frame_image_base64": "data:image/jpeg;base64,...",
-        "tracks": [{
-          "track_id": 1,
-          "global_id": "person_123",
-          "bbox_xyxy": [110.2, 220.5, 160.0, 330.8],
-          "confidence": 0.92,
-          "map_coords": [12.3, 45.6],
-          "is_focused": false
-        }]
-      }
-    }
-  }
+  "message_type": "detection_update",
+  "task_id": "uuid-...",
+  "camera_id": "c09",
+  "global_frame_index": 123,
+  "timestamp_processed_utc": "2025-01-01T10:30:05.456Z",
+  "camera_data": {
+    "frame_image_base64": "data:image/jpeg;base64,...",
+    "tracks": [{
+      "track_id": 1,
+      "global_id": "person_123",
+      "bbox_xyxy": [110.2, 220.5, 160.0, 330.8],
+      "confidence": 0.92,
+      "map_coords": [12.3, 45.6],
+      "is_focused": false
+    }]
+  },
+  "detection_data": { ... }
 }
 ```
 
@@ -296,27 +296,29 @@ class SpotOnClient {
     this.ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
       if (message.type === 'tracking_update') {
-        this.handleTrackingUpdate(message.payload);
+        this.handleTrackingUpdate(message);
       }
     };
   }
 
-  handleTrackingUpdate(payload) {
-    const { cameras, person_count_per_camera } = payload;
+  handleTrackingUpdate(message) {
+    const { camera_id, camera_data } = message;
 
-    Object.entries(cameras).forEach(([cameraId, data]) => {
-      // Update frame display
-      if (data.frame_image_base64) {
-        document.getElementById(`camera-${cameraId}`).src = data.frame_image_base64;
-      }
+    if (!camera_id || !camera_data) return;
 
-      // Update person count
-      document.getElementById(`count-${cameraId}`).textContent = person_count_per_camera[cameraId] || 0;
+    // Update frame display
+    if (camera_data.frame_image_base64) {
+      const img = document.getElementById(`camera-${camera_id}`);
+      if (img) img.src = camera_data.frame_image_base64;
+    }
 
-      // Draw bounding boxes
-      data.tracks?.forEach(track => {
-        this.drawBoundingBox(cameraId, track);
-      });
+    // Update active tracks count (example logic)
+    const countEl = document.getElementById(`count-${camera_id}`);
+    if (countEl) countEl.textContent = (camera_data.tracks || []).length;
+
+    // Draw bounding boxes
+    camera_data.tracks?.forEach(track => {
+      this.drawBoundingBox(camera_id, track);
     });
   }
 
