@@ -10,6 +10,9 @@ ENV PIP_NO_CACHE_DIR off
 ENV PIP_DISABLE_PIP_VERSION_CHECK on
 ENV PIP_DEFAULT_TIMEOUT 100
 
+# Configure apt to force IPv4 (fixes Docker on Windows networking hangs)
+RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99custom
+
 # Install uv globally
 ARG VERBOSE_BUILD=false
 RUN apt-get update && apt-get install -y --no-install-recommends curl procps ca-certificates && \
@@ -46,10 +49,10 @@ RUN if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
   apt-get install -y --no-install-recommends wget gnupg2 software-properties-common && \
   echo "--- Transforming sources list ---" && \
   sed -i -e's/ main/ main contrib non-free/g' /etc/apt/sources.list && \
-  echo "--- Fetching NVIDIA GPG key ---" && \
-  wget -O - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \
+  echo "--- Fetching NVIDIA GPG key (modern) ---" && \
+  wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | gpg --dearmor -o /usr/share/keyrings/cuda-archive-keyring.gpg && \
   echo "--- Adding NVIDIA repository ---" && \
-  echo "deb https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/ /" > /etc/apt/sources.list.d/cuda.list && \
+  echo "deb [signed-by=/usr/share/keyrings/cuda-archive-keyring.gpg] https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/ /" > /etc/apt/sources.list.d/cuda.list && \
   echo "--- Updating apt cache with new repo ---" && \
   apt-get update && \
   echo "--- Installing CUDA packages ---" && \
