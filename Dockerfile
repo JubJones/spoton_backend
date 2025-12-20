@@ -37,18 +37,31 @@ ARG TORCHAUDIO_VERSION="2.2.1"
 ARG CUDA_VERSION=12.1
 ARG CUDA_APT_VER=12-1
 # Install CUDA dependencies for GPU support when requested
+ENV DEBIAN_FRONTEND=noninteractive
+
 RUN if [ "${PYTORCH_VARIANT}" = "cu121" ]; then \
-  apt-get update && apt-get install -y --no-install-recommends wget gnupg2 software-properties-common && \
+  echo "--- Starting CUDA setup for cu121 ---" && \
+  apt-get update && \
+  echo "--- Installing initial dependencies ---" && \
+  apt-get install -y --no-install-recommends wget gnupg2 software-properties-common && \
+  echo "--- Transforming sources list ---" && \
   sed -i -e's/ main/ main contrib non-free/g' /etc/apt/sources.list && \
-  wget -qO - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \
+  echo "--- Fetching NVIDIA GPG key ---" && \
+  wget -O - https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/3bf863cc.pub | apt-key add - && \
+  echo "--- Adding NVIDIA repository ---" && \
   echo "deb https://developer.download.nvidia.com/compute/cuda/repos/debian11/x86_64/ /" > /etc/apt/sources.list.d/cuda.list && \
-  apt-get update && apt-get install -y --no-install-recommends \
+  echo "--- Updating apt cache with new repo ---" && \
+  apt-get update && \
+  echo "--- Installing CUDA packages ---" && \
+  apt-get install -y --no-install-recommends \
   cuda-runtime-${CUDA_APT_VER} \
   cuda-libraries-${CUDA_APT_VER} \
   cuda-libraries-dev-${CUDA_APT_VER} \
   libcudnn8 \
   libcudnn8-dev && \
-  rm -rf /var/lib/apt/lists/*; \
+  echo "--- Cleaning up ---" && \
+  rm -rf /var/lib/apt/lists/* && \
+  echo "--- CUDA setup complete ---"; \
   fi
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
