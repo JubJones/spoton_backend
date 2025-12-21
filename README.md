@@ -27,17 +27,11 @@ The SpotOn backend has reached **100% production readiness** with comprehensive 
 
 ### Start the System
 ```bash
-# Backend only (fastest for frontend integration)
-docker compose up -d backend
+# Start the System (CPU Default)
+docker compose up --build
 
-# Full stack (backend + Redis + TimescaleDB)
-docker compose --profile infra up --build -d
-
-# CPU stack (profiled compose)
-docker compose -f docker-compose.cpu.yml --profile infra up --build -d
-
-# GPU stack (requires NVIDIA GPU)
-docker compose -f docker-compose.gpu.yml --profile infra up --build -d
+# Start the System (GPU - Requires NVIDIA GPU)
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 
 # Health check
 curl http://localhost:3847/health
@@ -198,60 +192,13 @@ curl -X POST http://localhost:3847/api/v1/export/tracking-data \
 }
 ```
 
-## System Configuration
-
-### Performance Settings
-```bash
-# .env file settings
-TARGET_FPS=3                           # Processing frame rate
-FRAME_JPEG_QUALITY=70                  # Image quality (1-100)
-DETECTION_CONFIDENCE_THRESHOLD=0.7     # Detection sensitivity
-ENABLE_PLAYBACK_CONTROL=true           # Toggle pause/resume endpoints
-PLAYBACK_CONTROL_TIMEOUT_SECONDS=1.0   # Pause/resume acknowledgement timeout
-```
-
 ### Camera Configuration
 ```bash
 # Available environments and cameras
 Campus: c09, c12, c13, c16
 Factory: c01, c02, c03, c04
 ```
-
-## Troubleshooting
-
-### Check System Status
-```bash
-# View logs
-docker-compose logs -f backend
-
-# Check health
-curl http://localhost:3847/health
-
-# Monitor resources
-docker stats
-```
-
-### Common Issues
-- **Slow performance**: Lower TARGET_FPS in .env file
-- **Out of memory**: Reduce FRAME_JPEG_QUALITY or restart containers
-- **Model not loaded**: Ensure clip_market1501.pt is in ./weights/ directory
-
-## Development
-
-### Local Setup
-```bash
-# Python environment
-uv venv .venv --python 3.9
-source .venv/bin/activate
-uv pip install ".[dev]"
-
-# Run locally (requires Redis/TimescaleDB)
-uvicorn app.main:app --reload
-
-# Run tests
-pytest
-```
-
 ### API Documentation
 - **Swagger UI**: http://localhost:3847/docs
 - **ReDoc**: http://localhost:3847/redoc
+

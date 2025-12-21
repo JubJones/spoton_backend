@@ -1,8 +1,10 @@
 services:
   backend:
     build:
-      context: .
       dockerfile: Dockerfile.gpu
+      args:
+        PYTORCH_VARIANT: gpu
+    image: spoton_backend_image:gpu
     deploy:
       resources:
         reservations:
