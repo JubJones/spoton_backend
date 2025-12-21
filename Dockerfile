@@ -1,5 +1,5 @@
 # ---- Base Stage ----
-FROM python:3.9.18-bullseye AS base
+FROM python:3.10-bullseye AS base
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1

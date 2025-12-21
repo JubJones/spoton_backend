@@ -79,21 +79,6 @@ class RTDETRDetector(AbstractDetector):
         try:
             # Load RT-DETR model
             logger.info("RT-DETR weights path: %s", self.model_name)
-            
-            # Patch for PyTorch >= 2.6 which defaults weights_only=True
-            # We need to allow the specific Ultralytics class to be unpickled
-            try:
-                from ultralytics.nn.tasks import RTDETRDetectionModel
-                torch.serialization.add_safe_globals([RTDETRDetectionModel])
-                logger.info("Added RTDETRDetectionModel to safe globals for torch.load")
-            except ImportError:
-                # If we can't import it directly (version mismatch), we might need to rely on legacy loading
-                # or the user might have an older torch version where this isn't an issue.
-                logger.warning("Could not explicitly whitelist RTDETRDetectionModel. Ensure PyTorch version matches Ultralytics requirements.")
-            except AttributeError:
-                 # Older torch versions might not have add_safe_globals
-                 pass
-
             self.model = RTDETR(self.model_name)
             
             # Set device

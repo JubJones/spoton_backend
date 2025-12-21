@@ -42,13 +42,16 @@ RUN uv venv /opt/venv --python $(which python)
 RUN /opt/venv/bin/python -m ensurepip --upgrade || true
 ENV PATH="/opt/venv/bin:$PATH"
 
-# PyTorch is already installed in the base image.
-# We just need to install faiss-gpu and other deps.
-RUN /opt/venv/bin/python -m pip install faiss-gpu
-
-# Install application requirements
+# Install application requirements together with specific PyTorch version
+# We merge them into one command so pip's resolver sees the constraints together
 COPY requirements/requirements.txt /tmp/requirements.txt
-RUN /opt/venv/bin/python -m pip install -r /tmp/requirements.txt && \
+RUN /opt/venv/bin/python -m pip install \
+    torch==2.2.1 \
+    torchvision==0.17.1 \
+    torchaudio==2.2.1 \
+    --index-url https://download.pytorch.org/whl/cu121 \
+    -r /tmp/requirements.txt && \
+    /opt/venv/bin/python -m pip install faiss-gpu && \
     /opt/venv/bin/python -m pip install boxmot==15.0.2 --no-deps
 
 # ---- Runtime Stage ----
