@@ -44,7 +44,7 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 # PyTorch is already installed in the base image.
 # We just need to install faiss-gpu and other deps.
-RUN /opt/venv/bin/python -m pip install "faiss-gpu>=1.7.4,<1.8.0"
+RUN /opt/venv/bin/python -m pip install faiss-gpu
 
 # Install application requirements
 COPY requirements/requirements.txt /tmp/requirements.txt
