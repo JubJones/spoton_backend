@@ -105,13 +105,13 @@ class GeometricMatcher:
         roi: SearchROI,
         num_candidates: int,
     ) -> MatchResult:
-        self.logger.debug(
-            "No geometric match %s→%s for track %s (candidates=%s)",
-            roi.source_camera,
-            roi.dest_camera,
-            source_point.person_id,
-            num_candidates,
-        )
+        pass # self.logger.debug(
+            #     "No geometric match %s→%s for track %s (candidates=%s)",
+            #     roi.source_camera,
+            #     roi.dest_camera,
+            #     source_point.person_id,
+            #     num_candidates,
+            # )
 
         return MatchResult(
             source_camera=source_point.camera_id,
@@ -138,15 +138,15 @@ class GeometricMatcher:
         confidence = self.exact_match_confidence - (distance * self.distance_penalty_factor)
         confidence = max(0.0, min(1.0, confidence))
 
-        self.logger.debug(
-            "Exact geometric match %s→%s source=%s dest=%s distance=%.3fm confidence=%.2f",
-            roi.source_camera,
-            roi.dest_camera,
-            source_point.person_id,
-            matched_candidate.person_id,
-            distance,
-            confidence,
-        )
+        pass # self.logger.debug(
+            #     "Exact geometric match %s→%s source=%s dest=%s distance=%.3fm confidence=%.2f",
+            #     roi.source_camera,
+            #     roi.dest_camera,
+            #     source_point.person_id,
+            #     matched_candidate.person_id,
+            #     distance,
+            #     confidence,
+            # )
 
         return MatchResult(
             source_camera=source_point.camera_id,
@@ -181,16 +181,16 @@ class GeometricMatcher:
         confidence = self.closest_match_confidence - (closest_distance * self.distance_penalty_factor)
         confidence = max(0.0, min(1.0, confidence))
 
-        self.logger.debug(
-            "Closest geometric match %s→%s source=%s dest=%s distance=%.3fm candidates=%d confidence=%.2f",
-            roi.source_camera,
-            roi.dest_camera,
-            source_point.person_id,
-            closest_candidate.person_id if closest_candidate else None,
-            closest_distance,
-            num_candidates,
-            confidence,
-        )
+        pass # self.logger.debug(
+            #     "Closest geometric match %s→%s source=%s dest=%s distance=%.3fm candidates=%d confidence=%.2f",
+            #     roi.source_camera,
+            #     roi.dest_camera,
+            #     source_point.person_id,
+            #     closest_candidate.person_id if closest_candidate else None,
+            #     closest_distance,
+            #     num_candidates,
+            #     confidence,
+            # )
 
         return MatchResult(
             source_camera=source_point.camera_id,

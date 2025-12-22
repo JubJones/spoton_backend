@@ -203,14 +203,14 @@ class FocusTrackingHandler:
                 message_type=MessageType.CONTROL_MESSAGE
             )
 
-            logger.debug(
-                "Focus update dispatched",
-                extra={
-                    "task_id": task_id,
-                    "focused_person_id": focus_state.focused_person_id,
-                    "camera_id": focus_state.person_details.camera_id if focus_state.person_details else None,
-                },
-            )
+            # logger.debug(
+            #     "Focus update dispatched",
+            #     extra={
+            #         "task_id": task_id,
+            #         "focused_person_id": focus_state.focused_person_id,
+            #         "camera_id": focus_state.person_details.camera_id if focus_state.person_details else None,
+            #     },
+            # )
             
         except Exception as e:
             logger.error(f"Error sending focus update for task {task_id}: {e}")
@@ -227,7 +227,7 @@ class FocusTrackingHandler:
                 self._focus_update_loop(task_id)
             )
             
-            logger.debug(f"Started focus updates for task {task_id}")
+            # logger.debug(f"Started focus updates for task {task_id}")
             
         except Exception as e:
             logger.error(f"Error starting focus updates for task {task_id}: {e}")
@@ -239,7 +239,7 @@ class FocusTrackingHandler:
                 self.focus_update_tasks[task_id].cancel()
                 del self.focus_update_tasks[task_id]
                 
-            logger.debug(f"Stopped focus updates for task {task_id}")
+            # logger.debug(f"Stopped focus updates for task {task_id}")
             
         except Exception as e:
             logger.error(f"Error stopping focus updates for task {task_id}: {e}")
@@ -261,7 +261,7 @@ class FocusTrackingHandler:
                 await asyncio.sleep(1.0)  # Update every 1 second
                 
         except asyncio.CancelledError:
-            logger.debug(f"Focus update loop cancelled for task {task_id}")
+            pass # logger.debug(f"Focus update loop cancelled for task {task_id}")
         except Exception as e:
             logger.error(f"Error in focus update loop for task {task_id}: {e}")
     

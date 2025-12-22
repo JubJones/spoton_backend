@@ -24,8 +24,12 @@ from app.services.environment_configuration_service import (
 )
 from app.services.analytics_engine import analytics_engine
 
-logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "WARNING"), format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Suppress chatty third-party logs
+logging.getLogger("botocore").setLevel(logging.WARNING)
+logging.getLogger("boto3").setLevel(logging.WARNING)
 
 class HeaderLoggingMiddleware:
     def __init__(self, app: Callable):
@@ -46,9 +50,9 @@ class HeaderLoggingMiddleware:
                 f"  Headers: {headers_decoded}\n"
             )
             if scope["type"] == "websocket":
-                logger.info(f"--- WebSocket Connection Attempt --- \n{log_message}")
+                pass # logger.info(f"--- WebSocket Connection Attempt --- \n{log_message}")
             elif scope["type"] == "http" and scope.get("path", "").startswith("/ws/"):
-                logger.info(f"--- HTTP to WebSocket Upgrade Attempt --- \n{log_message}")
+                pass # logger.info(f"--- HTTP to WebSocket Upgrade Attempt --- \n{log_message}")
 
         await self.app(scope, receive, send)
 
@@ -106,7 +110,7 @@ async def lifespan(app_instance: FastAPI):
             else:
                 logger.info(f"Weights directory present: {weights_dir}")
         except Exception as e:
-            logger.debug(f"Startup validation checks skipped due to error: {e}")
+            pass # logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
         # Log RT-DETR model path configuration and a resolved sample (campus)
         try:
@@ -127,7 +131,7 @@ async def lifespan(app_instance: FastAPI):
             except Exception as e:
                 logger.warning(f"Could not resolve RT-DETR weights for 'campus': {e}")
         except Exception as e:
-            logger.debug(f"RT-DETR configuration logging skipped: {e}")
+            pass # logger.debug(f"RT-DETR configuration logging skipped: {e}")
 
         # Initialize Environment Configuration Service so camera/env endpoints work
         try:
@@ -179,7 +183,7 @@ async def lifespan(app_instance: FastAPI):
             detection_video_service.trail_service = trail_service
             logger.info("Injected preloaded services into detection video service")
         except Exception as e:
-            logger.debug(f"Could not inject services into detection video service: {e}")
+            pass # logger.debug(f"Could not inject services into detection video service: {e}")
 
         # Initialize analytics engine so real-time metrics are populated
         try:

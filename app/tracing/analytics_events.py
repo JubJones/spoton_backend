@@ -136,7 +136,7 @@ class AnalyticsEventTracer:
             "timestamp": event_ts.isoformat(),
             "trace_id": trace_id,
         }
-        logger.info(json.dumps(payload))
+        # logger.info(json.dumps(payload))
 
 
 analytics_event_tracer = AnalyticsEventTracer()

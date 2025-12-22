@@ -100,25 +100,25 @@ class InverseHomographyProjector:
         camera_key = str(target_camera)
         matrix = self._inverse_matrices.get(camera_key)
         if matrix is None:
-            self.logger.debug("No inverse homography found for camera %s; skipping reprojection.", camera_key)
+            pass # self.logger.debug("No inverse homography found for camera %s; skipping reprojection.", camera_key)
             return None
 
         input_world = np.array([[[world_point.x, world_point.y]]], dtype=np.float32)
         try:
             projected = cv2.perspectiveTransform(input_world, matrix)
         except cv2.error as exc:
-            self.logger.debug("cv2 perspectiveTransform failed for camera %s: %s", camera_key, exc)
+            pass # self.logger.debug("cv2 perspectiveTransform failed for camera %s: %s", camera_key, exc)
             return None
 
         x_px = float(projected[0, 0, 0])
         y_px = float(projected[0, 0, 1])
         if not np.isfinite(x_px) or not np.isfinite(y_px):
-            self.logger.debug(
-                "Reprojection produced non-finite result for camera %s (%.2f, %.2f).",
-                camera_key,
-                x_px,
-                y_px,
-            )
+            pass # self.logger.debug(
+            #     "Reprojection produced non-finite result for camera %s (%.2f, %.2f).",
+            #     camera_key,
+            #     x_px,
+            #     y_px,
+            # )
             return None
 
         return ProjectedImagePoint(

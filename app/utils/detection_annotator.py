@@ -43,7 +43,7 @@ class DetectionAnnotator:
         self.style = style or AnnotationStyle()
         self.font = cv2.FONT_HERSHEY_SIMPLEX
         
-        logger.info("DetectionAnnotator initialized for Phase 2 detection pipeline")
+        # logger.info("DetectionAnnotator initialized for Phase 2 detection pipeline")
     
     def annotate_frame(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None, handoff_zones: Optional[List[any]] = None) -> np.ndarray:
         """
@@ -77,7 +77,7 @@ class DetectionAnnotator:
                         logger.warning(f"Error annotating detection {i}: {e}")
                         continue
             else:
-                logger.debug("No detections to annotate")
+                pass # logger.debug("No detections to annotate")
             
             # Draw tracks on top (if provided), using global-ID based colors
             if tracks:
@@ -88,7 +88,7 @@ class DetectionAnnotator:
                         logger.warning(f"Error annotating track {t.get('track_id')}: {e}")
                         continue
             
-            logger.debug(f"Annotated frame with {len(detections)} detections")
+            # logger.debug(f"Annotated frame with {len(detections)} detections")
             return annotated_frame
             
         except Exception as e:
@@ -309,7 +309,7 @@ class DetectionAnnotator:
             # Convert to base64
             base64_string = base64.b64encode(buffer).decode('utf-8')
             
-            logger.debug(f"Encoded frame to base64: {len(base64_string)} characters, quality={quality}")
+            # logger.debug(f"Encoded frame to base64: {len(base64_string)} characters, quality={quality}")
             return base64_string
             
         except Exception as e:

@@ -171,7 +171,7 @@ def load_env_vars() -> dict:
                         key = key.strip()
                         value = value.strip().strip('"\'')
                         env_vars[key] = value
-                        logger.debug(f"Loaded env var: {key} = {'***' if 'KEY' in key.upper() else value}")
+
         except Exception as e:
             logger.warning(f"Error reading .env file: {e}")
     else:

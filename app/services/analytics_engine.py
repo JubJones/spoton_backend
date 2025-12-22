@@ -118,13 +118,13 @@ class AnalyticsEngine:
         self._db_retry_at: Optional[datetime] = None
         self._retry_interval = timedelta(minutes=2)
         
-        logger.info("AnalyticsEngine initialized")
+        # logger.info("AnalyticsEngine initialized")
     
     async def initialize(self):
         """Initialize the analytics engine."""
         try:
             if self._initialized:
-                logger.info("AnalyticsEngine already initialized; skipping")
+                pass # logger.info("AnalyticsEngine already initialized; skipping")
                 return
             
             # Start real-time analytics processing
@@ -137,7 +137,7 @@ class AnalyticsEngine:
             await self._initialize_prediction_models()
             
             self._initialized = True
-            logger.info("AnalyticsEngine initialized successfully")
+            pass # logger.info("AnalyticsEngine initialized successfully")
             
         except Exception as e:
             logger.error(f"Error initializing AnalyticsEngine: {e}")
@@ -203,7 +203,7 @@ class AnalyticsEngine:
                 'performance_metrics': performance_metrics
             }
             
-            logger.debug(f"Processed real-time metrics: {active_count} active persons")
+            pass # logger.debug(f"Processed real-time metrics: {active_count} active persons")
             
         except Exception as e:
             logger.error(f"Error processing real-time metrics: {e}")
@@ -258,7 +258,7 @@ class AnalyticsEngine:
             }
 
         except Exception as e:
-            logger.debug(f"Performance metrics unavailable (cache dependency issue): {e}")
+            pass # logger.debug(f"Performance metrics unavailable (cache dependency issue): {e}")
             self._redis_retry_at = current_time + self._retry_interval
             setattr(tracking_cache, 'redis', None)
             return {}
@@ -282,7 +282,7 @@ class AnalyticsEngine:
                     return active_persons
 
             except Exception as e:
-                logger.debug(f"Active person cache unavailable: {e}")
+                pass # logger.debug(f"Active person cache unavailable: {e}")
                 self._redis_retry_at = current_time + self._retry_interval
                 setattr(tracking_cache, 'redis', None)
 
@@ -294,10 +294,10 @@ class AnalyticsEngine:
                         prefer_cache=False
                     )
                     if persons:
-                        logger.debug(f"Fetched {len(persons)} active persons from DB for env {env}")
+                        pass # logger.debug(f"Fetched {len(persons)} active persons from DB for env {env}")
                         return persons
                 except Exception as db_error:
-                    logger.debug(f"DB fallback for active persons failed ({env}): {db_error}")
+                    pass # logger.debug(f"DB fallback for active persons failed ({env}): {db_error}")
 
         return []
 
@@ -323,7 +323,7 @@ class AnalyticsEngine:
                     return stats
 
             except Exception as e:
-                logger.debug(f"Detection statistics query failed for {env}: {e}")
+                pass # logger.debug(f"Detection statistics query failed for {env}: {e}")
 
         # Fallback to aggregated analytics snapshot to ensure metrics are populated
         for env in self.analytics_environments:
@@ -352,9 +352,9 @@ class AnalyticsEngine:
                     return stats
 
             except Exception as agg_error:
-                logger.debug(f"Aggregated analytics fallback failed for {env}: {agg_error}")
+                pass # logger.debug(f"Aggregated analytics fallback failed for {env}: {agg_error}")
 
-        logger.debug("Detection statistics unavailable; applying retry backoff")
+        pass # logger.debug("Detection statistics unavailable; applying retry backoff")
         self._db_retry_at = current_time + self._retry_interval
         return {}
 
@@ -378,7 +378,7 @@ class AnalyticsEngine:
                 if loads:
                     return loads
             except Exception as exc:
-                logger.debug(f"Aggregated camera load fallback failed for {env}: {exc}")
+                pass # logger.debug(f"Aggregated camera load fallback failed for {env}: {exc}")
 
         return {}
 
@@ -396,7 +396,7 @@ class AnalyticsEngine:
                 if camera_id:
                     camera_loads[camera_id] = camera_loads.get(camera_id, 0) + 1
         except Exception as e:
-            logger.debug(f"Failed to derive camera loads: {e}")
+            pass # logger.debug(f"Failed to derive camera loads: {e}")
 
         return camera_loads
     
@@ -851,7 +851,7 @@ class AnalyticsEngine:
                 }
             }
             
-            logger.info("Prediction models initialized")
+            # logger.info("Prediction models initialized")
             
         except Exception as e:
             logger.error(f"Error initializing prediction models: {e}")
@@ -1071,7 +1071,7 @@ class AnalyticsEngine:
             'predictions_made': 0,
             'reports_generated': 0
         }
-        logger.info("Analytics statistics reset")
+        # logger.info("Analytics statistics reset")
 
     async def shutdown(self):
         """Shutdown analytics engine background tasks."""

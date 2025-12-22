@@ -100,7 +100,7 @@ class TrailManagementService:
                 trail = trail[:self.trail_length]
                 self.trails[camera_id][detection_id] = trail
             
-            logger.debug(f"Updated trail for {camera_id}:{detection_id} - {len(trail)} points")
+            # logger.debug(f"Updated trail for {camera_id}:{detection_id} - {len(trail)} points")
             return trail.copy()  # Return copy to avoid external modification
     
     async def get_trail(self, camera_id: str, detection_id: str) -> List[TrailPoint]:
@@ -154,7 +154,7 @@ class TrailManagementService:
                     if trail and (current_time - trail[0].timestamp).total_seconds() > max_age_seconds:
                         del self.trails[camera_id][detection_id]
                         removed_count += 1
-                        logger.debug(f"Removed old trail for {camera_id}:{detection_id}")
+                        # logger.debug(f"Removed old trail for {camera_id}:{detection_id}")
                 
                 # Clean up empty camera entries
                 if not self.trails[camera_id]:
@@ -229,7 +229,7 @@ class TrailManagementService:
         with self._lock:
             if camera_id in self.trails and detection_id in self.trails[camera_id]:
                 del self.trails[camera_id][detection_id]
-                logger.debug(f"Removed trail for {camera_id}:{detection_id}")
+                # logger.debug(f"Removed trail for {camera_id}:{detection_id}")
                 
                 # Clean up empty camera entry
                 if not self.trails[camera_id]:

@@ -327,12 +327,12 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
         ]
     
     async def dispatch(self, request: Request, call_next):
-        logger.debug(f"RequestValidationMiddleware: Processing request {request.method} {request.url.path}")
+        # logger.debug(f"RequestValidationMiddleware: Processing request {request.method} {request.url.path}")
         
         # Check request size
         content_length = request.headers.get("content-length")
         if content_length and int(content_length) > self.config.max_request_size:
-            logger.debug(f"RequestValidationMiddleware: Request too large {content_length}")
+            # logger.debug(f"RequestValidationMiddleware: Request too large {content_length}")
             return JSONResponse(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
                 content={"detail": "Request too large"}
@@ -356,7 +356,7 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Invalid request"}
                 )
         
-        logger.debug(f"RequestValidationMiddleware: Calling next middleware for {request.method} {request.url.path}")
+        # logger.debug(f"RequestValidationMiddleware: Calling next middleware for {request.method} {request.url.path}")
         try:
             response = await call_next(request)
             
@@ -367,7 +367,7 @@ class RequestValidationMiddleware(BaseHTTPMiddleware):
                     content={"detail": "Internal server error"}
                 )
             
-            logger.debug(f"RequestValidationMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
+            # logger.debug(f"RequestValidationMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
             return response
         except Exception as e:
             logger.error(f"RequestValidationMiddleware: Exception in {request.method} {request.url.path}: {str(e)}")
@@ -397,7 +397,7 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
         client_ip = self._get_client_ip(request)
         
         # Log entry to debug middleware chain
-        logger.debug(f"SecurityMonitoringMiddleware: Processing request {request.method} {request.url.path}")
+        # logger.debug(f"SecurityMonitoringMiddleware: Processing request {request.method} {request.url.path}")
         
         # Initialize security event data regardless of logging setting
         security_event = None
@@ -412,9 +412,9 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
             }
         
         try:
-            logger.debug(f"SecurityMonitoringMiddleware: Calling next middleware for {request.method} {request.url.path}")
+            # logger.debug(f"SecurityMonitoringMiddleware: Calling next middleware for {request.method} {request.url.path}")
             response = await call_next(request)
-            logger.debug(f"SecurityMonitoringMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
+            # logger.debug(f"SecurityMonitoringMiddleware: Got response {response.status_code} for {request.method} {request.url.path}")
             
             # Log completed request
             if self.config.enable_request_logging and security_event is not None:
@@ -429,7 +429,7 @@ class SecurityMonitoringMiddleware(BaseHTTPMiddleware):
                 
                 self.security_events.append(security_event)
             
-            logger.debug(f"SecurityMonitoringMiddleware: Returning response for {request.method} {request.url.path}")
+            # logger.debug(f"SecurityMonitoringMiddleware: Returning response for {request.method} {request.url.path}")
             return response
             
         except Exception as e:

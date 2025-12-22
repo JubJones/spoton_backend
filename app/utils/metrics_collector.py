@@ -292,7 +292,7 @@ class ProductionMetricsCollector:
                         self._add_metric_point('gpu_usage', self.resource_metrics.gpu_usage, current_time)
                         self._add_metric_point('gpu_memory_usage', self.resource_metrics.gpu_memory_usage, current_time)
                 except Exception as gpu_error:
-                    logger.debug(f"GPU metrics collection failed: {gpu_error}")
+                    pass # logger.debug(f"GPU metrics collection failed: {gpu_error}")
             
             # Disk metrics
             disk = psutil.disk_usage('/')
@@ -388,7 +388,7 @@ class ProductionMetricsCollector:
                 labels={'transition': key},
             )
         except Exception as error:
-            logger.debug(f"Error recording playback transition metric: {error}")
+            pass # logger.debug(f"Error recording playback transition metric: {error}")
 
     def record_playback_pause_latency(self, latency_seconds: float) -> None:
         """Record latency between pause command and acknowledgement."""
@@ -401,7 +401,7 @@ class ProductionMetricsCollector:
                 time.time(),
             )
         except Exception as error:
-            logger.debug(f"Error recording playback latency metric: {error}")
+            pass # logger.debug(f"Error recording playback latency metric: {error}")
     
     def _add_metric_point(self, metric_name: str, value: float, timestamp: float,
                          labels: Dict[str, str] = None, metadata: Dict[str, Any] = None):

@@ -396,18 +396,18 @@ class IntegratedDatabaseService:
                     bucket_size_seconds=bucket_size_seconds,
                 )
 
-                logger.debug(
-                    "Aggregated detection totals",
-                    extra={
-                        "environment_id": environment_id,
-                        "camera_id": camera_id,
-                        "detections": detections,
-                        "unique_entities": unique_entities,
-                        "avg_confidence": confidence,
-                        "bucket_size_seconds": bucket_size_seconds,
-                        "event_timestamp": timestamp.isoformat(),
-                    },
-                )
+                # logger.debug(
+                #     "Aggregated detection totals",
+                #     extra={
+                #         "environment_id": environment_id,
+                #         "camera_id": camera_id,
+                #         "detections": detections,
+                #         "unique_entities": unique_entities,
+                #         "avg_confidence": confidence,
+                #         "bucket_size_seconds": bucket_size_seconds,
+                #         "event_timestamp": timestamp.isoformat(),
+                #     },
+                # )
 
         except Exception as exc:
             logger.warning(f"Failed to aggregate detection metrics: {exc}")
@@ -841,7 +841,7 @@ class IntegratedDatabaseService:
             self.sync_stats.sync_operations += 1
             self.sync_stats.last_sync_time = datetime.now(timezone.utc)
             
-            logger.debug("Cache to database sync completed")
+            # logger.debug("Cache to database sync completed")
             
         except Exception as e:
             logger.error(f"Error syncing cache to database: {e}")

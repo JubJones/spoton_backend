@@ -315,7 +315,7 @@ class HistoricalDataService:
             # Update storage statistics
             self.storage_stats['total_stored'] += 1
             
-            logger.debug(f"Stored tracking data for person {global_person_id} in camera {camera_id}")
+            # logger.debug(f"Stored tracking data for person {global_person_id} in camera {camera_id}")
             
         except Exception as e:
             logger.error(f"Error storing tracking data: {e}")
@@ -873,7 +873,7 @@ class HistoricalDataService:
             file_path.unlink()
             
             self.storage_stats['compressed_files'] += 1
-            logger.debug(f"Compressed file: {file_path}")
+            pass # logger.debug(f"Compressed file: {file_path}")
             
         except Exception as e:
             logger.error(f"Error compressing file {file_path}: {e}")

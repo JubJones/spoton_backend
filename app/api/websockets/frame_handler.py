@@ -112,7 +112,7 @@ class FrameHandler:
                     success, encoded_frame = cv2.imencode('.jpg', frame, encode_params)
                     
             except Exception as gpu_error:
-                logger.debug(f"GPU encoding failed, falling back to CPU: {gpu_error}")
+                # logger.debug(f"GPU encoding failed, falling back to CPU: {gpu_error}")
                 # Fall back to CPU encoding
                 success, encoded_frame = cv2.imencode('.jpg', frame, encode_params)
             

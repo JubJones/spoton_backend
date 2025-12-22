@@ -105,7 +105,7 @@ class MJPEGStreamer:
                 # Clients waiting will wake up.
                 
         except asyncio.CancelledError:
-            logger.debug(f"Client disconnected from stream {task_id}/{camera_id}")
+            pass # logger.debug(f"Client disconnected from stream {task_id}/{camera_id}")
             raise
 
 # Global instance

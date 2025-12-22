@@ -147,11 +147,11 @@ class BottomPointExtractor:
                 )
                 points.append(point)
             except ValueError as exc:
-                logger.debug(
-                    "Validation failed for bottom point extraction in camera %s: %s",
-                    camera_id,
-                    exc,
-                )
+                pass # logger.debug(
+                #     "Validation failed for bottom point extraction in camera %s: %s",
+                #     camera_id,
+                #     exc,
+                # )
         return points
 
     def _validate_point(

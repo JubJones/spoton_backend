@@ -98,14 +98,14 @@ class PlaybackControlService:
         updated: PlaybackStatus,
     ) -> None:
         if previous.state == updated.state:
-            logger.debug(
-                "Playback state unchanged",
-                extra={
-                    "event": "playback_state_transition_noop",
-                    "task_id": task_id,
-                    "state": previous.state.value,
-                },
-            )
+            pass # logger.debug(
+                #     "Playback state unchanged",
+                #     extra={
+                #         "event": "playback_state_transition_noop",
+                #         "task_id": task_id,
+                #         "state": previous.state.value,
+                #     },
+                # )
             return
 
         transition = {
@@ -122,4 +122,4 @@ class PlaybackControlService:
                 next_state=updated.state.value,
             )
         except Exception as metrics_error:
-            logger.debug(f"Unable to record playback transition metric: {metrics_error}")
+            pass # logger.debug(f"Unable to record playback transition metric: {metrics_error}")

@@ -83,7 +83,7 @@ class TrackingRepository:
             self.db.commit()
             self.db.refresh(event)
             
-            logger.debug(f"Created tracking event for person {global_person_id}")
+            # logger.debug(f"Created tracking event for person {global_person_id}")
             return event
             
         except SQLAlchemyError as e:
@@ -191,7 +191,7 @@ class TrackingRepository:
             self.db.commit()
             self.db.refresh(event)
             
-            logger.debug(f"Created detection event for camera {camera_id}")
+            # logger.debug(f"Created detection event for camera {camera_id}")
             return event
             
         except SQLAlchemyError as e:
@@ -281,7 +281,7 @@ class TrackingRepository:
             self.db.commit()
             self.db.refresh(trajectory_point)
             
-            logger.debug(f"Created trajectory point for person {global_person_id}")
+            # logger.debug(f"Created trajectory point for person {global_person_id}")
             return trajectory_point
             
         except SQLAlchemyError as e:
@@ -346,7 +346,7 @@ class TrackingRepository:
             self.db.commit()
             self.db.refresh(identity)
             
-            logger.debug(f"Created person identity {global_person_id}")
+            # logger.debug(f"Created person identity {global_person_id}")
             return identity
             
         except SQLAlchemyError as e:
@@ -404,7 +404,7 @@ class TrackingRepository:
             
             self.db.commit()
             
-            logger.debug(f"Updated person identity {global_person_id}")
+            # logger.debug(f"Updated person identity {global_person_id}")
             return True
             
         except SQLAlchemyError as e:
@@ -527,7 +527,7 @@ class TrackingRepository:
             
             self.db.commit()
             
-            logger.debug(f"Updated session record {session_id}")
+            # logger.debug(f"Updated session record {session_id}")
             return True
             
         except SQLAlchemyError as e:

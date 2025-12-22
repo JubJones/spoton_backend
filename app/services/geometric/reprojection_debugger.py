@@ -96,18 +96,18 @@ class ReprojectionDebugger:
         if frame is None:
             frame = self.frame_provider(camera_id, frame_number)
             if frame is None:
-                logger.debug(
-                    "ReprojectionDebugger: no frame available for camera %s (frame %d)",
-                    camera_id,
-                    frame_number,
-                )
+                pass # logger.debug(
+                    #     "ReprojectionDebugger: no frame available for camera %s (frame %d)",
+                    #     camera_id,
+                    #     frame_number,
+                    # )
                 return
 
         overlay.draw_prediction(frame=frame, predicted_point=predicted_point, actual_point=actual_point)
 
         try:
             if not cv2.imwrite(str(output_path), frame):
-                logger.debug("Failed to write reprojection debug frame to %s", output_path)
+                pass # logger.debug("Failed to write reprojection debug frame to %s", output_path)
                 return
         except OSError as e:
             logger.warning("Permission error writing debug frame to %s: %s", output_path, e)
@@ -115,3 +115,43 @@ class ReprojectionDebugger:
 
         if not is_existing_output:
             self.frame_counts[camera_id] = count + 1
+
+    def save_frame(self, camera_id: str, frame_number: int, frame: np.ndarray) -> None:
+        """Persist a fully prepared debug frame to disk."""
+        if self.output_dir is None:
+            return
+
+        if frame_number % self.sampling_rate != 0:
+            return
+
+        count = self.frame_counts.get(camera_id, 0)
+        
+        # Only check max frames if this is a NEW frame we are saving (not overwriting)
+        # But here we assume this is called once per frame.
+        if count >= self.max_frames_per_camera:
+            # Check if file exists to decide if we skipped it or not? 
+            # Simplified: just check count. If we are over limit, we stop saving.
+            # But we need to handle the case where we might be re-saving?
+            # For simplicity, we respect the counter strictly.
+            return
+
+        camera_dir = self.output_dir / camera_id
+        try:
+            camera_dir.mkdir(exist_ok=True)
+        except OSError as e:
+            logger.warning("Failed to create camera dir %s: %s", camera_dir, e)
+            return
+
+        output_path = camera_dir / f"{frame_number:06d}.png"
+        
+        try:
+            if not cv2.imwrite(str(output_path), frame):
+                pass 
+                # logger.debug("Failed to write reprojection debug frame to %s", output_path)
+            else:
+                # Increment count only if successful
+                if count < self.max_frames_per_camera: # Double check
+                     self.frame_counts[camera_id] = count + 1
+        except OSError as e:
+            logger.warning("Permission error writing debug frame to %s: %s", output_path, e)
+

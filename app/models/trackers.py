@@ -43,20 +43,22 @@ class ByteTrackTracker(AbstractTracker):
         # Other ByteTrack params use library defaults (min_conf, track_thresh, match_thresh, track_buffer)
         self._model_loaded_flag: bool = False
 
-        logger.info(
-            f"ByteTrackTracker configured. PerClass: {self.per_class}, FrameRate: {self.frame_rate}"
-        )
+        self._model_loaded_flag: bool = False
+
+        # logger.info(
+        #     f"ByteTrackTracker configured. PerClass: {self.per_class}, FrameRate: {self.frame_rate}"
+        # )
 
     async def load_model(self):
         """
         Loads and initializes the ByteTrack tracker.
         """
         if self._model_loaded_flag and self.tracker_instance is not None:
-            logger.info("ByteTrack tracker already loaded.")
+            # logger.info("ByteTrack tracker already loaded.")
             return
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        logger.info(f"Loading ByteTrack tracker on device: {self.device}...")
+        # logger.info(f"Loading ByteTrack tracker on device: {self.device}...")
 
         try:
             # Instantiate with per_class and frame_rate; others use defaults
@@ -66,7 +68,7 @@ class ByteTrackTracker(AbstractTracker):
                 frame_rate=int(self.frame_rate),
             )
             self._model_loaded_flag = True
-            logger.info("ByteTrack tracker instance created.")
+            # logger.info("ByteTrack tracker instance created.")
         except TypeError as te:
             logger.exception(f"TypeError loading ByteTrack tracker. Check constructor arguments: {te}")
             self.tracker_instance = None

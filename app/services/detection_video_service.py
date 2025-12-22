@@ -209,7 +209,7 @@ class DetectionVideoService(RawVideoService):
                 metrics_summary=None,
             )
         except Exception as exc:
-            logger.debug("Failed to emit geometric metrics: %s", exc)
+            pass # logger.debug("Failed to emit geometric metrics: %s", exc)
     
     async def initialize_detection_services(self, environment_id: str = "default", task_id: Optional[uuid.UUID] = None) -> bool:
         """Initialize detection services including RT-DETR model loading and spatial intelligence services."""
@@ -372,7 +372,7 @@ class DetectionVideoService(RawVideoService):
                          )
                     
                     if in_zone:
-                        logger.info(f"[RE-ID] 🟢 New Track {track_id} in {camera_id} detected in Handoff Zone. Triggering Global Search.")
+                        # logger.info(f"[RE-ID] 🟢 New Track {track_id} in {camera_id} detected in Handoff Zone. Triggering Global Search.")
                         
                         # Crop image
                         x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
@@ -389,7 +389,7 @@ class DetectionVideoService(RawVideoService):
                                 # Search for match in HandoffManager
                                 match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
                                 if match_global_id:
-                                    logger.info(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} matched to Global ID {match_global_id} (Score: {score:.2f})")
+                                    # logger.info(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} matched to Global ID {match_global_id} (Score: {score:.2f})")
                                     # Updated Phase 3: Use Registry
                                     self.global_registry.assign_identity(camera_id, track_id, match_global_id)
                                     
@@ -399,9 +399,9 @@ class DetectionVideoService(RawVideoService):
                                     # Set cooldown to prevent immediate re-extraction
                                     self._reid_cooldowns[track_key] = now
                                 else:
-                                     logger.debug(f"[RE-ID] ⚪ No match for new Track {track_id} in {camera_id}. Assigned temporary ID.")
+                                     pass # logger.debug(f"[RE-ID] ⚪ No match for new Track {track_id} in {camera_id}. Assigned temporary ID.")
                     else:
-                        logger.debug(f"[RE-ID] New Track {track_id} in {camera_id} NOT in Handoff Zone. Skipping Re-ID search (relying on spatial/local).")
+                        pass # logger.debug(f"[RE-ID] New Track {track_id} in {camera_id} NOT in Handoff Zone. Skipping Re-ID search (relying on spatial/local).")
 
                 except Exception as e:
                     logger.error(f"Re-ID Entry Error: {e}")
@@ -430,9 +430,9 @@ class DetectionVideoService(RawVideoService):
                                     current_gid = self.global_registry.get_global_id(camera_id, track_id)
                                     gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
                                     
-                                    logger.info(f"[RE-ID] 🚪 Track {track_id} (Global: {gid}) entered Handoff Zone in {camera_id}. Registering exit.")
+                                    # logger.info(f"[RE-ID] 🚪 Track {track_id} (Global: {gid}) entered Handoff Zone in {camera_id}. Registering exit.")
                                     self.handoff_manager.register_exit(gid, embedding, camera_id)
-                                    logger.debug(f"[RE-ID] 📤 Registered {gid} for handoff. Embedding size: {embedding.shape}.")
+                                    pass # logger.debug(f"[RE-ID] 📤 Registered {gid} for handoff. Embedding size: {embedding.shape}.")
                                     
                                     # Update cooldown
                                     self._reid_cooldowns[track_key] = now
@@ -513,11 +513,11 @@ class DetectionVideoService(RawVideoService):
                 # Lazy initialization check
                 if camera_id not in self.camera_trackers:
                     try:
-                        logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
+                        # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
                         tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
                         if tracker:
                             self.camera_trackers[camera_id] = tracker
-                            logger.info(f"Lazy initialization successful for {camera_id}")
+                            # logger.info(f"Lazy initialization successful for {camera_id}")
                     except Exception as e:
                         logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
 
@@ -557,30 +557,16 @@ class DetectionVideoService(RawVideoService):
 
         try:
             self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
-            if tracker_used and logger.isEnabledFor(logging.DEBUG):
-                sample = [
-                    {
-                        "detection_id": det.get("detection_id"),
-                        "track_id": det.get("track_id"),
-                        "global_id": det.get("global_id"),
-                        "iou": det.get("track_assignment_iou"),
-                        "center_dist": det.get("track_assignment_center_distance"),
-                    }
-                    for det in (detection_data.get("detections") or [])[:3]
-                ]
-                logger.debug(
-                    "Detection-track association (camera=%s frame=%s): %s",
-                    camera_id,
-                    frame_number,
-                    sample,
-                )
+            # if tracker_used and logger.isEnabledFor(logging.DEBUG):
+            #     pass
         except Exception as exc:
-            logger.debug(
-                "Detection-track association failed for %s frame %s: %s",
-                camera_id,
-                frame_number,
-                exc,
-            )
+            pass
+            # logger.debug(
+            #     "Detection-track association failed for %s frame %s: %s",
+            #     camera_id,
+            #     frame_number,
+            #     exc,
+            # )
         
         # Frontend: emit auxiliary events (non-blocking)
         try:
@@ -664,12 +650,12 @@ class DetectionVideoService(RawVideoService):
                         frame_height=frame_height,
                     )
                 except ValueError as exc:
-                    logger.debug(
-                        "Bottom point validation failed for detection %s in camera %s: %s",
-                        i,
-                        camera_id,
-                        exc,
-                    )
+                    pass # logger.debug(
+                    #     "Bottom point validation failed for detection %s in camera %s: %s",
+                    #     i,
+                    #     camera_id,
+                    #     exc,
+                    # )
 
                 world_point: Optional[WorldPoint] = None
                 if self.world_plane_transformer and bottom_point:
@@ -696,19 +682,21 @@ class DetectionVideoService(RawVideoService):
                             map_coords = {"map_x": candidate_map_x, "map_y": candidate_map_y}
                             projection_success = True
                             transformation_quality = transformation_quality or 0.8  # Legacy validation success
-                            logger.debug(
-                                "Fallback homography map coords accepted for %s: (%.4f, %.4f)",
-                                camera_id,
-                                candidate_map_x,
-                                candidate_map_y,
-                            )
+                            pass
+                            # logger.debug(
+                            #     "Fallback homography map coords accepted for %s: (%.4f, %.4f)",
+                            #     camera_id,
+                            #     candidate_map_x,
+                            #     candidate_map_y,
+                            # )
                         else:
-                            logger.info(
-                                "Fallback projected coords out of bounds for %s: (%.4f, %.4f)",
-                            camera_id,
-                            candidate_map_x,
-                            candidate_map_y,
-                        )
+                            pass
+                            # logger.info(
+                            #     "Fallback projected coords out of bounds for %s: (%.4f, %.4f)",
+                            #     camera_id,
+                            #     candidate_map_x,
+                            #     candidate_map_y,
+                            # )
 
                 if projection_success and map_coords:
                     try:
@@ -724,12 +712,13 @@ class DetectionVideoService(RawVideoService):
                         )
                         search_roi_payload = roi.to_dict()
                     except Exception as exc:
-                        logger.debug(
-                            "ROI calculation failed for detection %s in camera %s: %s",
-                            i,
-                            camera_id,
-                            exc,
-                        )
+                        pass
+                        # logger.debug(
+                        #     "ROI calculation failed for detection %s in camera %s: %s",
+                        #     i,
+                        #     camera_id,
+                        #     exc,
+                        # )
 
                 # Handoff detection
                 if self.handoff_service:
@@ -972,10 +961,10 @@ class DetectionVideoService(RawVideoService):
                                 
                                 # Log visibility status (WARNING to ensure visibility)
                                 if is_shared:
-                                    logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=True -> COLORING")
+                                    pass # logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=True -> COLORING")
                                 else:
                                     # Log unmatched too (limited to avoid infinite spam if possible, but for short test it is fine)
-                                    logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=False -> GREEN")
+                                    pass # logger.warning(f"COLOR DEBUG: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared=False -> GREEN")
 
                 # --- Send Updates Loop ---
                 # Now that global_ids are injected, send updates to frontend
@@ -1163,7 +1152,7 @@ class DetectionVideoService(RawVideoService):
                             (self.homography_service.validate_map_coordinate(camera_id, mx, my) if self.homography_service else True)
                         )
                         if not is_valid:
-                            logger.debug(f"Skipping invalid map_coords for {camera_id}: ({mx}, {my})")
+                            # logger.debug(f"Skipping invalid map_coords for {camera_id}: ({mx}, {my})")
                             continue
                         # UPDATE TRAIL for this detection
                         trail = await self.trail_service.update_trail(
@@ -1252,7 +1241,7 @@ class DetectionVideoService(RawVideoService):
                         if bytes_to_write:
                             await asyncio.to_thread(out_path.write_bytes, bytes_to_write)
             except Exception as e:
-                logger.debug(f"Frame cache error: {e}")
+                pass # logger.debug(f"Frame cache error: {e}")
 
             # Send via WebSocket
             success = await binary_websocket_manager.send_json_message(
@@ -1261,7 +1250,7 @@ class DetectionVideoService(RawVideoService):
             
             if success:
                 self.detection_stats["websocket_messages_sent"] += 1
-                logger.debug(f"📡 DETECTION UPDATE: Sent Phase 4 detection update for task {task_id}, camera {camera_id}, frame {frame_number}")
+                # logger.debug(f"📡 DETECTION UPDATE: Sent Phase 4 detection update for task {task_id}, camera {camera_id}, frame {frame_number}")
             else:
                 logger.warning(f"📡 DETECTION UPDATE: Failed to send detection update for task {task_id}")
             
@@ -1457,14 +1446,14 @@ class DetectionVideoService(RawVideoService):
             detection["track_assignment_iou"] = round(best_iou, 4)
             detection["track_assignment_center_distance"] = round(best_center_dist, 2)
 
-            logger.debug(
-                "Detection %s (camera=%s) associated with track %s -> detection_id=%s iou=%.3f",
-                original_detection_id,
-                camera_id,
-                track_id,
-                detection["detection_id"],
-                best_iou,
-            )
+            # logger.debug(
+            #     "Detection %s (camera=%s) associated with track %s -> detection_id=%s iou=%.3f",
+            #     original_detection_id,
+            #     camera_id,
+            #     track_id,
+            #     detection["detection_id"],
+            #     best_iou,
+            # )
 
     @staticmethod
     def _calculate_iou(box_a: List[float], box_b: List[float]) -> float:
@@ -1679,26 +1668,27 @@ class DetectionVideoService(RawVideoService):
             filtered_metadata.get('detection_id'),
             best_iou,
         )
-        logger.debug(
-            'Focus filter candidates',
-            extra={
-                'task_id': str(task_id),
-                'camera_id': camera_id,
-                'track_candidates': track_candidates,
-                'detection_candidates': detection_candidates,
-                'best_track_iou': best_track_iou,
-                'target_track_id': target_track_id,
-                'target_detection_id': target_detection_id,
-            },
-        )
+        pass # logger.debug(
+            #     'Focus filter candidates',
+            #     extra={
+            #         'task_id': str(task_id),
+            #         'camera_id': camera_id,
+            #         'track_candidates': track_candidates,
+            #         'detection_candidates': detection_candidates,
+            #         'best_track_iou': best_track_iou,
+            #         'target_track_id': target_track_id,
+            #         'target_detection_id': target_detection_id,
+            #     },
+            # )
 
         return filtered, True
 
     async def _enhance_tracks_with_spatial_intelligence(self, tracks: List[Dict[str, Any]], camera_id: str, frame_number: int) -> List[Dict[str, Any]]:
         """Compute map coordinates and short trajectories for tracks using homography and trail service."""
         # DEBUG TRACE: Verify execution
-        if frame_number % 30 == 0:
-             logger.info(f"EnhanceTracks: Processing {len(tracks)} tracks for {camera_id}. HomographyService? {self.homography_service is not None}")
+        # DEBUG TRACE: Verify execution
+        # if frame_number % 30 == 0:
+        #      logger.info(f"EnhanceTracks: Processing {len(tracks)} tracks for {camera_id}. HomographyService? {self.homography_service is not None}")
         
         if not tracks:
             return []
@@ -1730,7 +1720,7 @@ class DetectionVideoService(RawVideoService):
                 track["map_coords"] = map_coords
                 enhanced.append(track)
             except Exception as e:
-                logger.debug(f"Spatial enhancement failed for track {track.get('track_id')}: {e}")
+                pass # logger.debug(f"Spatial enhancement failed for track {track.get('track_id')}: {e}")
                 enhanced.append(track)
         return enhanced
     
@@ -1857,7 +1847,7 @@ class DetectionVideoService(RawVideoService):
                             frame_camera_data[camera_id] = (frame, detection_data)
                             any_frame_processed = True
                         else:
-                            logger.debug(f"End of video reached for camera {camera_id}")
+                            pass # logger.debug(f"End of video reached for camera {camera_id}")
                             break
                     else:
                         break
@@ -1885,8 +1875,8 @@ class DetectionVideoService(RawVideoService):
                                 is_shared = self.space_based_matcher.is_global_id_shared(gid)
                                 track["is_matched"] = is_shared
                                 # DEBUG LOG (Temporary)
-                                logger.warning(f"COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
-                                logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
+                                pass # logger.warning(f"COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
+                                pass # logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
 
                 # 3. Send Updates and Emit Debug
                 for camera_id, (frame, detection_data) in frame_camera_data.items():
@@ -2066,6 +2056,21 @@ class DetectionVideoService(RawVideoService):
         ):
             return
 
+        # Prepare in-memory canvases for all cameras involved
+        # distinct from _debug_frame_store which holds clean originals
+        canvases: Dict[str, np.ndarray] = {}
+        
+        # Helper to get canvas (lazy copy)
+        def get_canvas(cam_id: str) -> Optional[np.ndarray]:
+            if cam_id in canvases:
+                return canvases[cam_id]
+            
+            clean_frame = self._debug_frame_store.get((cam_id, frame_number))
+            if clean_frame is not None:
+                canvases[cam_id] = clean_frame.copy()
+                return canvases[cam_id]
+            return None
+
         for source_camera, payload in frame_payload.items():
             world_points: List[WorldPoint] = payload.get("world_points", [])
             if not world_points:
@@ -2083,14 +2088,23 @@ class DetectionVideoService(RawVideoService):
                     )
                     if not projected:
                         continue
+                    
+                    # Draw on in-memory canvas
+                    canvas = get_canvas(dest_camera)
+                    if canvas is not None:
+                        self.debug_overlay.draw_prediction(
+                            frame=canvas,
+                            predicted_point=projected,
+                            actual_point=None
+                        )
 
-                    self.reprojection_debugger.emit(
-                        camera_id=dest_camera,
-                        frame_number=frame_number,
-                        overlay=self.debug_overlay,
-                        predicted_point=projected,
-                        actual_point=None,
-                    )
+        # Save all modified canvases
+        for cam_id, canvas in canvases.items():
+            self.reprojection_debugger.save_frame(
+                camera_id=cam_id,
+                frame_number=frame_number,
+                frame=canvas
+            )
 
     def _project_world_point_to_camera(
         self,
@@ -2150,12 +2164,12 @@ class DetectionVideoService(RawVideoService):
         try:
             matrix = self.homography_service.get_homography_matrix(environment_id, CameraID(camera_id))
         except Exception as exc:
-            logger.debug(
-                "Homography lookup failed for env %s camera %s: %s",
-                environment_id,
-                camera_id,
-                exc,
-            )
+            pass # logger.debug(
+            #     "Homography lookup failed for env %s camera %s: %s",
+            #     environment_id,
+            #     camera_id,
+            #     exc,
+            # )
             return None
 
         if matrix is None:
@@ -2164,11 +2178,11 @@ class DetectionVideoService(RawVideoService):
         try:
             inverse = np.linalg.inv(matrix)
         except np.linalg.LinAlgError:
-            logger.debug(
-                "Homography matrix for env %s camera %s is not invertible",
-                environment_id,
-                camera_id,
-            )
+            # logger.debug(
+            #     "Homography matrix for env %s camera %s is not invertible",
+            #     environment_id,
+            #     camera_id,
+            # )
             return None
 
         self._inverse_homography_cache[cache_key] = inverse
@@ -2243,7 +2257,7 @@ class DetectionVideoService(RawVideoService):
                             
                             camera_frames_processed += 1
                         else:
-                            logger.debug(f"End of video reached for camera {camera_id}")
+                            pass # logger.debug(f"End of video reached for camera {camera_id}")
                             break
                     else:
                         break
@@ -2345,7 +2359,7 @@ class DetectionVideoService(RawVideoService):
                 if video_set.cam_id == camera_id:
                     return video_set.env_id
             
-            logger.debug(f"No environment found for camera {camera_id}")
+            # logger.debug(f"No environment found for camera {camera_id}")
             return None
             
         except Exception as e:

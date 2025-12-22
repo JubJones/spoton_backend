@@ -254,12 +254,12 @@ class WorldPlaneTransformer:
         if self.enable_bounds_validation and not self._is_within_world_bounds(world_x, world_y):
             transformation_quality = 0.5
             self.validation_failures += 1
-            self.logger.debug(
-                "World point (%s, %s) outside bounds for camera %s",
-                f"{world_x:.3f}",
-                f"{world_y:.3f}",
-                image_point.camera_id,
-            )
+            pass # self.logger.debug(
+            #     "World point (%s, %s) outside bounds for camera %s",
+            #     f"{world_x:.3f}",
+            #     f"{world_y:.3f}",
+            #     image_point.camera_id,
+            # )
 
         self.transformation_count += 1
 
@@ -289,7 +289,7 @@ class WorldPlaneTransformer:
         result: List[Optional[WorldPoint]] = [None] * len(image_points)
         for camera_id, points in grouped_indices.items():
             if camera_id not in self.homography_matrices:
-                self.logger.debug("Skipping camera %s with no homography matrix", camera_id)
+                pass # self.logger.debug("Skipping camera %s with no homography matrix", camera_id)
                 self.validation_failures += len(points)
                 continue
 

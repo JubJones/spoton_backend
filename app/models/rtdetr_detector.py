@@ -64,21 +64,21 @@ class RTDETRDetector(AbstractDetector):
         # Person class ID in COCO (0-indexed)
         self.person_class_id = 0
         
-        logger.info(f"RTDETRDetector configured for Person Class ID: {self.person_class_id}, Threshold: {self.confidence_threshold}")
+        # logger.info(f"RTDETRDetector configured for Person Class ID: {self.person_class_id}, Threshold: {self.confidence_threshold}")
     
     async def load_model(self):
         """
         Load the RT-DETR model.
         """
         if self._model_loaded_flag and self.model is not None:
-            logger.info("RT-DETR model already loaded.")
+            pass # logger.info("RT-DETR model already loaded.")
             return
         
-        logger.info(f"Loading RT-DETR model on device: {self.device}...")
+        # logger.info(f"Loading RT-DETR model on device: {self.device}...")
         
         try:
             # Load RT-DETR model
-            logger.info("RT-DETR weights path: %s", self.model_name)
+            # logger.info("RT-DETR weights path: %s", self.model_name)
             self.model = RTDETR(self.model_name)
             
             # Set device
@@ -88,7 +88,7 @@ class RTDETRDetector(AbstractDetector):
                 self.model.to('cpu')
             
             self._model_loaded_flag = True
-            logger.info("RT-DETR model loaded and configured successfully.")
+            # logger.info("RT-DETR model loaded and configured successfully.")
             
         except Exception as e:
             logger.exception(f"Error loading RT-DETR model: {e}")
@@ -104,11 +104,11 @@ class RTDETRDetector(AbstractDetector):
             logger.warning("Detector model not loaded. Cannot perform warmup.")
             return
         
-        logger.info(f"Warming up RT-DETR detector on device {self.device}...")
+        pass # logger.info(f"Warming up RT-DETR detector on device {self.device}...")
         try:
             dummy_np_image = np.uint8(np.random.rand(*dummy_image_shape) * 255)
             _ = await self.detect(dummy_np_image)
-            logger.info("RT-DETR detector warmup successful.")
+            pass # logger.info("RT-DETR detector warmup successful.")
         except Exception as e:
             logger.error(f"RT-DETR detector warmup failed: {e}", exc_info=True)
     

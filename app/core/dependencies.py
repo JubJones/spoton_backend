@@ -126,7 +126,7 @@ def get_detection_video_service(
     playback_runtime_registry: TaskRuntimeRegistry = Depends(global_task_runtime_registry),
 ) -> DetectionVideoService:
     """Dependency provider for DetectionVideoService."""
-    logger.debug("Initializing DetectionVideoService instance (or returning cached).")
+    # logger.debug("Initializing DetectionVideoService instance (or returning cached).")
     service = detection_video_service
     service.attach_playback_interfaces(
         status_store=playback_status_store,

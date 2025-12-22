@@ -188,7 +188,7 @@ class RawVideoService:
     async def initialize_services(self, environment_id: str = "default") -> bool:
         """Initialize video processing services for raw streaming."""
         try:
-            logger.info(f"🚀 RAW SERVICE INIT: Starting raw video service initialization for environment: {environment_id}")
+            # logger.info(f"🚀 RAW SERVICE INIT: Starting raw video service initialization for environment: {environment_id}")
             
             # Initialize asset downloader
             self.asset_downloader = AssetDownloader(
@@ -203,7 +203,7 @@ class RawVideoService:
                 asset_downloader=self.asset_downloader
             )
             
-            logger.info("✅ RAW SERVICE INIT: Raw video services initialized successfully")
+            # logger.info("✅ RAW SERVICE INIT: Raw video services initialized successfully")
             return True
             
         except Exception as e:
@@ -246,7 +246,7 @@ class RawVideoService:
             # Update statistics
             self.streaming_stats["total_tasks_created"] += 1
             
-            logger.info(f"✅ RAW TASK INIT: Task {task_id} initialized for environment {environment_id}")
+            # logger.info(f"✅ RAW TASK INIT: Task {task_id} initialized for environment {environment_id}")
             return task_id
             
         except Exception as e:
@@ -266,13 +266,13 @@ class RawVideoService:
         streaming_start = time.time()
         
         try:
-            logger.info(f"🎬 RAW PIPELINE: Starting raw streaming pipeline for task {task_id}, environment {environment_id}")
+            # logger.info(f"🎬 RAW PIPELINE: Starting raw streaming pipeline for task {task_id}, environment {environment_id}")
             
             # Update task status
             await self._update_task_status(task_id, "INITIALIZING", 0.05, "Initializing raw video services")
             
             # Step 1: Initialize services
-            logger.info(f"📹 RAW PIPELINE: Step 1/4 - Initializing services for task {task_id}")
+            # logger.info(f"📹 RAW PIPELINE: Step 1/4 - Initializing services for task {task_id}")
             services_initialized = await self.initialize_services(environment_id)
             if not services_initialized:
                 raise RuntimeError("Failed to initialize raw video services")
@@ -280,7 +280,7 @@ class RawVideoService:
             await self._update_task_status(task_id, "DOWNLOADING", 0.25, "Downloading video data")
             
             # Step 2: Download video data
-            logger.info(f"⬇️ RAW PIPELINE: Step 2/4 - Downloading video data for task {task_id}")
+            # logger.info(f"⬇️ RAW PIPELINE: Step 2/4 - Downloading video data for task {task_id}")
             video_data = await self._download_video_data(environment_id)
             if not video_data:
                 raise RuntimeError("Failed to download video data")
@@ -288,7 +288,7 @@ class RawVideoService:
             await self._update_task_status(task_id, "EXTRACTING", 0.50, "Extracting raw frames")
             
             # Step 3: Extract frames
-            logger.info(f"🖼️ RAW PIPELINE: Step 3/4 - Extracting frames for task {task_id}")
+            # logger.info(f"🖼️ RAW PIPELINE: Step 3/4 - Extracting frames for task {task_id}")
             frames_extracted = await self._extract_raw_frames(task_id, video_data)
             if not frames_extracted:
                 raise RuntimeError("Failed to extract frames")
@@ -296,7 +296,7 @@ class RawVideoService:
             await self._update_task_status(task_id, "STREAMING", 0.75, "Streaming raw video frames")
             
             # Step 4: Stream frames
-            logger.info(f"📡 RAW PIPELINE: Step 4/4 - Streaming frames for task {task_id}")
+            # logger.info(f"📡 RAW PIPELINE: Step 4/4 - Streaming frames for task {task_id}")
             streaming_success = await self._stream_raw_frames(task_id, video_data)
             if self._task_marked_stopped(task_id):
                 logger.info(f"🛑 RAW PIPELINE: Task {task_id} stopped early (likely no active WebSocket clients)")
@@ -313,7 +313,7 @@ class RawVideoService:
             self.streaming_stats["successful_streams"] += 1
             self._update_streaming_stats()
             
-            logger.info(f"✅ RAW PIPELINE: Raw streaming pipeline completed successfully for task {task_id}")
+            # logger.info(f"✅ RAW PIPELINE: Raw streaming pipeline completed successfully for task {task_id}")
             
         except Exception as e:
             logger.error(f"❌ RAW PIPELINE: Error in raw streaming pipeline for task {task_id}: {e}")
@@ -332,7 +332,7 @@ class RawVideoService:
     async def _download_video_data(self, environment_id: str) -> Dict[str, Any]:
         """Download video data for the environment."""
         try:
-            logger.info(f"⬇️ RAW DOWNLOAD: Downloading video data for environment {environment_id}")
+            # logger.info(f"⬇️ RAW DOWNLOAD: Downloading video data for environment {environment_id}")
             
             # Get video configuration for environment
             video_configs = [vc for vc in settings.VIDEO_SETS if vc.env_id == environment_id]
@@ -355,7 +355,7 @@ class RawVideoService:
                         "video_path": video_path,
                         "config": video_config
                     }
-                    logger.info(f"✅ RAW DOWNLOAD: Downloaded video for camera {camera_id}")
+                    pass # logger.info(f"✅ RAW DOWNLOAD: Downloaded video for camera {camera_id}")
                 else:
                     logger.warning(f"⚠️ RAW DOWNLOAD: Failed to download video for camera {camera_id}")
             
@@ -368,7 +368,7 @@ class RawVideoService:
     async def _extract_raw_frames(self, task_id: UUID, video_data: Dict[str, Any]) -> bool:
         """Extract frames from video files."""
         try:
-            logger.info(f"🖼️ RAW EXTRACT: Extracting frames for task {task_id}")
+            # logger.info(f"🖼️ RAW EXTRACT: Extracting frames for task {task_id}")
             
             # Process each camera's video
             for camera_id, data in video_data.items():
@@ -384,14 +384,14 @@ class RawVideoService:
                 fps = cap.get(cv2.CAP_PROP_FPS)
                 frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
                 
-                logger.info(f"📹 RAW EXTRACT: Camera {camera_id} - FPS: {fps}, Frames: {frame_count}")
+                # logger.info(f"📹 RAW EXTRACT: Camera {camera_id} - FPS: {fps}, Frames: {frame_count}")
                 
                 # Store frame extraction info
                 data["fps"] = fps
                 data["frame_count"] = frame_count
                 data["video_capture"] = cap
                 
-            logger.info(f"✅ RAW EXTRACT: Frame extraction setup completed for task {task_id}")
+            # logger.info(f"✅ RAW EXTRACT: Frame extraction setup completed for task {task_id}")
             return True
             
         except Exception as e:
@@ -401,7 +401,7 @@ class RawVideoService:
     async def _stream_raw_frames(self, task_id: UUID, video_data: Dict[str, Any]) -> bool:
         """Stream raw frames via WebSocket."""
         try:
-            logger.info(f"📡 RAW STREAM: Starting frame streaming for task {task_id}")
+            # logger.info(f"📡 RAW STREAM: Starting frame streaming for task {task_id}")
             
             # Calculate target FPS and frame interval
             target_fps = getattr(settings, 'TARGET_FPS', 10)
@@ -526,7 +526,7 @@ class RawVideoService:
                         progress = (frame_index / total_frames) * 0.25 + 0.75  # 0.75-1.0 range
                         await self._update_task_status(task_id, "STREAMING", progress, 
                                                      f"Streaming frame {frame_index}/{total_frames}")
-                        logger.info(f"📡 RAW STREAM: Streamed frame {frame_index}/{total_frames} for task {task_id}")
+                        # logger.info(f"📡 RAW STREAM: Streamed frame {frame_index}/{total_frames} for task {task_id}")
                 
                 # Frame rate control
                 elapsed = time.time() - last_frame_time
@@ -548,7 +548,7 @@ class RawVideoService:
                 logger.info(f"🛑 RAW STREAM: {reason} (task {task_id})")
                 return True
 
-            logger.info(f"✅ RAW STREAM: Frame streaming completed for task {task_id}")
+            # logger.info(f"✅ RAW STREAM: Frame streaming completed for task {task_id}")
             return True
 
         except Exception as e:

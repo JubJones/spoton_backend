@@ -112,7 +112,7 @@ async def create_hypertables():
             for query in hypertable_queries:
                 try:
                     conn.execute(text(query))
-                    logger.debug(f"Executed hypertable query: {query}")
+                    pass # logger.debug(f"Executed hypertable query: {query}")
                 except SQLAlchemyError as e:
                     # Hypertable might already exist
                     if "already exists" not in str(e):
@@ -154,7 +154,7 @@ async def create_indexes():
             for query in index_queries:
                 try:
                     conn.execute(text(query))
-                    logger.debug(f"Created index: {query}")
+                    pass # logger.debug(f"Created index: {query}")
                 except SQLAlchemyError as e:
                     # Index might already exist
                     if "already exists" not in str(e):

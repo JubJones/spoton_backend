@@ -120,7 +120,7 @@ async def websocket_tracking_endpoint(websocket: WebSocket, task_id: str):
 
                 except asyncio.TimeoutError:
                     # Handle listen-only clients - no message received is normal for streaming clients
-                    logger.debug(f"No client message received in 30s for task_id {task_id} (listen-only client)")
+                    # logger.debug(f"No client message received in 30s for task_id {task_id} (listen-only client)")
                     # Keep connection alive for listen-only clients
                     continue
 
@@ -222,7 +222,7 @@ async def websocket_frames_endpoint(websocket: WebSocket, task_id: str):
 
                 except asyncio.TimeoutError:
                     # Handle listen-only clients - no message received is normal for streaming clients
-                    logger.debug(f"No frame control message received in 30s for task_id {task_id} (listen-only client)")
+                    # logger.debug(f"No frame control message received in 30s for task_id {task_id} (listen-only client)")
                     # Keep connection alive for listen-only clients
                     continue
 
@@ -324,7 +324,7 @@ async def websocket_system_endpoint(websocket: WebSocket):
 
                 except asyncio.TimeoutError:
                     # Handle listen-only clients - no message received is normal for monitoring clients
-                    logger.debug("No system control message received in 30s (listen-only client)")
+                    # logger.debug("No system control message received in 30s (listen-only client)")
                     # Keep connection alive for listen-only clients
                     continue
 
@@ -403,7 +403,7 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
 
                 except asyncio.TimeoutError:
                     # Handle listen-only clients - no message received is normal for focus clients
-                    logger.debug(f"No focus message received in 30s for task_id {task_id} (listen-only client)")
+                    # logger.debug(f"No focus message received in 30s for task_id {task_id} (listen-only client)")
                     # Keep connection alive for listen-only clients
                     continue
 
@@ -483,7 +483,7 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
 
                 except asyncio.TimeoutError:
                     # Handle listen-only clients - no message received is normal for analytics clients
-                    logger.debug(f"No analytics message received in 30s for task_id {task_id} (listen-only client)")
+                    # logger.debug(f"No analytics message received in 30s for task_id {task_id} (listen-only client)")
                     # Keep connection alive for listen-only clients
                     continue
 

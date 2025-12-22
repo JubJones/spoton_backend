@@ -178,7 +178,7 @@ class TrackingHandler:
                 update_latency = time.time() - update_start
                 self._update_tracking_stats(update_latency)
                 
-                logger.debug(f"Sent tracking update for person {gid}")
+                # logger.debug(f"Sent tracking update for person {gid}")
             else:
                 self.tracking_stats["failed_updates"] += 1
                 logger.warning(f"Failed to send tracking update for person {gid}")
@@ -237,14 +237,14 @@ class TrackingHandler:
                 
                 if camera_success:
                     total_sent += len(camera_persons)
-                    logger.debug(f"Sent tracking updates for camera {camera_id}: {len(camera_persons)} persons")
+                    # logger.debug(f"Sent tracking updates for camera {camera_id}: {len(camera_persons)} persons")
                 else:
                     all_success = False
                     logger.warning(f"Failed to send tracking updates for camera {camera_id}")
             
             if all_success:
                 self.tracking_stats["total_updates_sent"] += total_sent
-                logger.debug(f"All camera tracking updates sent successfully: {total_sent} total persons")
+                # logger.debug(f"All camera tracking updates sent successfully: {total_sent} total persons")
             
             return all_success
             

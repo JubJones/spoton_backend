@@ -78,13 +78,13 @@ class BatchedFrameProvider:
             else:
                 self.num_processed_frames_per_video[cam_id] = 0
 
-            logger.info(
-                f"[Task {self.task_id}][{cam_id}] Opened video {video_path.name}. "
-                f"Actual FPS: {self.video_actual_fps[cam_id]:.2f}, "
-                f"Target FPS: {self.target_fps}, Skip Interval: {skip_interval}, "
-                f"Total Original Frames: {self.total_frames_in_video[cam_id]}, "
-                f"Est. Processed Frames: {self.num_processed_frames_per_video[cam_id]}."
-            )
+            pass # logger.info(
+                 #     f"[Task {self.task_id}][{cam_id}] Opened video {video_path.name}. "
+                 #     f"Actual FPS: {self.video_actual_fps[cam_id]:.2f}, "
+                 #     f"Target FPS: {self.target_fps}, Skip Interval: {skip_interval}, "
+                 #     f"Total Original Frames: {self.total_frames_in_video[cam_id]}, "
+                 #     f"Est. Processed Frames: {self.num_processed_frames_per_video[cam_id]}."
+                 # )
         self._is_open = True
 
     def get_num_processed_frames_for_camera(self, cam_id: CameraID) -> int:
@@ -125,7 +125,7 @@ class BatchedFrameProvider:
                 any_video_active = True
 
         if not any_video_active and self.loop_videos and self.video_captures:
-            logger.info(f"[Task {self.task_id}] All videos ended, looping enabled. Re-opening videos.")
+            pass # logger.info(f"[Task {self.task_id}] All videos ended, looping enabled. Re-opening videos.")
             self.close()
             self._open_videos()
             if self._is_open:
@@ -158,11 +158,11 @@ class BatchedFrameProvider:
 
     def close(self):
         """Releases all video capture objects."""
-        logger.info(f"[Task {self.task_id}] Closing BatchedFrameProvider.")
+        # logger.info(f"[Task {self.task_id}] Closing BatchedFrameProvider.")
         for cam_id, cap in self.video_captures.items():
             if cap.isOpened():
                 cap.release()
-                logger.debug(f"[Task {self.task_id}][{cam_id}] Released video capture.")
+                pass # logger.debug(f"[Task {self.task_id}][{cam_id}] Released video capture.")
         self.video_captures.clear()
         self._is_open = False
 
@@ -174,7 +174,7 @@ class VideoDataManagerService:
         self.asset_downloader = asset_downloader
         self.video_sets_config: List[VideoSetEnvironmentConfig] = settings.VIDEO_SETS
         self.local_video_dir_base: Path = Path(settings.LOCAL_VIDEO_DOWNLOAD_DIR)
-        logger.info("VideoDataManagerService initialized.")
+        # logger.info("VideoDataManagerService initialized.")
 
     async def download_sub_videos_for_environment_batch(
         self, task_id: uuid.UUID, environment_id: str, sub_video_index: int
@@ -195,9 +195,9 @@ class VideoDataManagerService:
             A dictionary mapping CameraID to the local Path of the downloaded sub-video.
         """
         # --- Local mode implementation ---
-        logger.info(
-            f"[Task {task_id}] (LOCAL MODE) Resolving sub_video index {sub_video_index} for env '{environment_id}'."
-        )
+        # logger.info(
+        #     f"[Task {task_id}] (LOCAL MODE) Resolving sub_video index {sub_video_index} for env '{environment_id}'."
+        # )
         downloaded_video_paths: Dict[CameraID, Path] = {}
 
         local_base = Path(getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', '/app/videos')).resolve()
@@ -271,7 +271,7 @@ class VideoDataManagerService:
 
             if chosen:
                 downloaded_video_paths[CameraID(cam_config.cam_id)] = chosen
-                logger.info(f"[Task {task_id}][{cam_config.cam_id}] Using local video: {chosen}")
+                pass # logger.info(f"[Task {task_id}][{cam_config.cam_id}] Using local video: {chosen}")
             else:
                 # Debug logging: List all files in local_base to help user debug
                 logger.error(f"[Task {task_id}] --- DEBUG VIDEO SEARCH --- listing contents of {local_base}:")
@@ -301,9 +301,9 @@ class VideoDataManagerService:
                     f"Tried: {local_video_path}, {fallback_path}, {alt_direct_file}, {alt_env_direct_file}, <dir scans>, <rglob>"
                 )
 
-        logger.info(
-            f"[Task {task_id}] (LOCAL MODE) Resolved {len(downloaded_video_paths)} local videos for sub-video index {sub_video_index}."
-        )
+        pass # logger.info(
+             #     f"[Task {task_id}] (LOCAL MODE) Resolved {len(downloaded_video_paths)} local videos for sub-video index {sub_video_index}."
+             # )
         return downloaded_video_paths
 
         """ Legacy S3 implementation (disabled)
@@ -346,10 +346,10 @@ class VideoDataManagerService:
                 "local_path": local_video_path
             })
             if not local_video_path.exists():
-                logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
+                pass # logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Queuing download: {remote_video_key} to {local_video_path}")
                 download_coroutines.append(_bounded_download(remote_video_key, local_video_path))
             else:
-                logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
+                pass # logger.debug(f"[Task {task_id}][{cam_config.cam_id}] Video already exists locally: {local_video_path}")
                 async def _mock_download_success():
                     return True
                 download_coroutines.append(_mock_download_success())
@@ -377,7 +377,7 @@ class VideoDataManagerService:
         """
         Creates and returns a BatchedFrameProvider for the given set of local video files.
         """
-        logger.info(f"[Task {task_id}] Creating BatchedFrameProvider for {len(local_video_paths_map)} videos.")
+        # logger.info(f"[Task {task_id}] Creating BatchedFrameProvider for {len(local_video_paths_map)} videos.")
         return BatchedFrameProvider(
             task_id=task_id,
             video_paths_map=local_video_paths_map,
@@ -392,11 +392,11 @@ class VideoDataManagerService:
             try:
                 import shutil
                 await asyncio.to_thread(shutil.rmtree, task_specific_video_dir)
-                logger.info(f"[Task {task_id}] Cleaned up downloaded video data from {task_specific_video_dir}.")
+                pass # logger.info(f"[Task {task_id}] Cleaned up downloaded video data from {task_specific_video_dir}.")
             except Exception as e:
                 logger.error(f"[Task {task_id}] Error cleaning up task data {task_specific_video_dir}: {e}", exc_info=True)
         else:
-            logger.info(f"[Task {task_id}] No video data directory found at {task_specific_video_dir} to cleanup.")
+            pass # logger.info(f"[Task {task_id}] No video data directory found at {task_specific_video_dir} to cleanup.")
 
     def get_max_sub_videos_for_environment(self, environment_id: str) -> int:
         """

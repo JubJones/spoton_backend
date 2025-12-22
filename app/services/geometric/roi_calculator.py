@@ -143,14 +143,14 @@ class ROICalculator:
 
         self.roi_count += 1
 
-        self.logger.debug(
-            "ROI generated: center=(%.2f, %.2f) radius=%.2f (time=%.2fs, quality=%.2f)",
-            predicted_location[0],
-            predicted_location[1],
-            radius,
-            time_elapsed,
-            quality,
-        )
+        # self.logger.debug(
+        #     "ROI generated: center=(%.2f, %.2f) radius=%.2f (time=%.2fs, quality=%.2f)",
+        #     predicted_location[0],
+        #     predicted_location[1],
+        #     radius,
+        #     time_elapsed,
+        #     quality,
+        # )
 
         return SearchROI(
             center=predicted_location,

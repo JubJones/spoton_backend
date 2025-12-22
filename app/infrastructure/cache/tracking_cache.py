@@ -171,7 +171,7 @@ class TrackingCache:
             await self._update_camera_person_index(camera_id, cached_state.global_id)
             
             self.cache_stats["writes"] += 1
-            logger.debug(f"Cached person state for {cached_state.global_id}")
+            # logger.debug(f"Cached person state for {cached_state.global_id}")
             
             return True
             
@@ -333,7 +333,7 @@ class TrackingCache:
             await self._update_embedding_index(person_id, camera_id)
             
             self.cache_stats["writes"] += 1
-            logger.debug(f"Cached embedding for person {person_id} from camera {camera_id}")
+            # logger.debug(f"Cached embedding for person {person_id} from camera {camera_id}")
             
             return True
             
@@ -532,7 +532,7 @@ class TrackingCache:
             )
             
             self.cache_stats["writes"] += 1
-            logger.debug(f"Cached trajectory for person {person_id} from camera {camera_id}")
+            # logger.debug(f"Cached trajectory for person {person_id} from camera {camera_id}")
             
             return True
             
@@ -581,7 +581,7 @@ class TrackingCache:
             # Clean up expired embeddings
             await self._cleanup_expired_embeddings()
             
-            logger.debug("Completed cache cleanup")
+            pass # logger.debug("Completed cache cleanup")
             
         except Exception as e:
             logger.error(f"Error during cache cleanup: {e}")

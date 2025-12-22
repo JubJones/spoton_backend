@@ -218,7 +218,7 @@ class MemoryManager:
                         self.stats.gpu_available = (gpu_memory - gpu_allocated) / (1024**3)  # GB
                         self.stats.gpu_percentage = (gpu_allocated / gpu_memory) * 100
                 except Exception as gpu_error:
-                    logger.debug(f"GPU memory stats collection failed: {gpu_error}")
+                    pass # logger.debug(f"GPU memory stats collection failed: {gpu_error}")
             
             # Cache statistics
             total_cache_size = sum(
@@ -370,7 +370,7 @@ class MemoryManager:
                     'objects_collected': collected,
                     'duration': time.time() - gc_start
                 })
-                logger.debug(f"Garbage collection freed {collected} objects")
+                pass # logger.debug(f"Garbage collection freed {collected} objects")
             
             # 2. Cache cleanup
             if strategy != OptimizationStrategy.CONSERVATIVE:
@@ -614,7 +614,7 @@ class MemoryManager:
                 'size_estimator': size_estimator
             }
             
-            logger.debug(f"Registered cache for management: {name}")
+            pass # logger.debug(f"Registered cache for management: {name}")
             
         except Exception as e:
             logger.error(f"Error registering cache {name}: {e}")
@@ -628,7 +628,7 @@ class MemoryManager:
         """
         try:
             self.optimization_callbacks.append(callback)
-            logger.debug("Added optimization callback")
+            pass # logger.debug("Added optimization callback")
             
         except Exception as e:
             logger.error(f"Error adding optimization callback: {e}")

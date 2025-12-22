@@ -80,7 +80,7 @@ class AnalyticsHandler:
                 message_type=binary_websocket_manager.MessageType.CONTROL_MESSAGE
             )
             
-            logger.debug(f"Sent analytics update for task {task_id}")
+            # logger.debug(f"Sent analytics update for task {task_id}")
             
         except Exception as e:
             logger.error(f"Error sending analytics update for task {task_id}: {e}")
@@ -176,7 +176,7 @@ class AnalyticsHandler:
                 self._analytics_update_loop(task_id, update_interval)
             )
             
-            logger.debug(f"Started analytics updates for task {task_id}")
+            # logger.debug(f"Started analytics updates for task {task_id}")
             
         except Exception as e:
             logger.error(f"Error starting analytics updates for task {task_id}: {e}")
@@ -188,7 +188,7 @@ class AnalyticsHandler:
                 self.analytics_update_tasks[task_id].cancel()
                 del self.analytics_update_tasks[task_id]
                 
-            logger.debug(f"Stopped analytics updates for task {task_id}")
+            # logger.debug(f"Stopped analytics updates for task {task_id}")
             
         except Exception as e:
             logger.error(f"Error stopping analytics updates for task {task_id}: {e}")
@@ -206,7 +206,7 @@ class AnalyticsHandler:
                 await asyncio.sleep(update_interval)
                 
         except asyncio.CancelledError:
-            logger.debug(f"Analytics update loop cancelled for task {task_id}")
+            pass # logger.debug(f"Analytics update loop cancelled for task {task_id}")
         except Exception as e:
             logger.error(f"Error in analytics update loop for task {task_id}: {e}")
     

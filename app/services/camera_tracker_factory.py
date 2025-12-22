@@ -78,7 +78,7 @@ class CameraTrackerFactory:
         """
         cache_key = (task_id, camera_id)
         if cache_key not in self._tracker_instances:
-            logger.info(f"Creating new ByteTrack tracker for task '{task_id}', camera '{camera_id}'.")
+            # logger.info(f"Creating new ByteTrack tracker for task '{task_id}', camera '{camera_id}'.")
             try:
                 tracker = ByteTrackTracker()
             except ImportError as e:
@@ -93,7 +93,7 @@ class CameraTrackerFactory:
                 await tracker.load_model()
                 # No separate warmup here for task-specific trackers unless desired for absolute first frame.
                 # The prototype warmup should cover general JIT.
-                logger.info(f"ByteTrack tracker model loaded successfully for task '{task_id}', camera '{camera_id}'.")
+                # logger.info(f"ByteTrack tracker model loaded successfully for task '{task_id}', camera '{camera_id}'.")
             except Exception as e:
                 logger.error(
                     f"Failed to load model for ByteTrack tracker (task '{task_id}', camera '{camera_id}'): {e}",
@@ -140,5 +140,5 @@ class CameraTrackerFactory:
         logger.info(f"Resetting all trackers for task '{task_id}'.")
         for (current_task_id, camera_id), tracker_instance in self._tracker_instances.items():
             if current_task_id == task_id:
-                logger.debug(f"Calling reset for tracker of camera '{camera_id}' in task '{task_id}'.")
+                pass # logger.debug(f"Calling reset for tracker of camera '{camera_id}' in task '{task_id}'.")
                 await tracker_instance.reset()

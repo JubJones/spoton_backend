@@ -122,7 +122,7 @@ class BinaryWebSocketManager:
             True if connection successful, False otherwise
         """
         try:
-            logger.debug(f"WS connect request task_id={task_id}; active={list(self.active_connections.keys())}")
+            # logger.debug(f"WS connect request task_id={task_id}; active={list(self.active_connections.keys())}")
             
             # Accept the WebSocket connection
             await websocket.accept()
@@ -197,7 +197,7 @@ class BinaryWebSocketManager:
             task_id: Task identifier
         """
         try:
-            logger.debug(f"WS disconnect task_id={task_id}; active={list(self.active_connections.keys())}")
+            # logger.debug(f"WS disconnect task_id={task_id}; active={list(self.active_connections.keys())}")
             
             # Remove from active connections
             if task_id in self.active_connections:
@@ -219,7 +219,7 @@ class BinaryWebSocketManager:
                         
                         # Clear pending message buffer
                         if task_id in self.pending_message_buffer:
-                            logger.info(f"🧹 WS DEBUG: Clearing pending message buffer for task_id: {task_id}")
+                            pass # logger.info(f"🧹 WS DEBUG: Clearing pending message buffer for task_id: {task_id}")
                             del self.pending_message_buffer[task_id]
             
             # Clean up metrics
@@ -263,12 +263,12 @@ class BinaryWebSocketManager:
         try:
             # Check if task has active connections
             if task_id not in self.active_connections:
-                logger.debug(f"No active connections for task_id: {task_id}, skipping frame")
+                # logger.debug(f"No active connections for task_id: {task_id}, skipping frame")
                 return False
             
             # Check if there are actually connected websockets
             if not self.active_connections[task_id]:
-                logger.debug(f"Empty connection list for task_id: {task_id}, skipping frame")
+                # logger.debug(f"Empty connection list for task_id: {task_id}, skipping frame")
                 return False
             
             # Prepare binary message
@@ -353,22 +353,22 @@ class BinaryWebSocketManager:
             True if sent successfully, False otherwise
         """
         try:
-            logger.debug(f"WS send_json task_id={task_id}, type={message_type.value}")
+            # logger.debug(f"WS send_json task_id={task_id}, type={message_type.value}")
             
             # Check if task has active connections
             if task_id not in self.active_connections or not self.active_connections[task_id]:
                 # Buffer tracking updates for later delivery when WebSocket connects
                 if message_type in (MessageType.TRACKING_UPDATE, MessageType.STATUS_UPDATE):
-                    logger.debug(f"WS buffer tracking update task_id={task_id} (no connections)")
+                    # logger.debug(f"WS buffer tracking update task_id={task_id} (no connections)")
                     await self._buffer_tracking_update(task_id, message)
                     return True  # Consider buffering as successful
                 else:
-                    logger.warning(f"❌ WS DEBUG: No active connections for task_id: {task_id}, skipping non-tracking message")
-                    logger.info(f"🔍 WS DEBUG: Available task_ids: {list(self.active_connections.keys())}")
+                    pass # logger.debug(f"❌ WS: No active connections for task_id: {task_id}, skipping non-tracking message")
+                    pass # logger.info(f"🔍 WS DEBUG: Available task_ids: {list(self.active_connections.keys())}")
                     return False
             
             connection_count = len(self.active_connections[task_id])
-            logger.debug(f"WS active connections for {task_id}: {connection_count}")
+            # logger.debug(f"WS active connections for {task_id}: {connection_count}")
             
             # Add message type and timestamp (preserve pre-set type if provided)
             if "type" not in message:
@@ -377,7 +377,7 @@ class BinaryWebSocketManager:
             
             # Log message size for debugging
             message_size = len(json.dumps(message).encode('utf-8'))
-            logger.debug(f"WS message size={message_size} for task_id={task_id}")
+            # logger.debug(f"WS message size={message_size} for task_id={task_id}")
             
             # Handle batching - Skip batching for tracking/status updates to keep them responsive
             if self.enable_batching and message_type in (MessageType.TRACKING_UPDATE, MessageType.STATUS_UPDATE):
@@ -467,12 +467,12 @@ class BinaryWebSocketManager:
         try:
             # Check if task has active connections
             if task_id not in self.active_connections:
-                logger.debug(f"No active connections for task_id: {task_id}")
+                # logger.debug(f"No active connections for task_id: {task_id}")
                 return False
             
             # Check if there are actually connected websockets
             if not self.active_connections[task_id]:
-                logger.debug(f"Empty connection list for task_id: {task_id}")
+                # logger.debug(f"Empty connection list for task_id: {task_id}")
                 return False
             
             # Convert to JSON
@@ -481,7 +481,7 @@ class BinaryWebSocketManager:
             
             # Check message size limits
             if len(message_bytes) > self.max_message_size:
-                logger.warning(f"⚠️ WS DEBUG: Message too large ({len(message_bytes)} bytes) for task_id: {task_id}, attempting compression")
+                # logger.warning(f"⚠️ WS DEBUG: Message too large ({len(message_bytes)} bytes) for task_id: {task_id}, attempting compression")
                 
                 # Try aggressive compression for large messages
                 try:
@@ -492,10 +492,10 @@ class BinaryWebSocketManager:
                         message = await self._reduce_message_size(message)
                         message_json = json.dumps(message)
                         message_bytes = message_json.encode('utf-8')
-                        logger.info(f"🔧 WS DEBUG: Reduced message size to {len(message_bytes)} bytes for task_id: {task_id}")
+                        # logger.info(f"🔧 WS DEBUG: Reduced message size to {len(message_bytes)} bytes for task_id: {task_id}")
                     else:
                         message_bytes = compressed_data
-                        logger.info(f"✅ WS DEBUG: Compressed large message from {len(message_json.encode('utf-8'))} to {len(compressed_data)} bytes for task_id: {task_id}")
+                        # logger.info(f"✅ WS DEBUG: Compressed large message from {len(message_json.encode('utf-8'))} to {len(compressed_data)} bytes for task_id: {task_id}")
                 except Exception as e:
                     logger.error(f"❌ WS DEBUG: Failed to compress large message for task_id: {task_id}: {e}")
                     return False
@@ -536,7 +536,7 @@ class BinaryWebSocketManager:
                 try:
                     # Enhanced WebSocket state validation
                     if not await self._is_websocket_ready(websocket):
-                        logger.debug(f"WebSocket not ready, marking for removal")
+                        # logger.debug(f"WebSocket not ready, marking for removal")
                         connections_to_remove.append(websocket)
                         continue
     
@@ -662,13 +662,13 @@ class BinaryWebSocketManager:
             
             # Check client state
             if websocket.client_state != WebSocketState.CONNECTED:
-                logger.debug(f"WebSocket client state not CONNECTED: {websocket.client_state}")
+                # logger.debug(f"WebSocket client state not CONNECTED: {websocket.client_state}")
                 return False
             
             # Check application state if available
             if hasattr(websocket, 'application_state'):
                 if websocket.application_state != WebSocketState.CONNECTED:
-                    logger.debug(f"WebSocket application state not CONNECTED: {websocket.application_state}")
+                    # logger.debug(f"WebSocket application state not CONNECTED: {websocket.application_state}")
                     return False
             
             return True
@@ -683,7 +683,7 @@ class BinaryWebSocketManager:
             try:
                 # Validate WebSocket is still ready before each attempt
                 if not await self._is_websocket_ready(websocket):
-                    logger.debug(f"WebSocket not ready on attempt {attempt + 1}")
+                    pass # logger.debug(f"WebSocket not ready on attempt {attempt + 1}")
                     if attempt < max_retries:
                         await asyncio.sleep(0.01 * (attempt + 1))  # Exponential backoff
                         continue
@@ -694,7 +694,7 @@ class BinaryWebSocketManager:
                 return True
                 
             except Exception as e:
-                logger.debug(f"Send attempt {attempt + 1} failed: {e}")
+                pass # logger.debug(f"Send attempt {attempt + 1} failed: {e}")
                 if attempt < max_retries:
                     await asyncio.sleep(0.01 * (attempt + 1))  # Exponential backoff
                     continue
@@ -716,10 +716,10 @@ class BinaryWebSocketManager:
             if len(self.pending_message_buffer[task_id]) > self.max_buffered_messages:
                 # Remove oldest message
                 removed_msg = self.pending_message_buffer[task_id].pop(0)
-                logger.info(f"📦 WS DEBUG: Buffer full for task_id: {task_id}, removed oldest message")
+                # logger.info(f"📦 WS DEBUG: Buffer full for task_id: {task_id}, removed oldest message")
             
             buffer_size = len(self.pending_message_buffer[task_id])
-            logger.info(f"📦 WS DEBUG: Message buffered for task_id: {task_id} (buffer size: {buffer_size})")
+            # logger.info(f"📦 WS DEBUG: Message buffered for task_id: {task_id} (buffer size: {buffer_size})")
             
         except Exception as e:
             logger.error(f"Error buffering tracking update for task_id {task_id}: {e}")
@@ -734,25 +734,25 @@ class BinaryWebSocketManager:
             if not buffered_messages:
                 return
             
-            logger.info(f"📤 WS DEBUG: Delivering {len(buffered_messages)} buffered messages for task_id: {task_id}")
+            # logger.info(f"📤 WS DEBUG: Delivering {len(buffered_messages)} buffered messages for task_id: {task_id}")
             
             # Send all buffered messages (preemptively reduce size for compatibility)
             for i, message in enumerate(buffered_messages):
                 # Preemptively reduce message size for buffered messages to prevent failures
                 message_size = len(json.dumps(message).encode('utf-8'))
                 if message_size > self.large_message_compression_threshold:
-                    logger.info(f"📦 WS DEBUG: Preemptively reducing buffered message size ({message_size} bytes) for task_id: {task_id}")
+                    pass # logger.info(f"📦 WS DEBUG: Preemptively reducing buffered message size ({message_size} bytes) for task_id: {task_id}")
                     message = await self._reduce_message_size(message)
                 
                 success = await self._send_immediate_message(task_id, message)
                 if success:
-                    logger.info(f"📤 WS DEBUG: Delivered buffered message {i+1}/{len(buffered_messages)} for task_id: {task_id}")
+                    pass # logger.info(f"📤 WS DEBUG: Delivered buffered message {i+1}/{len(buffered_messages)} for task_id: {task_id}")
                 else:
-                    logger.warning(f"⚠️ WS DEBUG: Failed to deliver buffered message {i+1}/{len(buffered_messages)} for task_id: {task_id}")
+                    pass # logger.warning(f"⚠️ WS DEBUG: Failed to deliver buffered message {i+1}/{len(buffered_messages)} for task_id: {task_id}")
             
             # Clear the buffer after delivery
             self.pending_message_buffer[task_id] = []
-            logger.info(f"✅ WS DEBUG: Cleared message buffer for task_id: {task_id}")
+            # logger.info(f"✅ WS DEBUG: Cleared message buffer for task_id: {task_id}")
             
         except Exception as e:
             logger.error(f"Error delivering buffered messages for task_id {task_id}: {e}")
@@ -770,7 +770,7 @@ class BinaryWebSocketManager:
                         camera_data["frame_image"] = "removed_for_size"  # Keep key but remove data
                         camera_data["frame_size_reduced"] = True
                 
-                logger.info(f"🔧 WS DEBUG: Removed frame images to reduce message size")
+                # logger.info(f"🔧 WS DEBUG: Removed frame images to reduce message size")
             
             return reduced_message
             
@@ -813,7 +813,7 @@ class BinaryWebSocketManager:
             subs = self.connection_channels[task_id].setdefault(websocket, set())
             subs.add(channel)
         except Exception as e:
-            logger.debug(f"Subscribe error: {e}")
+            pass # logger.debug(f"Subscribe error: {e}")
 
     def unsubscribe(self, task_id: str, websocket: WebSocket, channel: str):
         try:
@@ -821,13 +821,13 @@ class BinaryWebSocketManager:
             if subs and channel in subs:
                 subs.remove(channel)
         except Exception as e:
-            logger.debug(f"Unsubscribe error: {e}")
+            pass # logger.debug(f"Unsubscribe error: {e}")
 
     def set_max_fps(self, websocket: WebSocket, fps: float):
         try:
             self._max_fps_by_conn[id(websocket)] = max(1.0, float(fps))
         except Exception as e:
-            logger.debug(f"set_max_fps error: {e}")
+            pass # logger.debug(f"set_max_fps error: {e}")
 
 
 # Global manager instance

@@ -96,9 +96,9 @@ class HandoffDetectionService:
         self.handoff_rules = getattr(settings, 'POSSIBLE_CAMERA_OVERLAPS', [])
         self.overlap_threshold = getattr(settings, 'MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT', 0.5)
         
-        logger.info(f"HandoffDetectionService initialized with {len(self.camera_zones)} camera zones")
-        logger.debug(f"Handoff rules: {self.handoff_rules}")
-        logger.debug(f"Overlap threshold: {self.overlap_threshold}")
+        # logger.info(f"HandoffDetectionService initialized with {len(self.camera_zones)} camera zones")
+        # logger.debug(f"Handoff rules: {self.handoff_rules}")
+        # logger.debug(f"Overlap threshold: {self.overlap_threshold}")
     
     def _create_default_zones(self, camera_id: str) -> List[CameraZone]:
         """Generate default 4-sided zones (top/bottom/left/right) with 5% margin."""
@@ -138,11 +138,11 @@ class HandoffDetectionService:
                         )
                         camera_zone_defs.append(camera_zone)
                         total_zones += 1
-                        logger.debug(
-                            f"Defined zone for {camera_id}: "
-                            f"x={camera_zone.x_min:.2f}-{camera_zone.x_max:.2f}, "
-                            f"y={camera_zone.y_min:.2f}-{camera_zone.y_max:.2f}"
-                        )
+                        # logger.debug(
+                        #     f"Defined zone for {camera_id}: "
+                        #     f"x={camera_zone.x_min:.2f}-{camera_zone.x_max:.2f}, "
+                        #     f"y={camera_zone.y_min:.2f}-{camera_zone.y_max:.2f}"
+                        # )
                     except Exception as zone_error:
                         logger.warning(
                             f"Skipping invalid handoff zone config for camera {camera_id}: {zone_error}"
@@ -157,9 +157,9 @@ class HandoffDetectionService:
                 zones[camera_id] = final_zones
                 total_zones += len(final_zones)
                 
-                logger.info(f"Defined {len(final_zones)} handoff zones for camera {camera_id} (Config: {len(camera_zone_defs)} + Default: 4)")
+                # logger.info(f"Defined {len(final_zones)} handoff zones for camera {camera_id} (Config: {len(camera_zone_defs)} + Default: 4)")
 
-            logger.info(f"Defined {total_zones} handoff zones across {len(zones)} cameras")
+            # logger.info(f"Defined {total_zones} handoff zones across {len(zones)} cameras")
             return zones
 
         except Exception as e:
@@ -200,7 +200,7 @@ class HandoffDetectionService:
             # Check if camera has defined zones
             if camera_id not in self.camera_zones:
                 # Lazy-load default zones (4 sides) if not configured
-                logger.info(f"Initializing default handoff zones (4 edges) for camera {camera_id}")
+                # logger.info(f"Initializing default handoff zones (4 edges) for camera {camera_id}")
                 self.camera_zones[camera_id] = self._create_default_zones(camera_id)
             
             # Check each zone for this camera
@@ -225,16 +225,17 @@ class HandoffDetectionService:
                                 if other_camera not in candidate_cameras:
                                     candidate_cameras.append(other_camera)
                         
-                        logger.debug(f"Handoff triggered for {camera_id}: "
-                                   f"overlap={overlap_ratio:.3f}, candidates={candidate_cameras}")
+                        # logger.debug(f"Handoff triggered for {camera_id}: "
+                        #            f"overlap={overlap_ratio:.3f}, candidates={candidate_cameras}")
                         break
             
             # Log details for debugging
             if max_overlap_ratio > 0:
-                logger.debug(f"Handoff check for {camera_id}: "
-                           f"max_overlap={max_overlap_ratio:.3f}, "
-                           f"threshold={self.overlap_threshold:.3f}, "
-                           f"triggered={is_handoff}")
+                pass
+                # logger.debug(f"Handoff check for {camera_id}: "
+                #            f"max_overlap={max_overlap_ratio:.3f}, "
+                #            f"threshold={self.overlap_threshold:.3f}, "
+                #            f"triggered={is_handoff}")
             
             return is_handoff, candidate_cameras
             

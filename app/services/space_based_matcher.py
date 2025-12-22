@@ -43,10 +43,10 @@ class SpaceBasedMatcher:
 
         # Track history for velocity calculation (optional for later phases, kept effectively stateless per frame group here)
         
-        logger.info(
-            f"SpaceBasedMatcher initialized (threshold={self.threshold_meters}m, "
-            f"min_overlap={self.min_overlap_frames}, enabled={self.enabled})"
-        )
+        # logger.info(
+        #     f"SpaceBasedMatcher initialized (threshold={self.threshold_meters}m, "
+        #     f"min_overlap={self.min_overlap_frames}, enabled={self.enabled})"
+        # )
 
     def match_across_cameras(self, camera_detections: Dict[str, Dict[str, Any]]) -> None:
         """
@@ -67,7 +67,7 @@ class SpaceBasedMatcher:
         
         # DEBUG TRACE
         total_tracks = sum(len(t) for t in valid_tracks.values())
-        logger.info(f"SpaceMatcher: Found {total_tracks} valid tracks across {len(valid_tracks)} cameras")
+        # logger.info(f"SpaceMatcher: Found {total_tracks} valid tracks across {len(valid_tracks)} cameras")
 
         if len(valid_tracks) < 2:
             return  # Need at least two cameras with tracks to match anything
@@ -89,7 +89,7 @@ class SpaceBasedMatcher:
                     if not existing_gid:
                          new_global_id = self.registry.allocate_new_id()
                          self.registry.assign_identity(camera_id, int(track_id), new_global_id)
-                         logger.debug(f"Created new global ID {new_global_id} for UNMATCHED track {camera_id}:{track_id}")
+                         pass # logger.debug(f"Created new global ID {new_global_id} for UNMATCHED track {camera_id}:{track_id}")
         
         # 4. Inject global IDs back into the detection results
         self._inject_global_ids(camera_detections)
@@ -177,7 +177,8 @@ class SpaceBasedMatcher:
                         if dist is not None:
                              # AUDIT LOG: Print distance if relatively close, to debug threshold issues
                             if dist < 5000.0:
-                                logger.debug(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
+                                pass # logger.debug(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
+                                pass
 
                             if dist <= self.threshold_meters:
                                 # Optional: Velocity gate check (future Phase)
@@ -276,7 +277,7 @@ class SpaceBasedMatcher:
                 new_global_id = self.registry.allocate_new_id()
                 self.registry.assign_identity(cam_a, track_a_id, new_global_id)
                 self.registry.assign_identity(cam_b, track_b_id, new_global_id)
-                logger.debug(f"Created new global ID {new_global_id} for match {cam_a}:{track_a_id} <-> {cam_b}:{track_b_id}")
+                pass # logger.debug(f"Created new global ID {new_global_id} for match {cam_a}:{track_a_id} <-> {cam_b}:{track_b_id}")
 
     # Removed internal _assign_global_id and _merge_identities helpers as they are now in registry
 

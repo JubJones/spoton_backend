@@ -320,7 +320,7 @@ class HomographyService:
 
         # Get or compute homography matrix from JSON data
         if camera_key not in self.json_homography_matrices:
-            logger.debug("No cached JSON matrix for camera %s, attempting to compute", camera_key)
+            pass # logger.debug("No cached JSON matrix for camera %s, attempting to compute", camera_key)
             matrix = self.compute_homography(camera_key)
             if matrix is None:
                 logger.info(f"ProjectToMap: No matrix found for {camera_key}")
@@ -339,13 +339,13 @@ class HomographyService:
             
             # Extract transformed coordinates
             map_x, map_y = transformed[0, 0]
-            logger.debug(
-                "Homography projection for camera %s: image_point=%s -> map=(%.4f, %.4f)",
-                camera_key,
-                image_point,
-                map_x,
-                map_y,
-            )
+            # logger.debug(
+            #     "Homography projection for camera %s: image_point=%s -> map=(%.4f, %.4f)",
+            #     camera_key,
+            #     image_point,
+            #     map_x,
+            #     map_y,
+            # )
 
             # Validate transformed coordinates
             if np.isfinite(map_x) and np.isfinite(map_y):
@@ -413,7 +413,7 @@ class HomographyService:
             pad_y = max(1.0, 0.1 * max(abs(min_y), abs(max_y)))
             return (min_x - pad_x, max_x + pad_x, min_y - pad_y, max_y + pad_y)
         except Exception as e:
-            logger.debug("Failed computing map bounds for %s: %s", camera_id, e)
+            pass # logger.debug("Failed computing map bounds for %s: %s", camera_id, e)
             return None
 
     def validate_map_coordinate(self, camera_id: str, map_x: float, map_y: float) -> bool:

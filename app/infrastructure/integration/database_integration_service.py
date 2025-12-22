@@ -99,7 +99,7 @@ class DatabaseIntegrationService:
             
             if success:
                 self.service_stats['successful_operations'] += 1
-                logger.debug(f"Stored detection for camera {camera_id}")
+                # logger.debug(f"Stored detection for camera {camera_id}")
             else:
                 self.service_stats['failed_operations'] += 1
                 logger.warning(f"Failed to store detection for camera {camera_id}")
@@ -173,7 +173,7 @@ class DatabaseIntegrationService:
             
             if success:
                 self.service_stats['successful_operations'] += 1
-                logger.debug(f"Stored person identity {getattr(person_identity, 'global_id', None)}")
+                # logger.debug(f"Stored person identity {getattr(person_identity, 'global_id', None)}")
             else:
                 self.service_stats['failed_operations'] += 1
                 logger.warning(f"Failed to store person identity {getattr(person_identity, 'global_id', None)}")
@@ -325,7 +325,7 @@ class DatabaseIntegrationService:
             
             if success:
                 self.service_stats['successful_operations'] += 1
-                logger.debug(f"Stored trajectory for person {person_id}")
+                # logger.debug(f"Stored trajectory for person {person_id}")
             else:
                 self.service_stats['failed_operations'] += 1
                 logger.warning(f"Failed to store trajectory for person {person_id}")

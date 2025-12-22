@@ -128,7 +128,7 @@ class AssetDownloader:
                 )
                 etag = head_obj.get('ETag', '').strip('"')
             except Exception as e:
-                logger.debug(f"HEAD failed for {remote_s3_key}: {e}")
+                pass # logger.debug(f"HEAD failed for {remote_s3_key}: {e}")
 
             if os.path.exists(local_destination_path) and etag:
                 etag_path = f"{local_destination_path}.etag"
