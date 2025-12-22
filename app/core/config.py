@@ -565,6 +565,7 @@ class Settings(BaseSettings):
     TRACK_CONFIDENCE_THRESHOLD: float = 0.5
     
     # (Re-ID batch/gallery settings removed)
+    REID_ENABLED: bool = Field(default=True, description="Enable Re-ID feature extraction (disable for performance)")
     HANDOFF_ZONE_THRESHOLD: float = 0.2
     TRACKER_CONFIG_PATH: Optional[str] = None
 

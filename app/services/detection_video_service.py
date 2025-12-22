@@ -335,6 +335,10 @@ class DetectionVideoService(RawVideoService):
         2. Detect Exit (Handoff Zone) -> Extract -> Register to HandoffManager
         3. Assign Global ID to tracks
         """
+        # Early exit if Re-ID is disabled via config
+        if not getattr(settings, 'REID_ENABLED', True):
+            return tracks
+        
         if not self.feature_extraction_service or not self.handoff_manager:
             return tracks
 
@@ -1937,8 +1941,8 @@ class DetectionVideoService(RawVideoService):
 
                 frame_index += 1
                 
-                # Small delay to prevent overwhelming WebSocket clients
-                await asyncio.sleep(0.02)  # 20ms delay
+                # Yield to event loop (no delay for max FPS)
+                await asyncio.sleep(0)
             
             # Cleanup video captures
             for data in video_data.values():
