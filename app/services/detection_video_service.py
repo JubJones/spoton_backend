@@ -517,13 +517,22 @@ class DetectionVideoService(RawVideoService):
         - If tracking is enabled and a tracker is available for the camera, updates tracks
         - Enhances track data with map coordinates and short trajectories
         """
+        import time as _time
+        _total_start = _time.perf_counter()
+        
         # Step 1: Run detection pipeline (includes spatial intelligence)
+        _det_start = _time.perf_counter()
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
+        _det_time = (_time.perf_counter() - _det_start) * 1000
 
         # Step 2: Tracking integration (via tracker factory)
         # Step 2: Tracking integration (via tracker factory)
         tracks: List[Dict[str, Any]] = []
         tracker_used = False
+        _track_time = 0.0
+        _spatial_time = 0.0
+        _reid_time = 0.0
+        
         try:
             if settings.TRACKING_ENABLED:
                 # Lazy initialization check
@@ -541,7 +550,10 @@ class DetectionVideoService(RawVideoService):
                 tracker = self.camera_trackers.get(camera_id)
                 # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
                 np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                
+                _track_start = _time.perf_counter()
                 tracked_np = await tracker.update(np_dets, frame)
+                _track_time = (_time.perf_counter() - _track_start) * 1000
                 
                 # ... (logging skipped for brevity in replacement) ...
 
@@ -549,11 +561,15 @@ class DetectionVideoService(RawVideoService):
                 tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
                 
                 # Enhance with spatial intelligence (map coords + short trajectory)
+                _spatial_start = _time.perf_counter()
                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
                 
                 # Apply Re-ID (Phase 2)
+                _reid_start = _time.perf_counter()
                 frame_height, frame_width = frame.shape[:2]
                 tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                _reid_time = (_time.perf_counter() - _reid_start) * 1000
                 
                 tracker_used = True
             else:
@@ -585,11 +601,26 @@ class DetectionVideoService(RawVideoService):
             # )
         
         # Frontend: emit auxiliary events (non-blocking)
+        _viz_start = _time.perf_counter()
         try:
             if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
                 await self._emit_frontend_events(task_id=None, camera_id=camera_id, frame_number=frame_number, tracks=tracks)
         except Exception:
             pass
+        _viz_time = (_time.perf_counter() - _viz_start) * 1000
+        
+        # Total time
+        _total_time = (_time.perf_counter() - _total_start) * 1000
+        
+        # Log timing breakdown every 10 frames or if slow (>100ms)
+        if frame_number % 10 == 0 or _total_time > 100:
+            logger.info(
+                "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
+                camera_id, frame_number, _total_time,
+                _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
+                len(tracks)
+            )
+        
         return detection_data
 
     def get_tracking_stats(self) -> Dict[str, Any]:
@@ -611,7 +642,10 @@ class DetectionVideoService(RawVideoService):
         Returns:
             Detection data dictionary with bounding boxes, coordinates, and spatial metadata
         """
-        detection_start = time.time()
+        import time as _time
+        _proc_start = _time.perf_counter()
+        _rtdetr_time = 0.0
+        _spatial_loop_time = 0.0
         
         try:
             # Select detector by environment of the camera, fallback to default
@@ -621,15 +655,18 @@ class DetectionVideoService(RawVideoService):
                 raise RuntimeError("RT-DETR detector not initialized for the current environment")
             
             # Run RT-DETR detection
+            _rtdetr_start = _time.perf_counter()
             detections = await detector.detect(frame)
+            _rtdetr_time = (_time.perf_counter() - _rtdetr_start) * 1000
             
             # Calculate processing time
-            processing_time = (time.time() - detection_start) * 1000
+            processing_time = (_time.perf_counter() - _proc_start) * 1000
             
             # Get frame dimensions for spatial processing
             frame_height, frame_width = frame.shape[:2]
             
             # Convert detections to the expected format with Phase 4 enhancements
+            _spatial_start = _time.perf_counter()
             enhanced_detections = []
             for i, detection in enumerate(detections):
                 bbox_dict = {
@@ -765,6 +802,8 @@ class DetectionVideoService(RawVideoService):
                 
                 enhanced_detections.append(enhanced_detection)
             
+            _spatial_loop_time = (_time.perf_counter() - _spatial_start) * 1000
+            
             detection_data = {
                 "detections": enhanced_detections,
                 "detection_count": len(detections),
@@ -786,6 +825,17 @@ class DetectionVideoService(RawVideoService):
             self._update_detection_stats()
 
             await self._emit_geometric_metrics(environment_id=env_for_camera, camera_id=camera_id)
+            
+            # Total time for this method
+            _total_det_time = (_time.perf_counter() - _proc_start) * 1000
+            
+            # Log granular timing every 10 frames or if slow
+            if frame_number % 10 == 0 or _total_det_time > 50:
+                logger.info(
+                    "[SPEED_OPTIMIZE] DET Cam=%s Frame=%d | Total=%.1fms | RTDETR=%.1fms SpatialLoop=%.1fms | Dets=%d",
+                    camera_id, frame_number, _total_det_time,
+                    _rtdetr_time, _spatial_loop_time, len(detections)
+                )
             
             return detection_data
             
@@ -1847,7 +1897,14 @@ class DetectionVideoService(RawVideoService):
                 frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                 any_frame_processed = False
                 
+                import time as _time
+                _batch_start = _time.perf_counter()
+                _camera_time = 0.0
+                _space_match_time = 0.0
+                _ws_time = 0.0
+                
                 # 1. Collect detections from all cameras
+                _camera_start = _time.perf_counter()
                 for camera_id, data in video_data.items():
                     cap = data.get("video_capture")
                     if cap and cap.isOpened():
@@ -1867,6 +1924,7 @@ class DetectionVideoService(RawVideoService):
                             break
                     else:
                         break
+                _camera_time = (_time.perf_counter() - _camera_start) * 1000
                 
                 # Check if all cameras finished
                 if not any_frame_processed:
@@ -1874,6 +1932,7 @@ class DetectionVideoService(RawVideoService):
                     break
 
                 # 2. Run Space-Based Matching (Cross-Camera)
+                _space_start = _time.perf_counter()
                 if self.space_based_matcher and self.space_based_matcher.enabled:
                     try:
                         # Extract detection dicts for matcher
@@ -1893,8 +1952,10 @@ class DetectionVideoService(RawVideoService):
                                 # DEBUG LOG (Temporary)
                                 pass # logger.warning(f"COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
                                 pass # logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
+                _space_match_time = (_time.perf_counter() - _space_start) * 1000
 
                 # 3. Send Updates and Emit Debug
+                _ws_start = _time.perf_counter()
                 for camera_id, (frame, detection_data) in frame_camera_data.items():
                     # Collect debug points (now with global_ids injected)
                     if self.enable_debug_reprojection:
@@ -1914,6 +1975,7 @@ class DetectionVideoService(RawVideoService):
                          await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
                     
                     frames_processed += 1
+                _ws_time = (_time.perf_counter() - _ws_start) * 1000
 
                 # 4. Emit Debug Frame
                 if self.enable_debug_reprojection and frame_debug_payload:
@@ -1928,6 +1990,18 @@ class DetectionVideoService(RawVideoService):
                     for key in list(self._debug_frame_store.keys()):
                         if key[1] == frame_index:
                             self._debug_frame_store.pop(key, None)
+                
+                # Total batch time
+                _batch_time = (_time.perf_counter() - _batch_start) * 1000
+                
+                # Log frame batch timing every 10 frames or if slow
+                if frame_index % 10 == 0 or _batch_time > 500:
+                    logger.info(
+                        "[SPEED_OPTIMIZE] BATCH Frame=%d | Total=%.1fms | Cameras=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
+                        frame_index, _batch_time,
+                        _camera_time, _space_match_time, _ws_time,
+                        len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
+                    )
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:
