@@ -13,6 +13,7 @@ from app.api.v1.endpoints import detection_processing_tasks
 from app.api.v1.endpoints import environments
 from app.api.v1.endpoints import analytics as analytics_endpoints
 from app.api.v1.endpoints import playback_controls
+from app.api.v1.endpoints import stream
 from app.api.websockets import endpoints as ws_router
 from app.api import health as health_router
 from app.infrastructure.cache.tracking_cache import get_tracking_cache
@@ -249,6 +250,11 @@ app.include_router(
     analytics_endpoints.router,
     prefix=f"{api_v1_router_prefix}/analytics",
     tags=["V1 - Analytics"]
+)
+app.include_router(
+    stream.router,
+    prefix=f"{api_v1_router_prefix}/stream",
+    tags=["V1 - MJPEG Stream"]
 )
 if settings.ENABLE_PLAYBACK_CONTROL:
     app.include_router(

@@ -28,6 +28,7 @@ from app.core.config import settings
 from app.services.raw_video_service import RawVideoService
 from app.models.rtdetr_detector import RTDETRDetector
 from app.utils.detection_annotator import DetectionAnnotator
+from app.utils.mjpeg_streamer import mjpeg_streamer
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
 from app.api.websockets.focus_handler import focus_tracking_handler
 from app.api.websockets.frame_handler import frame_handler
@@ -1129,13 +1130,22 @@ class DetectionVideoService(RawVideoService):
             if self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
                  handoff_zones = self.handoff_service.camera_zones.get(camera_id)
 
-            frame_overlay = self.annotator.create_detection_overlay(
+            # --- Phase 1 & 2 Enhancement: MJPEG Streaming & No Base64 ---
+            # 1. Annotate frame directly (skips Base64 encoding)
+            annotated_frame = self.annotator.annotate_frame(
                 frame,
                 payload_data.get("detections", []),
                 payload_data.get("tracks"),
                 handoff_zones=handoff_zones
             )
-            
+
+            # 2. Push to MJPEG Stream
+            if annotated_frame is not None:
+                jpeg_bytes = self.annotator.frame_to_jpeg_bytes(annotated_frame)
+                if jpeg_bytes:
+                    await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
+
+            # 3. Construct Message (Metadata Only - No Base64)
             # Phase 4: Prepare homography data for WebSocket message
             homography_data = None
             if self.homography_service:
@@ -1202,12 +1212,12 @@ class DetectionVideoService(RawVideoService):
                 "mode": "detection_streaming",  # Distinguish from raw mode
                 "message_type": "detection_update",
                 "camera_data": {
-                    "frame_image_base64": frame_overlay["annotated_b64"],  # Use annotated frame for display
-                    "original_frame_base64": frame_overlay["original_b64"],  # Keep original for reference
+                    "frame_image_base64": None,  # DISABLED for performance (MJPEG used instead)
+                    "original_frame_base64": None,  # DISABLED for performance
                     # Enhanced: Include tracking data if available
                     "tracks": payload_data.get("tracks", []),
-                    "frame_width": frame_overlay["width"],
-                    "frame_height": frame_overlay["height"], 
+                    "frame_width": frame.shape[1],
+                    "frame_height": frame.shape[0], 
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 },
                 # Additional detection-specific data (won't interfere with frontend display)
@@ -1227,17 +1237,22 @@ class DetectionVideoService(RawVideoService):
             
             # Optional on-disk frame cache (sampled) for annotated frames
             try:
-                if getattr(settings, 'STORE_EXTRACTED_FRAMES', False):
+                if getattr(settings, 'STORE_EXTRACTED_FRAMES', False) and annotated_frame is not None:
                     sample_rate = int(getattr(settings, 'FRAME_CACHE_SAMPLE_RATE', 0))
                     if sample_rate and frame_number % sample_rate == 0:
-                        from base64 import b64decode
                         cache_dir = Path(getattr(settings, 'FRAME_CACHE_DIR', './extracted_frames')) / str(task_id) / str(camera_id)
                         cache_dir.mkdir(parents=True, exist_ok=True)
                         out_path = cache_dir / f"frame_{frame_number:06d}.jpg"
-                        b64_str = frame_overlay["annotated_b64"].split(',', 1)[-1]
-                        await asyncio.to_thread(out_path.write_bytes, b64decode(b64_str))
-            except Exception:
-                pass
+                        
+                        # Use already encoded bytes if available, otherwise encode
+                        bytes_to_write = locals().get('jpeg_bytes')
+                        if not bytes_to_write:
+                             bytes_to_write = self.annotator.frame_to_jpeg_bytes(annotated_frame)
+                        
+                        if bytes_to_write:
+                            await asyncio.to_thread(out_path.write_bytes, bytes_to_write)
+            except Exception as e:
+                logger.debug(f"Frame cache error: {e}")
 
             # Send via WebSocket
             success = await binary_websocket_manager.send_json_message(

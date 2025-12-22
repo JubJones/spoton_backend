@@ -316,7 +316,25 @@ class DetectionAnnotator:
             logger.error(f"Error encoding frame to base64: {e}")
             return ""
     
-    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None, handoff_zones: Optional[List[any]] = None) -> Dict[str, str]:
+    def frame_to_jpeg_bytes(self, frame: np.ndarray, quality: int = 85) -> Optional[bytes]:
+        """Convert frame to JPEG bytes for MJPEG streaming (resized to max 640w)."""
+        if frame is None or frame.size == 0:
+            return None
+        try:
+            h, w = frame.shape[:2]
+            if w > 640:
+                scale = 640 / w
+                new_h = int(h * scale)
+                frame = cv2.resize(frame, (640, new_h), interpolation=cv2.INTER_AREA)
+            
+            success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+            if not success:
+                return None
+            return buffer.tobytes()
+        except Exception:
+            return None
+
+    def create_detection_overlay(self, frame: np.ndarray, detections: List[Dict], tracks: Optional[List[Dict]] = None, handoff_zones: Optional[List[any]] = None) -> Dict[str, any]:
         """
         Create both original and annotated frame encodings for WebSocket streaming.
         
@@ -327,7 +345,7 @@ class DetectionAnnotator:
             handoff_zones: Optional list of zones to visualize
             
         Returns:
-            Dictionary with 'original_b64' and 'annotated_b64' keys
+            Dictionary with 'original_b64', 'annotated_b64', and 'annotated_frame' keys
         """
         try:
             # Encode original frame
@@ -340,6 +358,7 @@ class DetectionAnnotator:
             return {
                 "original_b64": original_b64,
                 "annotated_b64": annotated_b64,
+                "annotated_frame": annotated_frame,
                 "width": frame.shape[1] if frame is not None else 0,
                 "height": frame.shape[0] if frame is not None else 0
             }

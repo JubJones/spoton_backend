@@ -15,12 +15,17 @@ const task = await fetch('http://localhost:3847/api/v1/detection-processing-task
   body: JSON.stringify({ environment_id: 'campus' })
 }).then(r => r.json());
 
-// 3. Connect to real-time updates
+// 3. Display Video Stream (MJPEG)
+const imgElement = document.getElementById('camera-view');
+imgElement.src = `http://localhost:3847/api/v1/stream/${task.task_id}/c09`;
+
+// 4. Connect to real-time metadata updates (Overlay)
 const ws = new WebSocket(`ws://localhost:3847/ws/tracking/${task.task_id}`);
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   if (data.type === 'tracking_update') {
-    handleTrackingUpdate(data);
+    // Draw bounding boxes on canvas overlay
+    drawBoundingBoxes(data.camera_data.tracks);
   }
 };
 ```
@@ -203,8 +208,8 @@ renderUptimeTrend(charts.uptime_trend);
 ## WebSocket Communication
 
 ### Connection URLs
-- **Tracking Updates**: `ws://localhost:3847/ws/tracking/{taskId}`
-- **Frame Streaming**: `ws://localhost:3847/ws/frames/{taskId}`
+- **Video Stream (MJPEG)**: `http://localhost:3847/api/v1/stream/{taskId}/{cameraId}` (Use in `<img src="...">`)
+- **Tracking Updates**: `ws://localhost:3847/ws/tracking/{taskId}` (Metadata only)
 - **System Monitoring**: `ws://localhost:3847/ws/system`
 - **Focus Tracking**: `ws://localhost:3847/ws/focus/{taskId}`
 - **Analytics Stream**: `ws://localhost:3847/ws/analytics/{taskId}`
@@ -228,7 +233,8 @@ renderUptimeTrend(charts.uptime_trend);
   "global_frame_index": 123,
   "timestamp_processed_utc": "2025-01-01T10:30:05.456Z",
   "camera_data": {
-    "frame_image_base64": "data:image/jpeg;base64,...",
+    "frame_image_base64": null, // DEPRECATED: Use MJPEG endpoint
+    "original_frame_base64": null, // DEPRECATED: Use MJPEG endpoint
     "tracks": [{
       "track_id": 1,
       "global_id": "person_123",
