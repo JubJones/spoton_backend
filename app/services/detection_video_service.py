@@ -57,6 +57,16 @@ from app.shared.types import CameraID, TrackID
 
 logger = logging.getLogger(__name__)
 
+# Dedicated file logger for [SPEED_OPTIMIZE] timing logs
+speed_optimize_logger = logging.getLogger("speed_optimize")
+speed_optimize_logger.setLevel(logging.INFO)
+_speed_log_path = Path("speed_optimize.log")
+_speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
+_speed_file_handler.setLevel(logging.INFO)
+_speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+speed_optimize_logger.addHandler(_speed_file_handler)
+speed_optimize_logger.propagate = False  # Don't duplicate to console
+
 
 class DetectionVideoService(RawVideoService):
     """
@@ -614,7 +624,7 @@ class DetectionVideoService(RawVideoService):
         
         # Log timing breakdown every 10 frames or if slow (>100ms)
         if frame_number % 10 == 0 or _total_time > 100:
-            logger.info(
+            speed_optimize_logger.info(
                 "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
                 camera_id, frame_number, _total_time,
                 _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
@@ -831,7 +841,7 @@ class DetectionVideoService(RawVideoService):
             
             # Log granular timing every 10 frames or if slow
             if frame_number % 10 == 0 or _total_det_time > 50:
-                logger.info(
+                speed_optimize_logger.info(
                     "[SPEED_OPTIMIZE] DET Cam=%s Frame=%d | Total=%.1fms | RTDETR=%.1fms SpatialLoop=%.1fms | Dets=%d",
                     camera_id, frame_number, _total_det_time,
                     _rtdetr_time, _spatial_loop_time, len(detections)
@@ -1996,7 +2006,7 @@ class DetectionVideoService(RawVideoService):
                 
                 # Log frame batch timing every 10 frames or if slow
                 if frame_index % 10 == 0 or _batch_time > 500:
-                    logger.info(
+                    speed_optimize_logger.info(
                         "[SPEED_OPTIMIZE] BATCH Frame=%d | Total=%.1fms | Cameras=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
                         frame_index, _batch_time,
                         _camera_time, _space_match_time, _ws_time,
