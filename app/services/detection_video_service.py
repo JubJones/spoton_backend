@@ -355,7 +355,19 @@ class DetectionVideoService(RawVideoService):
         for track in tracks:
             track_id = int(track['track_id'])
             current_track_ids.add(track_id)
-            bbox = track['bbox']
+            
+            # Convert bbox_xyxy [x1,y1,x2,y2] to dict format for handoff_service
+            bbox_xyxy = track.get('bbox_xyxy')
+            if not bbox_xyxy or len(bbox_xyxy) < 4:
+                continue
+            x1, y1, x2, y2 = bbox_xyxy[:4]
+            bbox = {
+                'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2,
+                'width': x2 - x1,
+                'height': y2 - y1,
+                'center_x': (x1 + x2) / 2,
+                'center_y': (y1 + y2) / 2,
+            }
             
             # Unique key for this track in this camera
             track_key = f"{camera_id}_{track_id}"
