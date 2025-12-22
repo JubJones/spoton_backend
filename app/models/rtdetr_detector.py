@@ -47,6 +47,13 @@ class RTDETRDetector(AbstractDetector):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._model_loaded_flag = False
         
+        # Performance optimization settings (configurable via env vars)
+        import os
+        self.imgsz = int(os.environ.get("DETECTION_IMGSZ", "640"))
+        self.use_half = os.environ.get("DETECTION_HALF", "true").lower() == "true" and self.device.type == "cuda"
+        
+        logger.info(f"RTDETRDetector configured: imgsz={self.imgsz}, half={self.use_half}, device={self.device}")
+        
         # COCO class names (RT-DETR is trained on COCO)
         self.coco_classes = [
             'person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
@@ -135,7 +142,7 @@ class RTDETRDetector(AbstractDetector):
 
             def _infer():
                 with torch.inference_mode():
-                    return self.model(image, conf=self.confidence_threshold, verbose=False)
+                    return self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
 
             results = await asyncio.to_thread(_infer)
             
