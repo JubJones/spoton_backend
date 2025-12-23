@@ -1567,13 +1567,23 @@ class DetectionVideoService(RawVideoService):
         filtered_metadata = filtered.setdefault("focus_metadata", {})
         filtered_metadata.update(focus_target)
 
-        target_camera = focus_target.get("camera_id")
-        if target_camera and target_camera != camera_id:
+        # Cross-camera tracking: filter by global_id match, not camera_id
+        focused_global_id = focus_target.get("focused_person_id")
+        
+        # Find tracks with matching global_id in this camera
+        matching_tracks = [
+            t for t in detection_data.get("tracks", [])
+            if t.get("global_id") == focused_global_id
+        ]
+        
+        if not matching_tracks:
+            # No matching global_id in this camera - hide all tracks
             filtered["detections"] = []
             filtered["tracks"] = []
             filtered["detection_count"] = 0
             filtered_metadata["active_on_camera"] = False
             return filtered, True
+        
         filtered_metadata["active_on_camera"] = True
 
         target_track_id = focus_target.get("track_id")
@@ -1592,7 +1602,8 @@ class DetectionVideoService(RawVideoService):
         best_track: Optional[Dict[str, Any]] = None
         best_track_iou = -1.0
         track_candidates: List[Dict[str, Any]] = []
-        for track in detection_data.get("tracks", []):
+        # Iterate over matching_tracks (filtered by global_id) instead of all tracks
+        for track in matching_tracks:
             track_bbox = track.get("bbox_xyxy")
             if track_bbox is None:
                 continue
@@ -1613,8 +1624,8 @@ class DetectionVideoService(RawVideoService):
                 best_track = track
                 best_track_iou = iou
 
-        if best_track is None and detection_data.get("tracks"):
-            best_track = detection_data["tracks"][0]
+        if best_track is None and matching_tracks:
+            best_track = matching_tracks[0]
             best_track_iou = 0.0
             focus_bbox = best_track.get("bbox_xyxy")
 
