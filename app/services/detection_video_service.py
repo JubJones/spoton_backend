@@ -1195,18 +1195,10 @@ class DetectionVideoService(RawVideoService):
             if self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
                  handoff_zones = self.handoff_service.camera_zones.get(camera_id)
 
-            # --- Phase 1 & 2 Enhancement: MJPEG Streaming & No Base64 ---
-            # 1. Annotate frame directly (skips Base64 encoding)
-            annotated_frame = self.annotator.annotate_frame(
-                frame,
-                payload_data.get("detections", []),
-                payload_data.get("tracks"),
-                handoff_zones=handoff_zones
-            )
-
-            # 2. Push to MJPEG Stream
-            if annotated_frame is not None:
-                jpeg_bytes = self.annotator.frame_to_jpeg_bytes(annotated_frame)
+            # --- MJPEG Streaming: Send RAW frames (annotations sent via WebSocket) ---
+            # Push raw frame to MJPEG stream (no annotations - frontend draws bboxes from WS data)
+            if frame is not None:
+                jpeg_bytes = self.annotator.frame_to_jpeg_bytes(frame)
                 if jpeg_bytes:
                     await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
 
