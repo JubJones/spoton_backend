@@ -133,6 +133,37 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             pass # logger.debug(f"RT-DETR configuration logging skipped: {e}")
 
+        # Preload RT-DETR detector for configured environments
+        if settings.PRELOAD_RTDETR_DETECTOR:
+            try:
+                from app.models.rtdetr_detector import RTDETRDetector
+                for env_id in settings.PRELOAD_ENVIRONMENTS:
+                    weights_path = detection_video_service._resolve_rtdetr_weights_for_environment(env_id)
+                    if env_id not in detection_video_service.detectors_by_env:
+                        logger.info(f"Preloading RT-DETR detector for environment '{env_id}' from: {weights_path}")
+                        detector = RTDETRDetector(
+                            model_name=weights_path,
+                            confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
+                        )
+                        await detector.load_model()
+                        await detector.warmup()
+                        detection_video_service.detectors_by_env[env_id] = detector
+                        detection_video_service.detector_weights_by_env[env_id] = weights_path
+                        logger.info(f"RT-DETR detector preloaded for '{env_id}'")
+            except Exception as e:
+                logger.warning(f"RT-DETR preload failed (non-fatal): {e}")
+
+        # Preload Re-ID model (FeatureExtractionService)
+        if settings.PRELOAD_REID_MODEL:
+            try:
+                from app.services.feature_extraction_service import FeatureExtractionService
+                logger.info("Preloading Re-ID model (FeatureExtractionService)...")
+                reid_service = FeatureExtractionService()
+                detection_video_service.feature_extraction_service = reid_service
+                logger.info("Re-ID model preloaded successfully")
+            except Exception as e:
+                logger.warning(f"Re-ID model preload failed (non-fatal): {e}")
+
         # Initialize Environment Configuration Service so camera/env endpoints work
         try:
             # Best-effort DB session; service degrades when DB disabled

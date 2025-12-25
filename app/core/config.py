@@ -608,6 +608,9 @@ class Settings(BaseSettings):
     # Lazy initialization toggles to reduce cold start
     PRELOAD_TRACKER_FACTORY: bool = Field(default=True, description="Preload prototype tracker at startup")
     PRELOAD_HOMOGRAPHY: bool = Field(default=True, description="Preload homography matrices at startup")
+    PRELOAD_RTDETR_DETECTOR: bool = Field(default=True, description="Preload RT-DETR detector at startup")
+    PRELOAD_REID_MODEL: bool = Field(default=True, description="Preload Re-ID model at startup")
+    PRELOAD_ENVIRONMENTS: List[str] = Field(default_factory=lambda: ["campus", "factory"], description="Environments to preload models for")
 
     # Trail management settings
     START_TRAIL_CLEANUP: bool = Field(default=True, description="Start global trail cleanup background task")

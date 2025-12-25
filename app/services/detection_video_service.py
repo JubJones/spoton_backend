@@ -234,9 +234,9 @@ class DetectionVideoService(RawVideoService):
             
             # Initialize RT-DETR detector for the requested environment
             weights_path = self._resolve_rtdetr_weights_for_environment(environment_id)
-            logger.info(f"🧠 DETECTION SERVICE INIT: Loading RT-DETR model for '{environment_id}' from: {weights_path}")
 
             if environment_id not in self.detectors_by_env:
+                logger.info(f"🧠 DETECTION SERVICE INIT: Loading RT-DETR model for '{environment_id}' from: {weights_path}")
                 detector = RTDETRDetector(
                     model_name=weights_path,
                     confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
@@ -246,8 +246,8 @@ class DetectionVideoService(RawVideoService):
                 self.detectors_by_env[environment_id] = detector
                 self.detector_weights_by_env[environment_id] = weights_path
             else:
-                # If already loaded, ensure we point the default handle to it
-                logger.info(f"🧠 DETECTION SERVICE INIT: Reusing cached RT-DETR model for '{environment_id}'")
+                # If already loaded (preloaded at startup), just use it
+                logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded RT-DETR model for '{environment_id}'")
 
             # Maintain backward-compatible single-detector reference for existing methods
             self.detector = self.detectors_by_env.get(environment_id)
@@ -268,14 +268,18 @@ class DetectionVideoService(RawVideoService):
             self.handoff_service = HandoffDetectionService()
 
             # Initialize Re-ID Services (Phase 2)
-            try:
-                self.feature_extraction_service = FeatureExtractionService()
+            if self.feature_extraction_service is None:
+                try:
+                    self.feature_extraction_service = FeatureExtractionService()
+                    logger.info("🧠 RE-ID: FeatureExtractionService initialized (on-demand)")
+                except Exception as e:
+                    logger.error(f"❌ RE-ID INIT FAILED: {e}")
+                    self.feature_extraction_service = None
+            else:
+                logger.info("🧠 RE-ID: Using preloaded FeatureExtractionService")
+            
+            if self.handoff_manager is None:
                 self.handoff_manager = HandoffManager()
-                logger.info("🧠 RE-ID: FeatureExtractionService and HandoffManager initialized")
-            except Exception as e:
-                logger.error(f"❌ RE-ID INIT FAILED: {e}")
-                self.feature_extraction_service = None
-                self.handoff_manager = None
             
             # Validate spatial intelligence configuration
             homography_validation = bool(getattr(self.homography_service, "json_homography_matrices", {}))
