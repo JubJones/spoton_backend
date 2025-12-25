@@ -11,8 +11,9 @@ Features:
 - Thread-safe operations for concurrent camera processing
 """
 import logging
+import time
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 import asyncio
 from threading import Lock
@@ -27,6 +28,7 @@ class TrailPoint:
     map_y: float
     timestamp: datetime
     frame_offset: int  # 0 = current, -1 = previous, -2 = two frames ago
+    monotonic_time: float = field(default_factory=time.monotonic)  # For efficient cleanup
 
 
 class TrailManagementService:
@@ -100,12 +102,11 @@ class TrailManagementService:
                 trail = trail[:self.trail_length]
                 self.trails[camera_id][detection_id] = trail
             
-            # logger.debug(f"Updated trail for {camera_id}:{detection_id} - {len(trail)} points")
             return trail.copy()  # Return copy to avoid external modification
     
-    async def get_trail(self, camera_id: str, detection_id: str) -> List[TrailPoint]:
+    def get_trail(self, camera_id: str, detection_id: str) -> List[TrailPoint]:
         """
-        Get current trail for a detection.
+        Get current trail for a detection (synchronous version).
         
         Args:
             camera_id: Camera identifier
@@ -117,6 +118,12 @@ class TrailManagementService:
         with self._lock:
             trail = self.trails.get(camera_id, {}).get(detection_id, [])
             return trail.copy()  # Return copy to avoid external modification
+    
+    async def get_trail_async(self, camera_id: str, detection_id: str) -> List[TrailPoint]:
+        """
+        Get current trail for a detection (async version for compatibility).
+        """
+        return self.get_trail(camera_id, detection_id)
     
     async def get_all_trails_for_camera(self, camera_id: str) -> Dict[str, List[TrailPoint]]:
         """
@@ -139,10 +146,12 @@ class TrailManagementService:
         This prevents memory leaks by removing trails for persons who are no longer
         being detected. Called periodically by background cleanup task.
         
+        OPTIMIZED: Uses monotonic clock for efficient comparison instead of datetime.
+        
         Args:
             max_age_seconds: Maximum age in seconds before trail is removed
         """
-        current_time = datetime.now(timezone.utc)
+        current_monotonic = time.monotonic()
         removed_count = 0
         
         with self._lock:
@@ -150,11 +159,10 @@ class TrailManagementService:
                 for detection_id in list(self.trails[camera_id].keys()):
                     trail = self.trails[camera_id][detection_id]
                     
-                    # Check if trail exists and is old
-                    if trail and (current_time - trail[0].timestamp).total_seconds() > max_age_seconds:
+                    # Check if trail exists and is old using monotonic time
+                    if trail and (current_monotonic - trail[0].monotonic_time) > max_age_seconds:
                         del self.trails[camera_id][detection_id]
                         removed_count += 1
-                        # logger.debug(f"Removed old trail for {camera_id}:{detection_id}")
                 
                 # Clean up empty camera entries
                 if not self.trails[camera_id]:

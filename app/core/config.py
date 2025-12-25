@@ -568,6 +568,10 @@ class Settings(BaseSettings):
     REID_ENABLED: bool = Field(default=True, description="Enable Re-ID feature extraction (disable for performance)")
     HANDOFF_ZONE_THRESHOLD: float = 0.2
     TRACKER_CONFIG_PATH: Optional[str] = None
+    
+    # Performance Optimization Settings
+    FRAME_SKIP: int = Field(default=1, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
+    SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
 
     # (Re-ID similarity settings removed)
 

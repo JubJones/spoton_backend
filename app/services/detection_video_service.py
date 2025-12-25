@@ -1222,12 +1222,12 @@ class DetectionVideoService(RawVideoService):
                         if not is_valid:
                             # logger.debug(f"Skipping invalid map_coords for {camera_id}: ({mx}, {my})")
                             continue
-                        # UPDATE TRAIL for this detection
-                        trail = await self.trail_service.update_trail(
+                        
+                        # GET trail (already updated in _enhance_tracks_with_spatial_intelligence)
+                        # Avoid duplicate update for performance
+                        trail = self.trail_service.get_trail(
                             camera_id=camera_id,
-                            detection_id=detection["detection_id"],
-                            map_x=mx,
-                            map_y=my
+                            detection_id=detection["detection_id"]
                         )
                         
                         # Convert trail to frontend format
@@ -1255,7 +1255,7 @@ class DetectionVideoService(RawVideoService):
                             "projection_successful": True,
                             "foot_point": foot_point,
                             "coordinate_system": detection.get("spatial_data", {}).get("coordinate_system", "bev_map_meters"),
-                            "trail": trail_data  # NEW: Trail data added
+                            "trail": trail_data
                         }
                         mapping_coordinates.append(coord_data)
 
@@ -1435,12 +1435,34 @@ class DetectionVideoService(RawVideoService):
 
         Matches detections to tracks using IoU and center distance so the frontend can
         rely on a consistent `detection_id` instead of frame-local indexes.
+        
+        OPTIMIZED: Uses spatial grid indexing for O(n) average-case instead of O(n*m).
         """
 
         if not detections or not tracks:
             return
 
         assigned_track_ids: Set[int] = set()
+        
+        # Build spatial grid index for tracks (100px cell size)
+        CELL_SIZE = 100.0
+        track_grid: Dict[Tuple[int, int], List[Dict[str, Any]]] = {}
+        
+        for track in tracks:
+            track_bbox = track.get("bbox_xyxy")
+            if not track_bbox or len(track_bbox) != 4:
+                continue
+            if track.get("track_id") is None:
+                continue
+            
+            # Index by center cell
+            cx = (float(track_bbox[0]) + float(track_bbox[2])) / 2.0
+            cy = float(track_bbox[3])  # foot point
+            cell = (int(cx // CELL_SIZE), int(cy // CELL_SIZE))
+            
+            if cell not in track_grid:
+                track_grid[cell] = []
+            track_grid[cell].append(track)
 
         for detection in detections:
             bbox = detection.get("bbox") or {}
@@ -1454,35 +1476,39 @@ class DetectionVideoService(RawVideoService):
 
             detection_bbox = [float(x1), float(y1), float(x2), float(y2)]
             det_center = ((detection_bbox[0] + detection_bbox[2]) / 2.0, detection_bbox[3])
-
+            
+            # Get detection's cell and check neighboring cells
+            det_cell = (int(det_center[0] // CELL_SIZE), int(det_center[1] // CELL_SIZE))
+            
             best_track: Optional[Dict[str, Any]] = None
             best_iou = 0.0
             best_center_dist = float("inf")
 
-            for track in tracks:
-                track_bbox = track.get("bbox_xyxy")
-                if not track_bbox or len(track_bbox) != 4:
-                    continue
+            # Check 3x3 neighborhood of cells for potential matches
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    neighbor_cell = (det_cell[0] + dx, det_cell[1] + dy)
+                    candidate_tracks = track_grid.get(neighbor_cell, [])
+                    
+                    for track in candidate_tracks:
+                        track_bbox = track.get("bbox_xyxy")
+                        track_id = track.get("track_id")
 
-                track_id = track.get("track_id")
-                if track_id is None:
-                    continue
+                        iou = self._calculate_iou(track_bbox, detection_bbox)
+                        track_center = ((float(track_bbox[0]) + float(track_bbox[2])) / 2.0, float(track_bbox[3]))
+                        center_dist = math.hypot(track_center[0] - det_center[0], track_center[1] - det_center[1])
 
-                iou = self._calculate_iou(track_bbox, detection_bbox)
-                track_center = ((float(track_bbox[0]) + float(track_bbox[2])) / 2.0, float(track_bbox[3]))
-                center_dist = math.hypot(track_center[0] - det_center[0], track_center[1] - det_center[1])
-
-                already_assigned = track_id in assigned_track_ids
-                if (
-                    iou > best_iou + 1e-6
-                    or (
-                        abs(iou - best_iou) <= 1e-6
-                        and (center_dist < best_center_dist - 1e-6 or (center_dist <= best_center_dist + 1e-6 and not already_assigned))
-                    )
-                ):
-                    best_track = track
-                    best_iou = iou
-                    best_center_dist = center_dist
+                        already_assigned = track_id in assigned_track_ids
+                        if (
+                            iou > best_iou + 1e-6
+                            or (
+                                abs(iou - best_iou) <= 1e-6
+                                and (center_dist < best_center_dist - 1e-6 or (center_dist <= best_center_dist + 1e-6 and not already_assigned))
+                            )
+                        ):
+                            best_track = track
+                            best_iou = iou
+                            best_center_dist = center_dist
 
             if not best_track:
                 continue
@@ -1912,6 +1938,12 @@ class DetectionVideoService(RawVideoService):
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True
                     break
+                
+                # FRAME SKIP: Only process every Nth frame for performance
+                frame_skip = getattr(settings, 'FRAME_SKIP', 1)
+                if frame_skip > 1 and frame_index % frame_skip != 0:
+                    frame_index += 1
+                    continue
                 
                 # Process all cameras for current frame using BATCH INFERENCE
                 frame_camera_data = {} # Buffer for (frame, detection_data)
