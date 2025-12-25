@@ -1,14 +1,18 @@
 import asyncio
 import logging
-from typing import Dict, Optional, AsyncGenerator
-import time
+import uuid
+from typing import Dict, List, Optional, AsyncGenerator
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
+
 class MJPEGStreamer:
     """
-    Singleton-like manager for MJPEG streams.
-    Manages broadcasting of frames to multiple connected clients per camera/task.
+    Singleton manager for MJPEG streams with multi-subscriber support.
+    
+    Uses a pub/sub pattern where each connected client gets their own queue.
+    This allows multiple simultaneous connections per camera without interference.
     """
     _instance = None
     
@@ -21,12 +25,20 @@ class MJPEGStreamer:
     def __init__(self):
         if self._initialized:
             return
-        # Store latest frame: frames[task_id][camera_id] = bytes
-        self._frames: Dict[str, Dict[str, bytes]] = {}
-        # Validation/Update events: events[task_id][camera_id] = asyncio.Event
-        self._events: Dict[str, Dict[str, asyncio.Event]] = {}
+        
+        # Subscriber queues: {task_id: {camera_id: {subscriber_id: asyncio.Queue}}}
+        self._subscribers: Dict[str, Dict[str, Dict[str, asyncio.Queue]]] = defaultdict(
+            lambda: defaultdict(dict)
+        )
+        
+        # Latest frame cache for new subscribers to get immediate frame
+        self._latest_frames: Dict[str, Dict[str, bytes]] = defaultdict(dict)
+        
+        # Lock for thread-safe subscriber management
+        self._lock = asyncio.Lock()
+        
         self._initialized = True
-        logger.info("MJPEGStreamer initialized")
+        logger.info("MJPEGStreamer initialized with multi-subscriber support")
 
     @classmethod
     def get_instance(cls):
@@ -34,79 +46,129 @@ class MJPEGStreamer:
             cls._instance = cls()
         return cls._instance
 
+    async def subscribe(self, task_id: str, camera_id: str) -> tuple[str, asyncio.Queue]:
+        """
+        Create a new subscriber queue for this camera.
+        
+        Returns:
+            Tuple of (subscriber_id, queue) for this subscription
+        """
+        subscriber_id = str(uuid.uuid4())[:8]
+        queue: asyncio.Queue = asyncio.Queue(maxsize=2)  # Small buffer for backpressure
+        
+        async with self._lock:
+            self._subscribers[task_id][camera_id][subscriber_id] = queue
+            subscriber_count = len(self._subscribers[task_id][camera_id])
+        
+        logger.debug(f"MJPEG subscriber {subscriber_id} connected to {task_id}/{camera_id} (total: {subscriber_count})")
+        
+        # Send latest frame immediately if available (new subscriber gets instant video)
+        latest = self._latest_frames.get(task_id, {}).get(camera_id)
+        if latest:
+            try:
+                queue.put_nowait(latest)
+            except asyncio.QueueFull:
+                pass
+        
+        return subscriber_id, queue
+
+    async def unsubscribe(self, task_id: str, camera_id: str, subscriber_id: str):
+        """
+        Remove subscriber when connection closes.
+        """
+        async with self._lock:
+            if subscriber_id in self._subscribers.get(task_id, {}).get(camera_id, {}):
+                del self._subscribers[task_id][camera_id][subscriber_id]
+                subscriber_count = len(self._subscribers[task_id][camera_id])
+                
+                # Cleanup empty structures
+                if not self._subscribers[task_id][camera_id]:
+                    del self._subscribers[task_id][camera_id]
+                if not self._subscribers[task_id]:
+                    del self._subscribers[task_id]
+                
+                logger.debug(f"MJPEG subscriber {subscriber_id} disconnected from {task_id}/{camera_id} (remaining: {subscriber_count})")
+
     async def push_frame(self, task_id: str, camera_id: str, frame_bytes: bytes):
         """
-        Update the current frame for a specific task and camera.
-        Notifies all waiting clients.
+        Broadcast frame to ALL subscribers for this camera.
+        
+        Non-blocking: drops frames for slow consumers instead of blocking.
         """
-        if not task_id or not camera_id:
+        if not task_id or not camera_id or not frame_bytes:
             return
-
-        # Ensure structures exist
-        if task_id not in self._frames:
-            self._frames[task_id] = {}
-            self._events[task_id] = {}
         
-        if camera_id not in self._events[task_id]:
-            self._events[task_id][camera_id] = asyncio.Event()
-
-        # Update frame
-        self._frames[task_id][camera_id] = frame_bytes
+        # Cache latest frame for new subscribers
+        self._latest_frames[task_id][camera_id] = frame_bytes
         
-        # Notify waiters
-        event = self._events[task_id][camera_id]
-        event.set()
-        event.clear()
+        # Get current subscribers (snapshot to avoid lock during iteration)
+        subscribers = list(self._subscribers.get(task_id, {}).get(camera_id, {}).values())
+        
+        if not subscribers:
+            return
+        
+        # Broadcast to all subscribers
+        for queue in subscribers:
+            try:
+                # Non-blocking put - drop frame if queue full (backpressure)
+                queue.put_nowait(frame_bytes)
+            except asyncio.QueueFull:
+                # Clear queue and put new frame (prefer latest frame over old)
+                try:
+                    while not queue.empty():
+                        queue.get_nowait()
+                    queue.put_nowait(frame_bytes)
+                except:
+                    pass  # Ignore race conditions
 
     async def stream_generator(self, task_id: str, camera_id: str) -> AsyncGenerator[bytes, None]:
         """
-        Yields MJPEG frames for a client.
-        """
-        # Ensure structures exist to avoid key errors if stream connects before first frame
-        if task_id not in self._frames:
-            self._frames[task_id] = {}
-            self._events[task_id] = {}
+        Yields MJPEG frames for a connected client.
         
-        if camera_id not in self._events[task_id]:
-            self._events[task_id][camera_id] = asyncio.Event()
-
-        event = self._events[task_id][camera_id]
-
+        Each client gets their own queue-based subscription.
+        """
+        subscriber_id, queue = await self.subscribe(task_id, camera_id)
+        
         try:
             while True:
-                # Wait for next frame update
-                # We use a timeout to send keepalive/heartbeat if needed, 
-                # but for MJPEG usually just waiting is fine. 
-                # Adding a small timeout to allow checking for disconnects cleanly if needed.
                 try:
-                    await asyncio.wait_for(event.wait(), timeout=1.0)
-                except asyncio.TimeoutError:
-                    # If no new frame for 1 second, just continue (maybe send same frame? or just wait)
-                    # For strict MJPEG, we usually only send when there is a new frame.
-                    # If we don't send anything, the browser just holds the last frame.
-                    pass
-                
-                # Get latest frame
-                frame_data = self._frames.get(task_id, {}).get(camera_id)
-                
-                if frame_data:
+                    # Wait for next frame with timeout
+                    frame_data = await asyncio.wait_for(queue.get(), timeout=5.0)
+                    
                     # MJPEG Frame Format
-                    yield (b'--frame\r\n'
-                           b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n')
-                
-                # event.wait() returns when set() is called. 
-                # Since multiple clients might be waiting on the same event, 
-                # set() -> all wake up. event.clear() happens in push_frame IMMEDIATELEY after set().
-                # WARNING: standardized asyncio.Event usage:
-                # If push_frame calls set() then clear(), clients might miss it if they are not waiting.
-                # BETTER APPROACH: Use a condition variable or just accept that if they miss a frame it's fine (skip).
-                # But Event is level-triggered. set() sets it to true. clear() sets to false.
-                # If we do set() then clear() in push_frame, it acts like a pulse.
-                # Clients waiting will wake up.
-                
+                    yield (
+                        b'--frame\r\n'
+                        b'Content-Type: image/jpeg\r\n\r\n' + frame_data + b'\r\n'
+                    )
+                except asyncio.TimeoutError:
+                    # No frame for 5 seconds - send empty to keep connection alive
+                    # Browser will just hold the last frame
+                    continue
+                    
         except asyncio.CancelledError:
-            pass # logger.debug(f"Client disconnected from stream {task_id}/{camera_id}")
+            logger.debug(f"MJPEG client {subscriber_id} cancelled for {task_id}/{camera_id}")
             raise
+        except GeneratorExit:
+            pass
+        finally:
+            await self.unsubscribe(task_id, camera_id, subscriber_id)
+
+    def get_subscriber_count(self, task_id: str, camera_id: str) -> int:
+        """Get current number of subscribers for a camera."""
+        return len(self._subscribers.get(task_id, {}).get(camera_id, {}))
+
+    def get_stats(self) -> dict:
+        """Get streaming statistics."""
+        total_subscribers = sum(
+            len(cameras)
+            for task in self._subscribers.values()
+            for cameras in task.values()
+        )
+        return {
+            "total_active_subscribers": total_subscribers,
+            "tasks_streaming": len(self._subscribers),
+        }
+
 
 # Global instance
 mjpeg_streamer = MJPEGStreamer()
