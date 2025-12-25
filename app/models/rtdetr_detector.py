@@ -191,3 +191,106 @@ class RTDETRDetector(AbstractDetector):
         except Exception as e:
             logger.error(f"Error during RT-DETR detection: {e}")
             return []
+
+    async def detect_batch(self, images: List[np.ndarray]) -> List[List[Detection]]:
+        """
+        Perform batch person detection on multiple images in a single GPU call.
+        
+        This is more efficient than calling detect() multiple times when processing
+        multiple cameras, as it runs a single GPU inference for all images.
+        
+        Args:
+            images: List of NumPy arrays representing images (BGR format from OpenCV).
+            
+        Returns:
+            List of detection lists, one per input image.
+            
+        Raises:
+            RuntimeError: If the detector model has not been loaded.
+        """
+        if not self._model_loaded_flag or not self.model:
+            raise RuntimeError("Detector model not loaded. Call load_model() first.")
+        
+        if not images:
+            return []
+        
+        # Single image fallback to regular detect
+        if len(images) == 1:
+            result = await self.detect(images[0])
+            return [result]
+        
+        try:
+            import torch
+
+            def _batch_infer():
+                with torch.inference_mode():
+                    # Ultralytics supports list of images for batch inference
+                    return self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+
+            results = await asyncio.to_thread(_batch_infer)
+            
+            # Parse each result
+            batch_detections: List[List[Detection]] = []
+            for i, (result, image) in enumerate(zip(results, images)):
+                try:
+                    detections = self._parse_single_result(result, image)
+                    batch_detections.append(detections)
+                except Exception as e:
+                    logger.error(f"Error parsing batch result {i}: {e}")
+                    batch_detections.append([])
+            
+            return batch_detections
+            
+        except Exception as e:
+            logger.error(f"Error during RT-DETR batch detection: {e}")
+            return [[] for _ in images]
+
+    def _parse_single_result(self, result, image: np.ndarray) -> List[Detection]:
+        """
+        Parse a single inference result into Detection objects.
+        
+        Args:
+            result: Ultralytics inference result object
+            image: Original image for dimension reference
+            
+        Returns:
+            List of Detection objects for persons found
+        """
+        detections_result: List[Detection] = []
+        
+        if hasattr(result, 'boxes') and result.boxes is not None:
+            boxes = result.boxes
+            
+            if boxes.xyxy is not None:
+                box_coords = boxes.xyxy.cpu().numpy()
+                confidences = boxes.conf.cpu().numpy()
+                class_ids = boxes.cls.cpu().numpy().astype(int)
+                
+                original_h, original_w = image.shape[:2]
+                
+                for box, score_val, label_id in zip(box_coords, confidences, class_ids):
+                    # Filter for person class only (class_id = 0 in COCO)
+                    if int(label_id) == self.person_class_id and score_val >= self.confidence_threshold:
+                        x1, y1, x2, y2 = box
+                        
+                        # Clip coordinates to image bounds
+                        x1_clipped = max(0.0, float(x1))
+                        y1_clipped = max(0.0, float(y1))
+                        x2_clipped = min(float(original_w), float(x2))
+                        y2_clipped = min(float(original_h), float(y2))
+                        
+                        # Ensure box has positive area after clipping
+                        if x2_clipped > x1_clipped and y2_clipped > y1_clipped:
+                            class_name = "person"
+                            
+                            detections_result.append(
+                                Detection(
+                                    bbox=BoundingBox(x1=x1_clipped, y1=y1_clipped, x2=x2_clipped, y2=y2_clipped),
+                                    confidence=float(score_val),
+                                    class_id=int(label_id),
+                                    class_name=class_name
+                                )
+                            )
+        
+        return detections_result
+

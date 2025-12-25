@@ -1913,19 +1913,24 @@ class DetectionVideoService(RawVideoService):
                     aborted_due_to_no_clients = True
                     break
                 
-                # Process all cameras for current frame
+                # Process all cameras for current frame using BATCH INFERENCE
                 frame_camera_data = {} # Buffer for (frame, detection_data)
                 frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                 any_frame_processed = False
                 
                 import time as _time
                 _batch_start = _time.perf_counter()
-                _camera_time = 0.0
+                _read_time = 0.0
+                _batch_det_time = 0.0
+                _track_time = 0.0
                 _space_match_time = 0.0
                 _ws_time = 0.0
                 
-                # 1. Collect detections from all cameras
-                _camera_start = _time.perf_counter()
+                # === PHASE 1: Collect all frames from cameras ===
+                _read_start = _time.perf_counter()
+                frames_batch: List[np.ndarray] = []
+                camera_order: List[Tuple[str, np.ndarray]] = []
+                
                 for camera_id, data in video_data.items():
                     cap = data.get("video_capture")
                     if cap and cap.isOpened():
@@ -1933,24 +1938,67 @@ class DetectionVideoService(RawVideoService):
                         if ret:
                             if self.enable_debug_reprojection:
                                 self._debug_frame_store[(camera_id, frame_index)] = frame.copy()
-
-                            # Run enhanced flow stub on frame (routes to detection + tracking)
-                            detection_data = await self.process_frame_with_tracking(
-                                frame, camera_id, frame_index
-                            )
-                            frame_camera_data[camera_id] = (frame, detection_data)
+                            frames_batch.append(frame)
+                            camera_order.append((camera_id, frame))
                             any_frame_processed = True
                         else:
-                            pass # logger.debug(f"End of video reached for camera {camera_id}")
+                            pass # End of video
                             break
                     else:
                         break
-                _camera_time = (_time.perf_counter() - _camera_start) * 1000
+                _read_time = (_time.perf_counter() - _read_start) * 1000
                 
                 # Check if all cameras finished
-                if not any_frame_processed:
+                if not any_frame_processed or not frames_batch:
                     logger.info(f"🔍 SIMPLE DETECTION: All cameras finished at frame {frame_index}")
                     break
+                
+                # === PHASE 2: Run batch detection (single GPU call) ===
+                _det_start = _time.perf_counter()
+                
+                # Get detector (use first camera's environment, they should all match)
+                first_camera_id = camera_order[0][0] if camera_order else None
+                env_for_batch = self._get_environment_for_camera(first_camera_id) or "default" if first_camera_id else "default"
+                detector = self.detectors_by_env.get(env_for_batch) or self.detector
+                
+                if detector and len(frames_batch) > 1:
+                    # Use batch inference for multiple cameras
+                    try:
+                        batch_detections = await detector.detect_batch(frames_batch)
+                    except Exception as e:
+                        logger.error(f"Batch detection failed, falling back to sequential: {e}")
+                        # Fallback: sequential detection
+                        batch_detections = []
+                        for frame in frames_batch:
+                            try:
+                                dets = await detector.detect(frame)
+                                batch_detections.append(dets)
+                            except Exception:
+                                batch_detections.append([])
+                elif detector:
+                    # Single camera, use regular detect
+                    batch_detections = [await detector.detect(frames_batch[0])]
+                else:
+                    batch_detections = [[] for _ in frames_batch]
+                    
+                _batch_det_time = (_time.perf_counter() - _det_start) * 1000
+                
+                # === PHASE 3: Process each camera with pre-computed detections ===
+                _track_start = _time.perf_counter()
+                for (camera_id, frame), raw_detections in zip(camera_order, batch_detections):
+                    # Convert raw detections to enhanced format with spatial intelligence
+                    detection_data = self._process_detections_to_format(
+                        raw_detections, frame, camera_id, frame_index
+                    )
+                    
+                    # Run tracking on the detections (without re-running detection)
+                    detection_data = await self._process_tracking_with_predetected(
+                        frame, camera_id, frame_index, detection_data
+                    )
+                    
+                    frame_camera_data[camera_id] = (frame, detection_data)
+                _track_time = (_time.perf_counter() - _track_start) * 1000
+
 
                 # 2. Run Space-Based Matching (Cross-Camera)
                 _space_start = _time.perf_counter()
@@ -2018,9 +2066,9 @@ class DetectionVideoService(RawVideoService):
                 # Log frame batch timing every 10 frames or if slow
                 if frame_index % 10 == 0 or _batch_time > 500:
                     speed_optimize_logger.info(
-                        "[SPEED_OPTIMIZE] BATCH Frame=%d | Total=%.1fms | Cameras=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
+                        "[SPEED_OPTIMIZE] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
                         frame_index, _batch_time,
-                        _camera_time, _space_match_time, _ws_time,
+                        _read_time, _batch_det_time, _track_time, _space_match_time, _ws_time,
                         len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
                     )
                 
@@ -2051,12 +2099,224 @@ class DetectionVideoService(RawVideoService):
                 logger.info(f"🛑 SIMPLE DETECTION: {reason} (task {task_id})")
                 return True
 
-            logger.info(f"✅ SIMPLE DETECTION: Completed processing - {frames_processed} frames processed")
             return True
 
         except Exception as e:
             logger.error(f"❌ SIMPLE DETECTION: Error in frame processing: {e}")
             return False
+    
+    def _process_detections_to_format(
+        self, 
+        raw_detections: List, 
+        frame: np.ndarray, 
+        camera_id: str, 
+        frame_number: int
+    ) -> Dict[str, Any]:
+        """
+        Convert raw Detection objects to enhanced format with spatial intelligence.
+        
+        This is extracted from process_frame_with_detection to allow batch detection
+        results to be processed without re-running the detector.
+        
+        Args:
+            raw_detections: List of Detection objects from detector
+            frame: Video frame for dimension reference
+            camera_id: Camera identifier
+            frame_number: Frame sequence number
+            
+        Returns:
+            Detection data dictionary with enhanced spatial metadata
+        """
+        frame_height, frame_width = frame.shape[:2]
+        
+        enhanced_detections = []
+        for i, detection in enumerate(raw_detections):
+            bbox_dict = {
+                "x1": detection.bbox.x1,
+                "y1": detection.bbox.y1, 
+                "x2": detection.bbox.x2,
+                "y2": detection.bbox.y2,
+                "width": detection.bbox.x2 - detection.bbox.x1,
+                "height": detection.bbox.y2 - detection.bbox.y1,
+                "center_x": (detection.bbox.x1 + detection.bbox.x2) / 2,
+                "center_y": (detection.bbox.y1 + detection.bbox.y2) / 2
+            }
+            
+            # Apply spatial intelligence
+            map_coords = {"map_x": 0, "map_y": 0}
+            projection_success = False
+            transformation_quality: Optional[float] = None
+            handoff_triggered = False
+            candidate_cameras = []
+            search_roi_payload: Optional[Dict[str, Optional[float]]] = None
+
+            bottom_point: Optional[ImagePoint] = None
+            try:
+                bottom_point = self.bottom_point_extractor.extract_point(
+                    bbox_x=bbox_dict["x1"],
+                    bbox_y=bbox_dict["y1"],
+                    bbox_width=bbox_dict["width"],
+                    bbox_height=bbox_dict["height"],
+                    camera_id=CameraID(camera_id),
+                    person_id=None,
+                    frame_number=frame_number,
+                    timestamp=None,
+                    frame_width=frame_width,
+                    frame_height=frame_height,
+                )
+            except ValueError:
+                pass
+
+            world_point: Optional[WorldPoint] = None
+            if self.world_plane_transformer and bottom_point:
+                try:
+                    world_point = self.world_plane_transformer.transform_point(bottom_point)
+                    transformation_quality = world_point.transformation_quality
+                    map_coords = {"map_x": world_point.x, "map_y": world_point.y}
+                    projection_success = transformation_quality >= 0.5
+                except (KeyError, ValueError):
+                    pass
+
+            # Homography coordinate transformation fallback (legacy)
+            if not projection_success and self.homography_service and bottom_point:
+                fallback_point = (bottom_point.x, bottom_point.y)
+                projected_coords = self.homography_service.project_to_map(camera_id, fallback_point)
+                if projected_coords:
+                    candidate_map_x, candidate_map_y = projected_coords
+                    if self.homography_service.validate_map_coordinate(camera_id, candidate_map_x, candidate_map_y):
+                        map_coords = {"map_x": candidate_map_x, "map_y": candidate_map_y}
+                        projection_success = True
+                        transformation_quality = transformation_quality or 0.8
+
+            if projection_success and map_coords:
+                try:
+                    roi = self.roi_calculator.calculate_roi(
+                        (map_coords["map_x"], map_coords["map_y"]),
+                        time_elapsed=0.0,
+                        transformation_quality=transformation_quality if transformation_quality is not None else 1.0,
+                        shape=self.roi_shape,
+                        source_camera=camera_id,
+                        dest_camera=None,
+                        person_id=None,
+                        timestamp=None,
+                    )
+                    search_roi_payload = roi.to_dict()
+                except Exception:
+                    pass
+
+            # Handoff detection
+            if self.handoff_service:
+                handoff_triggered, candidate_cameras = self.handoff_service.check_handoff_trigger(
+                    camera_id, bbox_dict, frame_width, frame_height
+                )
+            
+            enhanced_detection = {
+                "detection_id": f"det_{i:03d}",
+                "class_name": "person",
+                "class_id": 0,
+                "confidence": detection.confidence,
+                "bbox": bbox_dict,
+                "track_id": None,
+                "global_id": None,
+                "map_coords": map_coords,
+                "spatial_data": {
+                    "handoff_triggered": handoff_triggered,
+                    "candidate_cameras": candidate_cameras,
+                    "coordinate_system": "world_meters" if projection_success else None,
+                    "projection_successful": projection_success,
+                    "transformation_quality": transformation_quality,
+                    "search_roi": search_roi_payload,
+                }
+            }
+            
+            enhanced_detections.append(enhanced_detection)
+        
+        detection_data = {
+            "detections": enhanced_detections,
+            "detection_count": len(raw_detections),
+            "processing_time_ms": 0,  # Not tracked in batch mode
+            "spatial_metadata": {
+                "camera_id": camera_id,
+                "frame_dimensions": {"width": frame_width, "height": frame_height},
+                "homography_available": self.homography_service is not None,
+                "handoff_detection_enabled": self.handoff_service is not None
+            }
+        }
+        
+        # Update statistics
+        self.detection_stats["total_frames_processed"] += 1
+        self.detection_stats["total_detections_found"] += len(raw_detections)
+        self.detection_stats["successful_detections"] += 1
+        
+        return detection_data
+
+    async def _process_tracking_with_predetected(
+        self, 
+        frame: np.ndarray, 
+        camera_id: str, 
+        frame_number: int,
+        detection_data: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        Run tracking and Re-ID on pre-computed detection data.
+        
+        This is similar to process_frame_with_tracking but skips the detection
+        step since detections are already provided from batch inference.
+        
+        Args:
+            frame: Video frame
+            camera_id: Camera identifier
+            frame_number: Frame sequence number
+            detection_data: Pre-computed detection data from _process_detections_to_format
+            
+        Returns:
+            Detection data with tracks added
+        """
+        tracks: List[Dict[str, Any]] = []
+        
+        try:
+            if settings.TRACKING_ENABLED:
+                # Lazy initialization check
+                if camera_id not in self.camera_trackers:
+                    try:
+                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                        if tracker:
+                            self.camera_trackers[camera_id] = tracker
+                    except Exception as e:
+                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+
+            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
+                tracker = self.camera_trackers.get(camera_id)
+                
+                # Convert detections to BoxMOT format
+                np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                
+                # Update tracker
+                tracked_np = await tracker.update(np_dets, frame)
+                
+                # Convert to track dicts
+                tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                
+                # Enhance with spatial intelligence
+                tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                
+                # Apply Re-ID
+                frame_height, frame_width = frame.shape[:2]
+                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                
+        except Exception as e:
+            logger.warning(f"Tracking failed for camera {camera_id} on frame {frame_number}: {e}")
+            tracks = []
+
+        detection_data["tracks"] = tracks
+        
+        try:
+            self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
+        except Exception:
+            pass
+        
+        return detection_data
+
     
     def _collect_world_points(
         self,
