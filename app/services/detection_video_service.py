@@ -408,7 +408,7 @@ class DetectionVideoService(RawVideoService):
                         
                         if x2 > x1 and y2 > y1:
                             patch = frame[y1:y2, x1:x2]
-                            embedding = self.feature_extraction_service.extract(patch)
+                            embedding = await self.feature_extraction_service.extract_async(patch)
                             
                             match_found = False
                             if embedding is not None:
@@ -449,7 +449,7 @@ class DetectionVideoService(RawVideoService):
                             
                             if x2 > x1 and y2 > y1:
                                 patch = frame[y1:y2, x1:x2]
-                                embedding = self.feature_extraction_service.extract(patch)
+                                embedding = await self.feature_extraction_service.extract_async(patch)
                                 if embedding is not None:
                                     # Use current global_id if available, else track_id as temporary global_id
                                     # Phase 3: Get from registry first

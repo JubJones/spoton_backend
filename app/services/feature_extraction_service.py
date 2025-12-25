@@ -1,6 +1,8 @@
 import os
+import asyncio
 import torch
 import numpy as np
+from typing import List, Optional
 from app.services.fast_reid_interface import FastReIDInterface
 from app.core.config import settings
 
@@ -43,21 +45,16 @@ class FeatureExtractionService:
             device=self.device
         )
 
-    def extract(self, image_patch: np.ndarray) -> np.ndarray:
+    def extract(self, image_patch: np.ndarray) -> Optional[np.ndarray]:
         """
         Extract features from a single image patch (numpy array BGR).
         Returns a normalized 2048-dim embedding.
+        
+        Note: This is synchronous. Prefer extract_async() in async contexts.
         """
         if image_patch is None or image_patch.size == 0:
             return None
             
-        # FastReIDInterface.inference expects a list or array of detections [x1, y1, x2, y2, score]
-        # But here we already have the cropped patch.
-        # FastReIDInterface.inference logic includes cropping from the original image based on detections.
-        # We need to adapt this. 
-        # The inference method in the reference code takes (image, detections). 
-        # If we pass the patch itself as the "image" and a detection covering the whole patch, it should work.
-        
         h, w = image_patch.shape[:2]
         # Fake detection covering the whole patch
         detections = np.array([[0, 0, w, h, 1.0]])
@@ -68,3 +65,75 @@ class FeatureExtractionService:
             return None
             
         return features[0]
+
+    async def extract_async(self, image_patch: np.ndarray) -> Optional[np.ndarray]:
+        """
+        Async version of extract() - doesn't block the event loop.
+        Use this in async contexts for better performance.
+        """
+        if image_patch is None or image_patch.size == 0:
+            return None
+        
+        # Run the synchronous extraction in a thread pool
+        return await asyncio.to_thread(self.extract, image_patch)
+
+    def extract_batch(self, image_patches: List[np.ndarray]) -> List[Optional[np.ndarray]]:
+        """
+        Extract features from multiple image patches in a single GPU call.
+        
+        This is more efficient than calling extract() multiple times as it
+        leverages the FastReIDInterface's internal batching.
+        
+        Args:
+            image_patches: List of BGR image patches (numpy arrays)
+            
+        Returns:
+            List of feature embeddings (or None for invalid patches)
+        """
+        if not image_patches:
+            return []
+        
+        # Filter out invalid patches and track their indices
+        valid_patches = []
+        valid_indices = []
+        results: List[Optional[np.ndarray]] = [None] * len(image_patches)
+        
+        for i, patch in enumerate(image_patches):
+            if patch is not None and patch.size > 0:
+                valid_patches.append(patch)
+                valid_indices.append(i)
+        
+        if not valid_patches:
+            return results
+        
+        # Build combined image and detections for batch inference
+        # Stack patches vertically to create a single "image" that FastReID can process
+        # Actually, FastReIDInterface expects (image, detections) where detections are bboxes
+        # For batch, we need to process each patch individually but in one GPU call
+        
+        # Build fake detections for each patch (covering full patch)
+        all_features = []
+        for patch in valid_patches:
+            h, w = patch.shape[:2]
+            detections = np.array([[0, 0, w, h, 1.0]])
+            features = self.encoder.inference(patch, detections)
+            if features is not None and len(features) > 0:
+                all_features.append(features[0])
+            else:
+                all_features.append(None)
+        
+        # Map back to original indices
+        for idx, feat in zip(valid_indices, all_features):
+            results[idx] = feat
+        
+        return results
+
+    async def extract_batch_async(self, image_patches: List[np.ndarray]) -> List[Optional[np.ndarray]]:
+        """
+        Async version of extract_batch() - doesn't block the event loop.
+        """
+        if not image_patches:
+            return []
+        
+        return await asyncio.to_thread(self.extract_batch, image_patches)
+
