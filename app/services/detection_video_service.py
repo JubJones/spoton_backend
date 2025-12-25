@@ -956,6 +956,10 @@ class DetectionVideoService(RawVideoService):
             frame_index = 0
             aborted_due_to_no_clients = False
             
+            # FPS tracking for detection pipeline
+            fps_start_time = time.time()
+            fps_frame_count = 0
+            
             # Process frames from all cameras
             while frame_index < total_frames:
                 # Check if task is still active
@@ -1099,6 +1103,12 @@ class DetectionVideoService(RawVideoService):
                         task_id, "PROCESSING", progress,
                         f"Processed frame {frame_index}/{total_frames} - Found {detection_count} detections"
                     )
+                    # FPS logging
+                    fps_frame_count += 30
+                    fps_elapsed = time.time() - fps_start_time
+                    if fps_elapsed > 0:
+                        current_fps = fps_frame_count / fps_elapsed
+                        logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
                     logger.info(f"🔍 DETECTION PROCESSING: Frame {frame_index}/{total_frames} - {detection_count} detections")
                 
                 frame_index += 1

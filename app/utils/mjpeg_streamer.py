@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import uuid
+import time
 from typing import Dict, List, Optional, AsyncGenerator
 from collections import defaultdict
 
@@ -36,6 +37,11 @@ class MJPEGStreamer:
         
         # Lock for thread-safe subscriber management
         self._lock = asyncio.Lock()
+        
+        # FPS tracking: {task_id: {camera_id: {"frame_count": int, "start_time": float}}}
+        self._fps_counters: Dict[str, Dict[str, Dict[str, float]]] = defaultdict(
+            lambda: defaultdict(lambda: {"frame_count": 0, "start_time": time.time(), "last_log_time": time.time()})
+        )
         
         self._initialized = True
         logger.info("MJPEGStreamer initialized with multi-subscriber support")
@@ -98,6 +104,19 @@ class MJPEGStreamer:
         if not task_id or not camera_id or not frame_bytes:
             return
         
+        # FPS tracking
+        fps_data = self._fps_counters[task_id][camera_id]
+        fps_data["frame_count"] += 1
+        current_time = time.time()
+        
+        # Log FPS every 5 seconds
+        if current_time - fps_data["last_log_time"] >= 5.0:
+            elapsed = current_time - fps_data["start_time"]
+            if elapsed > 0:
+                fps = fps_data["frame_count"] / elapsed
+                logger.info(f"[FPS_DEBUG] Task={task_id[:8]} Camera={camera_id} FPS={fps:.1f} (frames={fps_data['frame_count']} elapsed={elapsed:.1f}s)")
+            fps_data["last_log_time"] = current_time
+        
         # Cache latest frame for new subscribers
         self._latest_frames[task_id][camera_id] = frame_bytes
         
@@ -120,6 +139,7 @@ class MJPEGStreamer:
                     queue.put_nowait(frame_bytes)
                 except:
                     pass  # Ignore race conditions
+
 
     async def stream_generator(self, task_id: str, camera_id: str) -> AsyncGenerator[bytes, None]:
         """
