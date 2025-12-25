@@ -1514,6 +1514,14 @@ class DetectionVideoService(RawVideoService):
             detection["track_assignment_iou"] = round(best_iou, 4)
             detection["track_assignment_center_distance"] = round(best_center_dist, 2)
 
+            # Priority 2 Enhancement: Pre-matched detection+track data
+            # Embed full track data on detection so frontend can display directly
+            # without running expensive IoU matching every frame
+            detection["bbox_xyxy"] = best_track.get("bbox_xyxy")
+            detection["track_confidence"] = best_track.get("confidence")
+            detection["is_matched"] = best_track.get("is_matched", False)
+            detection["class_id"] = best_track.get("class_id", detection.get("class_id", 0))
+
             # logger.debug(
             #     "Detection %s (camera=%s) associated with track %s -> detection_id=%s iou=%.3f",
             #     original_detection_id,
