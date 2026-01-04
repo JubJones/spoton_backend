@@ -32,15 +32,17 @@ RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 # TensorRT 10.x requires CUDA 12.4+ (provided by base image)
 COPY requirements/requirements.txt /tmp/requirements.txt
 
-# Install dependencies - ONNX packages are needed for TensorRT export
-RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
-    pip install --no-cache-dir "faiss-cpu>=1.7.4,<1.8.0" && \
-    pip install --no-cache-dir boxmot==15.0.2 --no-deps && \
-    pip install --no-cache-dir \
+# Install uv for much faster package installation (10-100x faster than pip)
+# Then install all dependencies in one go
+RUN pip install uv && \
+    uv pip install --system -r /tmp/requirements.txt && \
+    uv pip install --system "faiss-cpu>=1.7.4,<1.8.0" && \
+    uv pip install --system --no-deps boxmot==15.0.2 && \
+    uv pip install --system \
     "onnx>=1.12.0,<2.0.0" \
     "onnxslim>=0.1.71" \
     "onnxruntime-gpu" && \
-    pip install --no-cache-dir tensorrt --extra-index-url https://pypi.nvidia.com
+    uv pip install --system --extra-index-url https://pypi.nvidia.com tensorrt
 
 # Copy application code
 COPY ./app /app/app
