@@ -1203,26 +1203,33 @@ class DetectionVideoService(RawVideoService):
         Follows DETECTION.md schema with populated homography and handoff data
         replacing the previous static null values with actual spatial intelligence results.
         """
+        import time as _time
+        _func_start = _time.perf_counter()
+        
         try:
+            # Step 1: Apply focus filter
+            _focus_start = _time.perf_counter()
             payload_data = detection_data
             focus_applied = False
             if task_id is not None:
                 payload_data, focus_applied = self._apply_focus_filter(task_id, camera_id, detection_data)
+            _focus_time = (_time.perf_counter() - _focus_start) * 1000
 
             # Retrieve handoff zones for visualization if available
             handoff_zones = None
             if self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
                  handoff_zones = self.handoff_service.camera_zones.get(camera_id)
 
-            # --- MJPEG Streaming: Send RAW frames (annotations sent via WebSocket) ---
-            # Push raw frame to MJPEG stream (no annotations - frontend draws bboxes from WS data)
+            # Step 2: MJPEG Streaming - encode and push frame
+            _mjpeg_start = _time.perf_counter()
             if frame is not None:
                 jpeg_bytes = self.annotator.frame_to_jpeg_bytes(frame)
                 if jpeg_bytes:
                     await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
+            _mjpeg_time = (_time.perf_counter() - _mjpeg_start) * 1000
 
-            # 3. Construct Message (Metadata Only - No Base64)
-            # Phase 4: Prepare homography data for WebSocket message
+            # Step 3: Prepare homography and mapping data
+            _mapping_start = _time.perf_counter()
             homography_data = None
             if self.homography_service:
                 homography_data = self.homography_service.get_homography_data(camera_id)
@@ -1239,11 +1246,9 @@ class DetectionVideoService(RawVideoService):
                             (self.homography_service.validate_map_coordinate(camera_id, mx, my) if self.homography_service else True)
                         )
                         if not is_valid:
-                            # logger.debug(f"Skipping invalid map_coords for {camera_id}: ({mx}, {my})")
                             continue
                         
                         # GET trail (already updated in _enhance_tracks_with_spatial_intelligence)
-                        # Avoid duplicate update for performance
                         trail = self.trail_service.get_trail(
                             camera_id=camera_id,
                             detection_id=detection["detection_id"]
@@ -1252,19 +1257,18 @@ class DetectionVideoService(RawVideoService):
                         # Convert trail to frontend format
                         trail_data = [
                             {
-                                # Keep frontend-facing fields 'x'/'y' as per workflow frontend
                                 "x": point.map_x,
                                 "y": point.map_y,
                                 "frame_offset": point.frame_offset,
                                 "timestamp": point.timestamp.isoformat()
                             }
-                            for point in trail[:3]  # Last 3 positions
+                            for point in trail[:3]
                         ]
                         
                         # Extract foot point used for projection
                         foot_point = {
                             "image_x": detection["bbox"]["center_x"],
-                            "image_y": detection["bbox"]["y2"]  # Bottom of bounding box
+                            "image_y": detection["bbox"]["y2"]
                         }
                         
                         coord_data = {
@@ -1277,32 +1281,31 @@ class DetectionVideoService(RawVideoService):
                             "trail": trail_data
                         }
                         mapping_coordinates.append(coord_data)
+            _mapping_time = (_time.perf_counter() - _mapping_start) * 1000
 
-            # Create WebSocket message compatible with frontend (same format as raw endpoint)
+            # Step 4: Create WebSocket message
+            _msg_start = _time.perf_counter()
             detection_message = {
-                "type": MessageType.TRACKING_UPDATE.value,  # Compatible with frontend expectation
+                "type": MessageType.TRACKING_UPDATE.value,
                 "task_id": str(task_id),
                 "camera_id": camera_id,
-                "global_frame_index": frame_number,  # Compatible key name
-                "timestamp_processed_utc": datetime.now(timezone.utc).isoformat(),  # Compatible key name
-                "mode": "detection_streaming",  # Distinguish from raw mode
+                "global_frame_index": frame_number,
+                "timestamp_processed_utc": datetime.now(timezone.utc).isoformat(),
+                "mode": "detection_streaming",
                 "message_type": "detection_update",
                 "camera_data": {
-                    "frame_image_base64": None,  # DISABLED for performance (MJPEG used instead)
-                    "original_frame_base64": None,  # DISABLED for performance
-                    # Enhanced: Include tracking data if available
+                    "frame_image_base64": None,
+                    "original_frame_base64": None,
                     "tracks": payload_data.get("tracks", []),
                     "frame_width": frame.shape[1],
                     "frame_height": frame.shape[0], 
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 },
-                # Additional detection-specific data (won't interfere with frontend display)
                 "detection_data": payload_data,
                 "future_pipeline_data": {
                     "tracking_data": {
                         "track_count": len(payload_data.get("tracks", []))
                     } if payload_data.get("tracks") is not None else None,
-                    # Phase 4: Populated homography and mapping data
                     "homography_data": homography_data,
                     "mapping_coordinates": mapping_coordinates if mapping_coordinates else None
                 }
@@ -1310,8 +1313,9 @@ class DetectionVideoService(RawVideoService):
 
             if focus_applied:
                 detection_message["focus"] = payload_data.get("focus_metadata", {})
+            _msg_time = (_time.perf_counter() - _msg_start) * 1000
             
-            # Optional on-disk frame cache (sampled) for annotated frames
+            # Optional on-disk frame cache (sampled)
             try:
                 if getattr(settings, 'STORE_EXTRACTED_FRAMES', False) and annotated_frame is not None:
                     sample_rate = int(getattr(settings, 'FRAME_CACHE_SAMPLE_RATE', 0))
@@ -1320,7 +1324,6 @@ class DetectionVideoService(RawVideoService):
                         cache_dir.mkdir(parents=True, exist_ok=True)
                         out_path = cache_dir / f"frame_{frame_number:06d}.jpg"
                         
-                        # Use already encoded bytes if available, otherwise encode
                         bytes_to_write = locals().get('jpeg_bytes')
                         if not bytes_to_write:
                              bytes_to_write = self.annotator.frame_to_jpeg_bytes(annotated_frame)
@@ -1328,16 +1331,26 @@ class DetectionVideoService(RawVideoService):
                         if bytes_to_write:
                             await asyncio.to_thread(out_path.write_bytes, bytes_to_write)
             except Exception as e:
-                pass # logger.debug(f"Frame cache error: {e}")
+                pass
 
-            # Send via WebSocket
+            # Step 5: Send via WebSocket
+            _ws_start = _time.perf_counter()
             success = await binary_websocket_manager.send_json_message(
                 str(task_id), detection_message, MessageType.TRACKING_UPDATE
+            )
+            _ws_time = (_time.perf_counter() - _ws_start) * 1000
+            
+            _func_total = (_time.perf_counter() - _func_start) * 1000
+            
+            # Log granular timing
+            speed_optimize_logger.info(
+                "[SPEED_DEBUG] send_detection_update | Cam=%s Frame=%d | Total=%.1fms | FocusFilter=%.1fms MJPEG=%.1fms Mapping=%.1fms MsgBuild=%.1fms WsSend=%.1fms",
+                camera_id, frame_number, _func_total,
+                _focus_time, _mjpeg_time, _mapping_time, _msg_time, _ws_time
             )
             
             if success:
                 self.detection_stats["websocket_messages_sent"] += 1
-                # logger.debug(f"📡 DETECTION UPDATE: Sent Phase 4 detection update for task {task_id}, camera {camera_id}, frame {frame_number}")
             else:
                 logger.warning(f"📡 DETECTION UPDATE: Failed to send detection update for task {task_id}")
             
@@ -2177,6 +2190,9 @@ class DetectionVideoService(RawVideoService):
         Returns:
             Detection data dictionary with enhanced spatial metadata
         """
+        import time as _time
+        _func_start = _time.perf_counter()
+        
         frame_height, frame_width = frame.shape[:2]
         
         enhanced_detections = []
@@ -2298,6 +2314,14 @@ class DetectionVideoService(RawVideoService):
         self.detection_stats["total_detections_found"] += len(raw_detections)
         self.detection_stats["successful_detections"] += 1
         
+        _func_total = (_time.perf_counter() - _func_start) * 1000
+        
+        # Log granular timing
+        speed_optimize_logger.info(
+            "[SPEED_DEBUG] _process_detections_to_format | Cam=%s Frame=%d | Total=%.1fms | Dets=%d",
+            camera_id, frame_number, _func_total, len(raw_detections)
+        )
+        
         return detection_data
 
     async def _process_tracking_with_predetected(
@@ -2322,11 +2346,21 @@ class DetectionVideoService(RawVideoService):
         Returns:
             Detection data with tracks added
         """
+        import time as _time
+        _func_start = _time.perf_counter()
+        
         tracks: List[Dict[str, Any]] = []
+        _tracker_init_time = 0.0
+        _convert_dets_time = 0.0
+        _tracker_update_time = 0.0
+        _convert_tracks_time = 0.0
+        _spatial_intel_time = 0.0
+        _reid_time = 0.0
         
         try:
             if settings.TRACKING_ENABLED:
                 # Lazy initialization check
+                _init_start = _time.perf_counter()
                 if camera_id not in self.camera_trackers:
                     try:
                         tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
@@ -2334,25 +2368,36 @@ class DetectionVideoService(RawVideoService):
                             self.camera_trackers[camera_id] = tracker
                     except Exception as e:
                         logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+                _tracker_init_time = (_time.perf_counter() - _init_start) * 1000
 
             if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
                 tracker = self.camera_trackers.get(camera_id)
                 
                 # Convert detections to BoxMOT format
+                _conv_start = _time.perf_counter()
                 np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                _convert_dets_time = (_time.perf_counter() - _conv_start) * 1000
                 
                 # Update tracker
+                _update_start = _time.perf_counter()
                 tracked_np = await tracker.update(np_dets, frame)
+                _tracker_update_time = (_time.perf_counter() - _update_start) * 1000
                 
                 # Convert to track dicts
+                _conv_tracks_start = _time.perf_counter()
                 tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                _convert_tracks_time = (_time.perf_counter() - _conv_tracks_start) * 1000
                 
                 # Enhance with spatial intelligence
+                _spatial_start = _time.perf_counter()
                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                _spatial_intel_time = (_time.perf_counter() - _spatial_start) * 1000
                 
                 # Apply Re-ID
+                _reid_start = _time.perf_counter()
                 frame_height, frame_width = frame.shape[:2]
                 tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                _reid_time = (_time.perf_counter() - _reid_start) * 1000
                 
         except Exception as e:
             logger.warning(f"Tracking failed for camera {camera_id} on frame {frame_number}: {e}")
@@ -2364,6 +2409,16 @@ class DetectionVideoService(RawVideoService):
             self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
         except Exception:
             pass
+        
+        _func_total = (_time.perf_counter() - _func_start) * 1000
+        
+        # Log granular timing
+        speed_optimize_logger.info(
+            "[SPEED_DEBUG] _process_tracking | Cam=%s Frame=%d | Total=%.1fms | TrackerInit=%.1fms ConvDets=%.1fms TrackerUpdate=%.1fms ConvTracks=%.1fms Spatial=%.1fms ReID=%.1fms | Tracks=%d",
+            camera_id, frame_number, _func_total,
+            _tracker_init_time, _convert_dets_time, _tracker_update_time, _convert_tracks_time, _spatial_intel_time, _reid_time,
+            len(tracks)
+        )
         
         return detection_data
 
