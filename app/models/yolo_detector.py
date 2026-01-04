@@ -66,12 +66,21 @@ class YOLODetector(AbstractDetector):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._model_loaded_flag = False
         
+        # Detect if this is a TensorRT engine file
+        self.is_tensorrt = model_name.endswith('.engine')
+        
         # Performance optimization settings (configurable via env vars)
         import os
         self.imgsz = int(os.environ.get("DETECTION_IMGSZ", "640"))
-        self.use_half = os.environ.get("DETECTION_HALF", "true").lower() == "true" and self.device.type == "cuda"
+        # TensorRT engines have precision baked in, so half is not needed
+        # For PyTorch models, use half precision on CUDA for speed
+        if self.is_tensorrt:
+            self.use_half = False  # TensorRT engine has precision already set
+        else:
+            self.use_half = os.environ.get("DETECTION_HALF", "true").lower() == "true" and self.device.type == "cuda"
         
-        logger.info(f"YOLODetector configured: imgsz={self.imgsz}, half={self.use_half}, device={self.device}")
+        model_type = "TensorRT" if self.is_tensorrt else "PyTorch"
+        logger.info(f"YOLODetector configured: type={model_type}, imgsz={self.imgsz}, half={self.use_half}, device={self.device}")
         
         # COCO class names (YOLO is trained on COCO)
         self.coco_classes = [
@@ -92,23 +101,30 @@ class YOLODetector(AbstractDetector):
     
     async def load_model(self):
         """
-        Load the YOLO model.
+        Load the YOLO model (PyTorch .pt or TensorRT .engine).
         """
         if self._model_loaded_flag and self.model is not None:
             return
         
         try:
-            logger.info(f"Loading YOLO model from: {self.model_name} on device: {self.device}...")
+            model_type = "TensorRT engine" if self.is_tensorrt else "PyTorch model"
+            logger.info(f"Loading YOLO {model_type}: {self.model_name} on device: {self.device}...")
+            
+            # Ultralytics YOLO automatically handles .engine files
             self.model = YOLO(self.model_name)
             
-            # Set device
-            if self.device.type == 'cuda' and torch.cuda.is_available():
-                self.model.to('cuda')
-            else:
-                self.model.to('cpu')
+            # For PyTorch models, explicitly set device
+            # TensorRT engines are already device-optimized during export
+            if not self.is_tensorrt:
+                if self.device.type == 'cuda' and torch.cuda.is_available():
+                    self.model.to('cuda')
+                else:
+                    self.model.to('cpu')
             
             self._model_loaded_flag = True
-            logger.info("YOLO model loaded and configured successfully.")
+            logger.info(f"✅ YOLO {model_type} loaded successfully!")
+            if self.is_tensorrt:
+                logger.info("🚀 TensorRT optimization active - expect 3-5x faster inference")
             
         except Exception as e:
             logger.exception(f"Error loading YOLO model: {e}")

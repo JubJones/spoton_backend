@@ -4,6 +4,7 @@
 named as clip_market1501.pt
 
 "yolo11l_campus.pt": "https://drive.google.com/file/d/1kWVPv71FEUgnO3nx7c4X1_NGdGbz19tn/view?usp=sharing"
+"yolo11l_campus.engine": "https://drive.google.com/file/d/12dGBBpXV6dCTY3wwK0L3uUcwPX5xyKZy/view?usp=sharing"
 --
 Alternative from Nota
 "market_aic_sbs_R50-ibn.pth": "https://drive.google.com/file/d/17e9fuLWWorTEPweZJwnM0_4on0cLjiBb/view?usp=sharing"
