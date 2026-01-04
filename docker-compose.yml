@@ -21,6 +21,7 @@ services:
       - ./data:/app/data
       - ./homography_data:/app/homography_data
       - ./weights:/app/weights
+      - ./scripts:/app/scripts # For running TensorRT export inside container
       - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
     env_file:
