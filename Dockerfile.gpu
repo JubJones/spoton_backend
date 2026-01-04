@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     "torchaudio==2.2.1" \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     -r /tmp/requirements.txt && \
-    pip install --no-cache-dir faiss-gpu && \
+    pip install --no-cache-dir "faiss-cpu>=1.7.4,<1.8.0" && \
     pip install --no-cache-dir boxmot==15.0.2 --no-deps && \
     pip install --no-cache-dir tensorrt --extra-index-url https://pypi.nvidia.com
 
