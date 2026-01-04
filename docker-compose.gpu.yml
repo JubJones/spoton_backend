@@ -5,6 +5,11 @@ services:
       args:
         PYTORCH_VARIANT: gpu
     image: spoton_backend_image:gpu
+    # GPU access configuration
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
     deploy:
       resources:
         reservations:

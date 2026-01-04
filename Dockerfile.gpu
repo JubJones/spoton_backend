@@ -1,6 +1,6 @@
 # ---- GPU Dockerfile (Single Stage Optimized) ----
 # Use official PyTorch image with CUDA 12.1 runtime
-FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
+FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
