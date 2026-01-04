@@ -1,6 +1,6 @@
 # ---- GPU Dockerfile (Single Stage Optimized) ----
-# Use official PyTorch image with CUDA 12.1 runtime
-FROM pytorch/pytorch:2.4.1-cuda12.4-cudnn9-runtime
+# Use official PyTorch image with CUDA 12.1 runtime (matches torch 2.2.1+cu121)
+FROM pytorch/pytorch:2.2.1-cuda12.1-cudnn8-runtime
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -31,15 +31,10 @@ RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 # We use --no-deps for boxmot to avoid conflicts
 COPY requirements/requirements.txt /tmp/requirements.txt
 
-# CRITICAL: We constrain torch to 2.2.1 to prevent upgrade, but use the pre-installed one
-# TensorRT is installed from NVIDIA's PyPI index for GPU inference optimization
+# Install application dependencies (PyTorch 2.2.1+cu121 is pre-installed in base image)
 # ONNX packages are needed for TensorRT export
-RUN pip install --no-cache-dir \
-    "torch==2.2.1" \
-    "torchvision==0.17.1" \
-    "torchaudio==2.2.1" \
-    --extra-index-url https://download.pytorch.org/whl/cu121 \
-    -r /tmp/requirements.txt && \
+# TensorRT is installed from NVIDIA's PyPI index for GPU inference optimization
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
     pip install --no-cache-dir "faiss-cpu>=1.7.4,<1.8.0" && \
     pip install --no-cache-dir boxmot==15.0.2 --no-deps && \
     pip install --no-cache-dir \
