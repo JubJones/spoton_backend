@@ -313,16 +313,30 @@ class DetectionVideoService(RawVideoService):
         """Resolve the best YOLO weights path for the given environment.
 
         Resolution order per environment:
-        0) If USE_TENSORRT=true, prefer TensorRT engine files (.engine)
+        0) If USE_TENSORRT=true AND CUDA available, prefer TensorRT engine files (.engine)
         1) Settings override (YOLO_MODEL_PATH_CAMPUS / YOLO_MODEL_PATH_FACTORY)
         2) External base dir (EXTERNAL_WEIGHTS_BASE_DIR) with 'yolo11l_<env>.[pt|engine]'
         3) Local weights directory './weights/yolo11l_<env>.[pt|engine]'
         4) Global default: settings.YOLO_MODEL_PATH or YOLO_MODEL_PATH_TENSORRT
+        
+        Note: Automatically falls back to .pt if CUDA is not available (e.g., on Mac/CPU).
         """
         try:
             import os
+            import torch
+            
             env_key = (environment_id or "").strip().lower()
-            use_tensorrt = getattr(settings, "USE_TENSORRT", False)
+            use_tensorrt_setting = getattr(settings, "USE_TENSORRT", False)
+            
+            # TensorRT requires CUDA - automatically disable on CPU/Mac
+            cuda_available = torch.cuda.is_available()
+            use_tensorrt = use_tensorrt_setting and cuda_available
+            
+            if use_tensorrt_setting and not cuda_available:
+                logger.warning(
+                    "USE_TENSORRT=true but CUDA not available (running on CPU/Mac). "
+                    "Falling back to PyTorch model (.pt)"
+                )
             
             # Determine file extension based on TensorRT setting
             ext = ".engine" if use_tensorrt else ".pt"

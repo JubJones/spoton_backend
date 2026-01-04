@@ -32,6 +32,7 @@ RUN groupadd -r appgroup && useradd --no-log-init -r -g appgroup appuser
 COPY requirements/requirements.txt /tmp/requirements.txt
 
 # CRITICAL: We constrain torch to 2.2.1 to prevent upgrade, but use the pre-installed one
+# TensorRT is installed from NVIDIA's PyPI index for GPU inference optimization
 RUN pip install --no-cache-dir \
     "torch==2.2.1" \
     "torchvision==0.17.1" \
@@ -39,7 +40,8 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cu121 \
     -r /tmp/requirements.txt && \
     pip install --no-cache-dir faiss-gpu && \
-    pip install --no-cache-dir boxmot==15.0.2 --no-deps
+    pip install --no-cache-dir boxmot==15.0.2 --no-deps && \
+    pip install --no-cache-dir tensorrt --extra-index-url https://pypi.nvidia.com
 
 # Copy application code
 COPY ./app /app/app

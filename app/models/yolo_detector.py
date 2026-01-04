@@ -111,7 +111,11 @@ class YOLODetector(AbstractDetector):
             logger.info(f"Loading YOLO {model_type}: {self.model_name} on device: {self.device}...")
             
             # Ultralytics YOLO automatically handles .engine files
-            self.model = YOLO(self.model_name)
+            # For TensorRT engines, explicitly specify task='detect' to avoid auto-detection warning
+            if self.is_tensorrt:
+                self.model = YOLO(self.model_name, task='detect')
+            else:
+                self.model = YOLO(self.model_name)
             
             # For PyTorch models, explicitly set device
             # TensorRT engines are already device-optimized during export
