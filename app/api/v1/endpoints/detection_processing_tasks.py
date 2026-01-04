@@ -1,8 +1,7 @@
 """
 Detection processing tasks API endpoints.
 
-Provides REST API endpoints for RT-DETR detection-enabled video processing tasks
-as outlined in Phase 1: Foundation Setup of the DETECTION.md pipeline requirements.
+Provides REST API endpoints for YOLO detection-enabled video processing tasks.
 
 Endpoints:
 - GET /environments - List detection-capable environments
@@ -32,11 +31,11 @@ router = APIRouter()
 @router.get(
     "/environments",
     response_model=Dict[str, Any],
-    summary="Get available environments for RT-DETR detection processing"
+    summary="Get available environments for YOLO detection processing"
 )
 async def get_available_detection_environments():
     """
-    Get list of available environments for RT-DETR detection processing.
+    Get list of available environments for YOLO detection processing.
     Returns environment configurations with detection capabilities.
     """
     try:
@@ -60,17 +59,17 @@ async def get_available_detection_environments():
         for env_id, env_data in env_groups.items():
             environment = {
                 "environment_id": env_id,
-                "name": f"{env_id.title()} Environment (RT-DETR Detection)",
-                "description": f"RT-DETR detection environment with {len(env_data['cameras'])} cameras and {env_data['total_sub_videos']} video segments",
+                "name": f"{env_id.title()} Environment (YOLO Detection)",
+                "description": f"YOLO detection environment with {len(env_data['cameras'])} cameras and {env_data['total_sub_videos']} video segments",
                 "camera_count": len(env_data["cameras"]),
                 "cameras": env_data["cameras"],
                 "available": True,
                 "total_sub_videos": env_data["total_sub_videos"],
                 "mode": "detection_processing",
                 "detection_features": {
-                    "model": "RT-DETR-l",
+                    "model": "YOLO11-L",
                     "person_detection": True,
-                    "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
+                    "confidence_threshold": settings.YOLO_CONFIDENCE_THRESHOLD,
                     "real_time_processing": True
                 }
             }
@@ -87,10 +86,10 @@ async def get_available_detection_environments():
                 environments.append(
                     {
                         "environment_id": env_id,
-                        "name": f"{template.get('name', env_id.title() + ' Environment')} (RT-DETR Detection)",
+                        "name": f"{template.get('name', env_id.title() + ' Environment')} (YOLO Detection)",
                         "description": template.get(
                             "description",
-                            f"RT-DETR detection environment with {len(camera_ids)} cameras"
+                            f"YOLO detection environment with {len(camera_ids)} cameras"
                         ),
                         "camera_count": len(camera_ids),
                         "cameras": camera_ids,
@@ -98,9 +97,9 @@ async def get_available_detection_environments():
                         "available": True,
                         "mode": "detection_processing",
                         "detection_features": {
-                            "model": "RT-DETR-l",
+                            "model": "YOLO11-L",
                             "person_detection": True,
-                            "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
+                            "confidence_threshold": settings.YOLO_CONFIDENCE_THRESHOLD,
                             "real_time_processing": True
                         }
                     }
@@ -112,12 +111,12 @@ async def get_available_detection_environments():
                 "environments": environments,
                 "total_count": len(environments),
                 "detection_capabilities": {
-                    "model_type": "RT-DETR",
-                    "model_variant": "rtdetr-l",
+                    "model_type": "YOLO",
+                    "model_variant": "yolo11l",
                     "supported_classes": ["person"],
                     "real_time_inference": True,
-                    "confidence_threshold": settings.RTDETR_CONFIDENCE_THRESHOLD,
-                    "input_resolution": f"{settings.RTDETR_INPUT_SIZE}x{settings.RTDETR_INPUT_SIZE}"
+                    "confidence_threshold": settings.YOLO_CONFIDENCE_THRESHOLD,
+                    "input_resolution": f"{settings.YOLO_INPUT_SIZE}x{settings.YOLO_INPUT_SIZE}"
                 }
             },
             "timestamp": str(datetime.utcnow().isoformat())
@@ -135,7 +134,7 @@ async def get_available_detection_environments():
     "/start",
     response_model=schemas.ProcessingTaskCreateResponse,
     status_code=status.HTTP_202_ACCEPTED,
-    summary="Start a new RT-DETR detection processing task"
+    summary="Start a new YOLO detection processing task"
 )
 async def start_detection_processing_task_endpoint(
     params: schemas.ProcessingTaskStartRequest,
@@ -143,12 +142,12 @@ async def start_detection_processing_task_endpoint(
     detection_service: DetectionVideoService = Depends(get_detection_video_service)
 ):
     """
-    Initiates a background task for RT-DETR person detection processing on video data.
+    Initiates a background task for YOLO person detection processing on video data.
 
     Simplified Detection Process:
-    1. Initialize RT-DETR model and detection services
+    1. Initialize YOLO model and detection services
     2. Download video data for the specified environment
-    3. Process frames with RT-DETR person detection
+    3. Process frames with YOLO person detection
     4. Stream detection results via WebSocket with annotated frames
     5. Future pipeline features (tracking, re-ID, homography) are sent as static null values
 
@@ -185,7 +184,7 @@ async def start_detection_processing_task_endpoint(
 
         response = schemas.ProcessingTaskCreateResponse(
             task_id=task_id,
-            message=f"RT-DETR detection processing task for environment '{params.environment_id}' initiated.",
+            message=f"YOLO detection processing task for environment '{params.environment_id}' initiated.",
             status_url=status_url,
             websocket_url=websocket_url
         )
@@ -250,7 +249,7 @@ async def list_detection_processing_tasks(
         for task in all_tasks:
             enhanced_task = dict(task)
             enhanced_task["mode"] = "detection_processing"
-            enhanced_task["detection_model"] = "RT-DETR-l"
+            enhanced_task["detection_model"] = "YOLO11-L"
             enhanced_tasks.append(enhanced_task)
         
         # Get detection statistics
@@ -310,7 +309,7 @@ async def get_detection_processing_task_details(
                 "created_at": task_info.get("created_at"),
                 "updated_at": task_info.get("updated_at"),
                 "mode": "detection_processing",
-                "detection_model": "RT-DETR-l",
+                "detection_model": "YOLO11-L",
                 "detection_statistics": detection_stats
             },
             "timestamp": str(datetime.utcnow().isoformat())

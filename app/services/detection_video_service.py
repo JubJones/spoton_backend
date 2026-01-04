@@ -1,11 +1,10 @@
 """
-Detection video service - integrates RT-DETR person detection with video streaming.
+Detection video service - integrates YOLO person detection with video streaming.
 
-This service extends RawVideoService to add RT-DETR-based person detection capabilities
-as outlined in Phase 1: Foundation Setup of the DETECTION.md pipeline requirements.
+This service extends RawVideoService to add YOLO-based person detection capabilities.
 
 Features:
-- RT-DETR person detection on video frames
+- YOLO11-L person detection on video frames
 - Inherits all raw video streaming capabilities  
 - Basic detection processing and frame annotation
 - WebSocket streaming of detection results
@@ -26,7 +25,7 @@ import json
 
 from app.core.config import settings
 from app.services.raw_video_service import RawVideoService
-from app.models.rtdetr_detector import RTDETRDetector
+from app.models.yolo_detector import YOLODetector
 from app.utils.detection_annotator import DetectionAnnotator
 from app.utils.mjpeg_streamer import mjpeg_streamer
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
@@ -70,10 +69,10 @@ speed_optimize_logger.propagate = False  # Don't duplicate to console
 
 class DetectionVideoService(RawVideoService):
     """
-    Detection video service that extends RawVideoService with RT-DETR person detection.
+    Detection video service that extends RawVideoService with YOLO person detection.
     
     Phase 4 Implementation Features:
-    - RT-DETR person detection on video frames
+    - YOLO11-L person detection on video frames
     - Spatial intelligence with homography coordinate transformations
     - Camera handoff detection for cross-camera tracking
     - WebSocket streaming of enhanced detection results
@@ -91,10 +90,10 @@ class DetectionVideoService(RawVideoService):
     ):
         super().__init__()
         
-        # RT-DETR detector instance (Phase 1)
-        self.detector: Optional[RTDETRDetector] = None
+        # YOLO detector instance
+        self.detector: Optional[YOLODetector] = None
         # Maintain detectors by environment to support separate weights
-        self.detectors_by_env: Dict[str, RTDETRDetector] = {}
+        self.detectors_by_env: Dict[str, YOLODetector] = {}
         # Track the resolved weights per environment for logging/debug
         self.detector_weights_by_env: Dict[str, str] = {}
         
@@ -222,7 +221,7 @@ class DetectionVideoService(RawVideoService):
             pass # logger.debug("Failed to emit geometric metrics: %s", exc)
     
     async def initialize_detection_services(self, environment_id: str = "default", task_id: Optional[uuid.UUID] = None) -> bool:
-        """Initialize detection services including RT-DETR model loading and spatial intelligence services."""
+        """Initialize detection services including YOLO model loading and spatial intelligence services."""
         try:
             logger.info(f"🚀 DETECTION SERVICE INIT: Starting detection service initialization for environment: {environment_id}")
             
@@ -232,14 +231,14 @@ class DetectionVideoService(RawVideoService):
                 logger.error("❌ DETECTION SERVICE INIT: Failed to initialize parent video services")
                 return False
             
-            # Initialize RT-DETR detector for the requested environment
-            weights_path = self._resolve_rtdetr_weights_for_environment(environment_id)
+            # Initialize YOLO detector for the requested environment
+            weights_path = self._resolve_yolo_weights_for_environment(environment_id)
 
             if environment_id not in self.detectors_by_env:
-                logger.info(f"🧠 DETECTION SERVICE INIT: Loading RT-DETR model for '{environment_id}' from: {weights_path}")
-                detector = RTDETRDetector(
+                logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
+                detector = YOLODetector(
                     model_name=weights_path,
-                    confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
+                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
                 )
                 await detector.load_model()
                 await detector.warmup()
@@ -247,7 +246,7 @@ class DetectionVideoService(RawVideoService):
                 self.detector_weights_by_env[environment_id] = weights_path
             else:
                 # If already loaded (preloaded at startup), just use it
-                logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded RT-DETR model for '{environment_id}'")
+                logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded YOLO model for '{environment_id}'")
 
             # Maintain backward-compatible single-detector reference for existing methods
             self.detector = self.detectors_by_env.get(environment_id)
@@ -304,43 +303,43 @@ class DetectionVideoService(RawVideoService):
             logger.error(f"❌ DETECTION SERVICE INIT: Failed to initialize detection services: {e}")
             return False
 
-    def _resolve_rtdetr_weights_for_environment(self, environment_id: str) -> str:
-        """Resolve the best RT-DETR weights path for the given environment.
+    def _resolve_yolo_weights_for_environment(self, environment_id: str) -> str:
+        """Resolve the best YOLO weights path for the given environment.
 
         Resolution order per environment:
-        1) Settings override (RTDETR_MODEL_PATH_CAMPUS / RTDETR_MODEL_PATH_FACTORY)
-        2) External base dir (EXTERNAL_WEIGHTS_BASE_DIR) with '<env>.pt'
-        3) Local weights directory './weights/<env>.pt'
-        4) Global default: settings.RTDETR_MODEL_PATH
+        1) Settings override (YOLO_MODEL_PATH_CAMPUS / YOLO_MODEL_PATH_FACTORY)
+        2) External base dir (EXTERNAL_WEIGHTS_BASE_DIR) with 'yolo11l_<env>.pt'
+        3) Local weights directory './weights/yolo11l_<env>.pt'
+        4) Global default: settings.YOLO_MODEL_PATH
         """
         try:
             import os
             env_key = (environment_id or "").strip().lower()
             # 1) Settings override
-            if env_key == "factory" and getattr(settings, "RTDETR_MODEL_PATH_FACTORY", None):
-                candidate = settings.RTDETR_MODEL_PATH_FACTORY
+            if env_key == "factory" and getattr(settings, "YOLO_MODEL_PATH_FACTORY", None):
+                candidate = settings.YOLO_MODEL_PATH_FACTORY
                 if os.path.isfile(candidate):
                     return candidate
-            if env_key == "campus" and getattr(settings, "RTDETR_MODEL_PATH_CAMPUS", None):
-                candidate = settings.RTDETR_MODEL_PATH_CAMPUS
+            if env_key == "campus" and getattr(settings, "YOLO_MODEL_PATH_CAMPUS", None):
+                candidate = settings.YOLO_MODEL_PATH_CAMPUS
                 if os.path.isfile(candidate):
                     return candidate
 
-            # 2) External base dir
+            # 2) External base dir (YOLO-specific naming)
             if getattr(settings, "EXTERNAL_WEIGHTS_BASE_DIR", None):
-                candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.pt")
+                candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"yolo11l_{env_key}.pt")
                 if os.path.isfile(candidate):
                     return candidate
 
-            # 3) Local weights dir
-            candidate = os.path.join("weights", f"{env_key}.pt")
+            # 3) Local weights dir (YOLO-specific naming: yolo11l_<env>.pt)
+            candidate = os.path.join("weights", f"yolo11l_{env_key}.pt")
             if os.path.isfile(candidate):
                 return candidate
 
             # 4) Global default
-            return settings.RTDETR_MODEL_PATH
+            return settings.YOLO_MODEL_PATH
         except Exception:
-            return settings.RTDETR_MODEL_PATH
+            return settings.YOLO_MODEL_PATH
 
     async def _apply_reid_logic(self, tracks: List[Dict[str, Any]], frame: np.ndarray, camera_id: str, frame_width: int, frame_height: int) -> List[Dict[str, Any]]:
         """
@@ -646,7 +645,7 @@ class DetectionVideoService(RawVideoService):
     
     async def process_frame_with_detection(self, frame: np.ndarray, camera_id: str, frame_number: int) -> Dict[str, Any]:
         """
-        Process frame with RT-DETR detection and Phase 4 spatial intelligence.
+        Process frame with YOLO detection and Phase 4 spatial intelligence.
         
         Args:
             frame: Video frame as numpy array
@@ -658,7 +657,7 @@ class DetectionVideoService(RawVideoService):
         """
         import time as _time
         _proc_start = _time.perf_counter()
-        _rtdetr_time = 0.0
+        _yolo_time = 0.0
         _spatial_loop_time = 0.0
         
         try:
@@ -666,12 +665,12 @@ class DetectionVideoService(RawVideoService):
             env_for_camera = self._get_environment_for_camera(camera_id) or "default"
             detector = self.detectors_by_env.get(env_for_camera) or self.detector
             if not detector:
-                raise RuntimeError("RT-DETR detector not initialized for the current environment")
+                raise RuntimeError("YOLO detector not initialized for the current environment")
             
-            # Run RT-DETR detection
-            _rtdetr_start = _time.perf_counter()
+            # Run YOLO detection
+            _yolo_start = _time.perf_counter()
             detections = await detector.detect(frame)
-            _rtdetr_time = (_time.perf_counter() - _rtdetr_start) * 1000
+            _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
             
             # Calculate processing time
             processing_time = (_time.perf_counter() - _proc_start) * 1000
@@ -846,9 +845,9 @@ class DetectionVideoService(RawVideoService):
             # Log granular timing every 10 frames or if slow
             if frame_number % 10 == 0 or _total_det_time > 50:
                 speed_optimize_logger.info(
-                    "[SPEED_OPTIMIZE] DET Cam=%s Frame=%d | Total=%.1fms | RTDETR=%.1fms SpatialLoop=%.1fms | Dets=%d",
+                    "[SPEED_OPTIMIZE] DET Cam=%s Frame=%d | Total=%.1fms | YOLO=%.1fms SpatialLoop=%.1fms | Dets=%d",
                     camera_id, frame_number, _total_det_time,
-                    _rtdetr_time, _spatial_loop_time, len(detections)
+                    _yolo_time, _spatial_loop_time, len(detections)
                 )
             
             return detection_data
@@ -867,10 +866,10 @@ class DetectionVideoService(RawVideoService):
     
     async def run_detection_pipeline(self, task_id: uuid.UUID, environment_id: str):
         """
-        Main detection pipeline that extends raw video streaming with RT-DETR detection.
+        Main detection pipeline that extends raw video streaming with YOLO detection.
         
         Phase 1 Process:
-        1. Initialize detection services (including RT-DETR)
+        1. Initialize detection services (including YOLO)
         2. Download video data (inherited from parent)
         3. Extract and process frames with detection
         4. Stream detection results via WebSocket
@@ -897,7 +896,7 @@ class DetectionVideoService(RawVideoService):
             if not video_data:
                 raise RuntimeError("Failed to download video data")
             
-            await self._update_task_status(task_id, "PROCESSING", 0.50, "Processing frames with RT-DETR detection")
+            await self._update_task_status(task_id, "PROCESSING", 0.50, "Processing frames with YOLO detection")
             
             # Step 3: Process frames with detection
             logger.info(f"🔍 DETECTION PIPELINE: Step 3/4 - Processing frames with detection for task {task_id}")
@@ -939,7 +938,7 @@ class DetectionVideoService(RawVideoService):
             self._clear_client_watch(task_id)
     
     async def _process_frames_with_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
-        """Process video frames with RT-DETR detection."""
+        """Process video frames with YOLO detection."""
         try:
             logger.info(f"🔍 DETECTION PROCESSING: Processing frames with detection for task {task_id}")
             
@@ -1855,7 +1854,7 @@ class DetectionVideoService(RawVideoService):
         """
         Simplified detection processing pipeline (detection-only).
         
-        Focuses only on person detection with RT-DETR, sends results via WebSocket
+        Focuses only on person detection with YOLO, sends results via WebSocket
         with static null values for future pipeline features (homography-only details).
         """
         pipeline_start = time.time()
@@ -1864,7 +1863,7 @@ class DetectionVideoService(RawVideoService):
             logger.info(f"🎬 DETECTION PIPELINE: Starting simplified detection pipeline for task {task_id}")
             
             # Initialize detection services
-            await self._update_task_status(task_id, "INITIALIZING", 0.10, "Initializing RT-DETR detection services")
+            await self._update_task_status(task_id, "INITIALIZING", 0.10, "Initializing YOLO detection services")
             services_initialized = await self.initialize_detection_services(environment_id)
             if not services_initialized:
                 raise RuntimeError("Failed to initialize detection services")
@@ -1882,7 +1881,7 @@ class DetectionVideoService(RawVideoService):
                 raise RuntimeError("Failed to extract frames")
             
             # Process frames with detection only
-            await self._update_task_status(task_id, "PROCESSING", 0.60, "Processing frames with RT-DETR detection")
+            await self._update_task_status(task_id, "PROCESSING", 0.60, "Processing frames with YOLO detection")
             success = await self._process_frames_simple_detection(task_id, environment_id, video_data)
             if self._task_marked_stopped(task_id):
                 logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
@@ -1917,13 +1916,13 @@ class DetectionVideoService(RawVideoService):
     
     async def _process_frames_simple_detection(self, task_id: uuid.UUID, environment_id: str, video_data: Dict[str, Any]) -> bool:
         """
-        Process frames with simple RT-DETR detection only.
+        Process frames with simple YOLO detection only.
         
         Simplified version that focuses only on detection and annotation,
         sending WebSocket updates with static null values for future features.
         """
         try:
-            logger.info(f"🔍 SIMPLE DETECTION: Starting frame processing with RT-DETR for task {task_id}")
+            logger.info(f"🔍 SIMPLE DETECTION: Starting frame processing with YOLO for task {task_id}")
             
             # Get total frame count
             frame_counts = [data.get("frame_count", 0) for data in video_data.values() if data.get("frame_count", 0) > 0]

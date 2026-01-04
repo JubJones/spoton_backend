@@ -112,46 +112,46 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             pass # logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
-        # Log RT-DETR model path configuration and a resolved sample (campus)
+        # Log YOLO model path configuration and a resolved sample (campus)
         try:
             logger.info(
-                "RT-DETR configuration: default=%s, campus_override=%s, factory_override=%s",
-                settings.RTDETR_MODEL_PATH,
-                settings.RTDETR_MODEL_PATH_CAMPUS or "None",
-                settings.RTDETR_MODEL_PATH_FACTORY or "None",
+                "YOLO configuration: default=%s, campus_override=%s, factory_override=%s",
+                settings.YOLO_MODEL_PATH,
+                settings.YOLO_MODEL_PATH_CAMPUS or "None",
+                settings.YOLO_MODEL_PATH_FACTORY or "None",
             )
             try:
-                resolved_campus = detection_video_service._resolve_rtdetr_weights_for_environment("campus")
+                resolved_campus = detection_video_service._resolve_yolo_weights_for_environment("campus")
                 exists_str = "present" if Path(resolved_campus).exists() else "missing"
                 logger.info(
-                    "RT-DETR resolved weights for 'campus': %s (%s)",
+                    "YOLO resolved weights for 'campus': %s (%s)",
                     resolved_campus,
                     exists_str,
                 )
             except Exception as e:
-                logger.warning(f"Could not resolve RT-DETR weights for 'campus': {e}")
+                logger.warning(f"Could not resolve YOLO weights for 'campus': {e}")
         except Exception as e:
-            pass # logger.debug(f"RT-DETR configuration logging skipped: {e}")
+            pass # logger.debug(f"YOLO configuration logging skipped: {e}")
 
-        # Preload RT-DETR detector for configured environments
-        if settings.PRELOAD_RTDETR_DETECTOR:
+        # Preload YOLO detector for configured environments
+        if settings.PRELOAD_YOLO_DETECTOR:
             try:
-                from app.models.rtdetr_detector import RTDETRDetector
+                from app.models.yolo_detector import YOLODetector
                 for env_id in settings.PRELOAD_ENVIRONMENTS:
-                    weights_path = detection_video_service._resolve_rtdetr_weights_for_environment(env_id)
+                    weights_path = detection_video_service._resolve_yolo_weights_for_environment(env_id)
                     if env_id not in detection_video_service.detectors_by_env:
-                        logger.info(f"Preloading RT-DETR detector for environment '{env_id}' from: {weights_path}")
-                        detector = RTDETRDetector(
+                        logger.info(f"Preloading YOLO detector for environment '{env_id}' from: {weights_path}")
+                        detector = YOLODetector(
                             model_name=weights_path,
-                            confidence_threshold=settings.RTDETR_CONFIDENCE_THRESHOLD
+                            confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
                         )
                         await detector.load_model()
                         await detector.warmup()
                         detection_video_service.detectors_by_env[env_id] = detector
                         detection_video_service.detector_weights_by_env[env_id] = weights_path
-                        logger.info(f"RT-DETR detector preloaded for '{env_id}'")
+                        logger.info(f"YOLO detector preloaded for '{env_id}'")
             except Exception as e:
-                logger.warning(f"RT-DETR preload failed (non-fatal): {e}")
+                logger.warning(f"YOLO preload failed (non-fatal): {e}")
 
         # Preload Re-ID model (FeatureExtractionService)
         if settings.PRELOAD_REID_MODEL:
@@ -274,7 +274,7 @@ api_v1_router_prefix = settings.API_V1_PREFIX
 app.include_router(
     detection_processing_tasks.router,
     prefix=f"{api_v1_router_prefix}/detection-processing-tasks",
-    tags=["V1 - RT-DETR Detection Tasks (Phase 1)"]
+    tags=["V1 - YOLO Detection Tasks"]
 )
 app.include_router(
     environments.router,
@@ -314,7 +314,7 @@ async def health_check(request: Request):
     tracker_factory_state = getattr(request.app.state, 'tracker_factory', None)
     homography_service_state = getattr(request.app.state, 'homography_service', None)
 
-    # Detector is initialized per task (RT-DETR). Do not require preload for health.
+    # Detector is initialized per task (YOLO). Do not require preload for health.
     detector_ready = True
     tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
     homography_ready = False

@@ -447,7 +447,7 @@ class HealthChecker:
             status = "healthy"
             message = "AI models loaded and ready"
             details = {
-                "detector": "RT-DETR",
+                "detector": "YOLO",
                 "tracker": "ByteTrack",
                 "model_warmup_completed": True,
             }

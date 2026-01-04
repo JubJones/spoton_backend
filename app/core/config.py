@@ -529,22 +529,22 @@ class Settings(BaseSettings):
     DB_POOL_RECYCLE: int = Field(default=3600, description="Seconds to recycle DB connections")
     DB_POOL_PRE_PING: bool = Field(default=True, description="Enable pool_pre_ping to detect stale connections")
 
-    DETECTOR_TYPE: str = "rtdetr"
+    DETECTOR_TYPE: str = "yolo"
     PERSON_CLASS_ID: int = 1
     DETECTION_CONFIDENCE_THRESHOLD: float = 0.5
     DETECTION_USE_AMP: bool = False
     
-    # RT-DETR Configuration (Phase 1)
-    RTDETR_MODEL_PATH: str = "weights/campus.pt"
+    # YOLO Configuration (YOLO11-L)
+    YOLO_MODEL_PATH: str = "weights/yolo11l_campus.pt"
     # Optional per-environment model overrides. If provided and file exists,
     # detection will use these weights for the corresponding environment.
-    RTDETR_MODEL_PATH_CAMPUS: Optional[str] = None
-    RTDETR_MODEL_PATH_FACTORY: Optional[str] = None
+    YOLO_MODEL_PATH_CAMPUS: Optional[str] = None
+    YOLO_MODEL_PATH_FACTORY: Optional[str] = None
     # Optional external weights directory (e.g., sibling repo with weights)
     EXTERNAL_WEIGHTS_BASE_DIR: Optional[str] = None
-    RTDETR_CONFIDENCE_THRESHOLD: float = 0.5
-    RTDETR_NMS_THRESHOLD: float = 0.45
-    RTDETR_INPUT_SIZE: int = 640
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.5
+    YOLO_NMS_THRESHOLD: float = 0.45
+    YOLO_INPUT_SIZE: int = 640
     DETECTION_ANNOTATION_ENABLED: bool = True
     DETECTION_SAVE_ORIGINAL_FRAMES: bool = True
     TRACKER_TYPE: str = "bytetrack"
@@ -608,7 +608,7 @@ class Settings(BaseSettings):
     # Lazy initialization toggles to reduce cold start
     PRELOAD_TRACKER_FACTORY: bool = Field(default=True, description="Preload prototype tracker at startup")
     PRELOAD_HOMOGRAPHY: bool = Field(default=True, description="Preload homography matrices at startup")
-    PRELOAD_RTDETR_DETECTOR: bool = Field(default=True, description="Preload RT-DETR detector at startup")
+    PRELOAD_YOLO_DETECTOR: bool = Field(default=True, description="Preload YOLO detector at startup")
     PRELOAD_REID_MODEL: bool = Field(default=True, description="Preload Re-ID model at startup")
     PRELOAD_ENVIRONMENTS: List[str] = Field(default_factory=lambda: ["campus", "factory"], description="Environments to preload models for")
 
