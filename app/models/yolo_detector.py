@@ -21,6 +21,24 @@ from .base_models import AbstractDetector, Detection, BoundingBox
 
 logger = logging.getLogger(__name__)
 
+# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY
+from pathlib import Path
+
+class SpeedDebugFilter(logging.Filter):
+    """Filter to only allow [SPEED_DEBUG] messages"""
+    def filter(self, record):
+        return '[SPEED_DEBUG]' in record.getMessage()
+
+speed_debug_logger = logging.getLogger("speed_debug_yolo")
+speed_debug_logger.setLevel(logging.INFO)
+_speed_log_path = Path("speed_debug.log")
+_speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
+_speed_file_handler.setLevel(logging.INFO)
+_speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+_speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
+speed_debug_logger.addHandler(_speed_file_handler)
+speed_debug_logger.propagate = True  # Also show in console
+
 
 class YOLODetector(AbstractDetector):
     """
@@ -129,18 +147,28 @@ class YOLODetector(AbstractDetector):
         if not self._model_loaded_flag or not self.model:
             raise RuntimeError("Detector model not loaded. Call load_model() first.")
         
+        import time as _time
+        _total_start = _time.perf_counter()
+        
         try:
             # Run inference without tracking gradients and offload to thread to avoid blocking event loop
             import asyncio
             import torch
 
+            _thread_start = _time.perf_counter()
+            
             def _infer():
+                _infer_start = _time.perf_counter()
                 with torch.inference_mode():
-                    return self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                _infer_time = (_time.perf_counter() - _infer_start) * 1000
+                return result, _infer_time
 
-            results = await asyncio.to_thread(_infer)
+            results, _gpu_infer_time = await asyncio.to_thread(_infer)
+            _thread_time = (_time.perf_counter() - _thread_start) * 1000
             
             # Process results
+            _parse_start = _time.perf_counter()
             detections_result: List[Detection] = []
             
             if len(results) > 0:
@@ -180,6 +208,15 @@ class YOLODetector(AbstractDetector):
                                         )
                                     )
             
+            _parse_time = (_time.perf_counter() - _parse_start) * 1000
+            _total_time = (_time.perf_counter() - _total_start) * 1000
+            
+            # Log detailed timing to file and console
+            speed_debug_logger.info(
+                "[SPEED_DEBUG] YOLO.detect | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | Dets=%d | ImgShape=%s",
+                _total_time, _thread_time, _gpu_infer_time, _parse_time, len(detections_result), image.shape[:2]
+            )
+            
             return detections_result
             
         except Exception as e:
@@ -215,15 +252,24 @@ class YOLODetector(AbstractDetector):
         
         try:
             import torch
+            import time as _time
+            
+            _batch_total_start = _time.perf_counter()
 
             def _batch_infer():
+                _infer_start = _time.perf_counter()
                 with torch.inference_mode():
                     # Ultralytics supports list of images for batch inference
-                    return self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                _infer_time = (_time.perf_counter() - _infer_start) * 1000
+                return result, _infer_time
 
-            results = await asyncio.to_thread(_batch_infer)
+            _thread_start = _time.perf_counter()
+            results, _gpu_infer_time = await asyncio.to_thread(_batch_infer)
+            _thread_time = (_time.perf_counter() - _thread_start) * 1000
             
             # Parse each result
+            _parse_start = _time.perf_counter()
             batch_detections: List[List[Detection]] = []
             for i, (result, image) in enumerate(zip(results, images)):
                 try:
@@ -232,6 +278,16 @@ class YOLODetector(AbstractDetector):
                 except Exception as e:
                     logger.error(f"Error parsing batch result {i}: {e}")
                     batch_detections.append([])
+            _parse_time = (_time.perf_counter() - _parse_start) * 1000
+            
+            _batch_total_time = (_time.perf_counter() - _batch_total_start) * 1000
+            
+            # Detailed timing log to file and console
+            total_dets = sum(len(d) for d in batch_detections)
+            speed_debug_logger.info(
+                "[SPEED_DEBUG] YOLO.detect_batch | BatchSize=%d | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | TotalDets=%d",
+                len(images), _batch_total_time, _thread_time, _gpu_infer_time, _parse_time, total_dets
+            )
             
             return batch_detections
             

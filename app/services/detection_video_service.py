@@ -56,15 +56,21 @@ from app.shared.types import CameraID, TrackID
 
 logger = logging.getLogger(__name__)
 
-# Dedicated file logger for [SPEED_OPTIMIZE] timing logs
-speed_optimize_logger = logging.getLogger("speed_optimize")
+# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY
+class SpeedDebugFilter(logging.Filter):
+    """Filter to only allow [SPEED_DEBUG] messages"""
+    def filter(self, record):
+        return '[SPEED_DEBUG]' in record.getMessage()
+
+speed_optimize_logger = logging.getLogger("speed_debug_pipeline")
 speed_optimize_logger.setLevel(logging.INFO)
-_speed_log_path = Path("speed_optimize.log")
+_speed_log_path = Path("speed_debug.log")
 _speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
 _speed_file_handler.setLevel(logging.INFO)
 _speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+_speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
 speed_optimize_logger.addHandler(_speed_file_handler)
-speed_optimize_logger.propagate = False  # Don't duplicate to console
+speed_optimize_logger.propagate = True  # Also show in console
 
 
 class DetectionVideoService(RawVideoService):
@@ -2108,14 +2114,13 @@ class DetectionVideoService(RawVideoService):
                 # Total batch time
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
                 
-                # Log frame batch timing every 10 frames or if slow
-                if frame_index % 10 == 0 or _batch_time > 500:
-                    speed_optimize_logger.info(
-                        "[SPEED_OPTIMIZE] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
-                        frame_index, _batch_time,
-                        _read_time, _batch_det_time, _track_time, _space_match_time, _ws_time,
-                        len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
-                    )
+                # Log frame batch timing EVERY FRAME for debugging
+                speed_optimize_logger.info(
+                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
+                    frame_index, _batch_time,
+                    _read_time, _batch_det_time, _track_time, _space_match_time, _ws_time,
+                    len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
+                )
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:
