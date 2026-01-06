@@ -581,6 +581,12 @@ class DetectionVideoService(RawVideoService):
             if not camera_ids:
                  logger.warning(f"No cameras found for env {environment_id} in settings.VIDEO_SETS")
 
+            # GROUND TRUTH OVERRIDE: Skip actual tracker initialization
+            if settings.USE_GROUND_TRUTH:
+                logger.info("🛡️ TRACKING INIT: Ground Truth Mode ENABLED. Skipping tracker instantiation.")
+                self.camera_trackers = {} # Empty dict
+                return True
+
             # Create trackers for each camera (keyed by the real task_id)
             self.camera_trackers = {}
             for camera_id in camera_ids:

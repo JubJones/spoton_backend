@@ -78,7 +78,9 @@ async def lifespan(app_instance: FastAPI):
 
         # Preload tracker factory (ByteTrack prototype)
         tracker_factory = CameraTrackerFactory(device=device)
-        if settings.PRELOAD_TRACKER_FACTORY:
+        if settings.USE_GROUND_TRUTH:
+            logger.info("🛡️ STARTUP: Ground Truth Mode ENABLED. Skipping tracker prototype preload.")
+        elif settings.PRELOAD_TRACKER_FACTORY:
             try:
                 await tracker_factory.preload_prototype_tracker()
             except Exception as e:
@@ -320,7 +322,10 @@ async def health_check(request: Request):
 
     # Detector is initialized per task (YOLO). Do not require preload for health.
     detector_ready = True
-    tracker_factory_ready = tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
+    # If using Ground Truth, we don't care about the prototype tracker
+    tracker_factory_ready = (
+        tracker_factory_state and tracker_factory_state._prototype_tracker_loaded
+    ) or settings.USE_GROUND_TRUTH
     homography_ready = False
     if homography_service_state is not None:
         try:
