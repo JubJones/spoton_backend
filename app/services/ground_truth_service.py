@@ -116,6 +116,19 @@ class GroundTruthService:
                         tracks_by_frame[frame_num] = []
                     tracks_by_frame[frame_num].append(track_data)
             
+            # 1. TRACE: Ingestion
+            total_frames = len(tracks_by_frame)
+            total_tracks = sum(len(t) for t in tracks_by_frame.values())
+            first_frame_idx = sorted(list(tracks_by_frame.keys()))[0] if tracks_by_frame else -1
+            sample_track = tracks_by_frame[first_frame_idx][0] if tracks_by_frame and tracks_by_frame[first_frame_idx] else "None"
+            
+            logger.info(
+                f"🛡️ [GT-TRACE-1] Ingested {gt_file}. "
+                f"Total Frames: {total_frames}. Total Tracks: {total_tracks}. "
+                f"Frame Range: {first_frame_idx} -> {sorted(list(tracks_by_frame.keys()))[-1]}. "
+                f"Sample Track (Frame {first_frame_idx}): {sample_track}"
+            )
+
             self._cache[camera_id] = tracks_by_frame
             logger.info(f"Loaded {len(tracks_by_frame)} frames of GT data for {camera_id}")
             return True
@@ -136,6 +149,11 @@ class GroundTruthService:
                  return []
         
         tracks = self._cache.get(camera_id, {}).get(frame_number, [])
+        
+        # 2. TRACE: Utilization (Lookup) - Log every 60 frames to avoid spam, or on error
+        if frame_number % 60 == 0:
+             logger.info(f"🛡️ [GT-TRACE-2] Lookup Cam={camera_id} Frame={frame_number}. Found {len(tracks)} tracks.")
+
         if not tracks:
              # Force log on EVERY blank frame for a moment to verify execution path
              frames = sorted(list(self._cache[camera_id].keys()))

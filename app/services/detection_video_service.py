@@ -623,7 +623,11 @@ class DetectionVideoService(RawVideoService):
             tracks = self.ground_truth_service.get_tracks_for_frame(camera_id, frame_number)
 
             if tracks:
-                 logger.info(f"🛡️ [GT-DEBUG] Cam={camera_id} Frame={frame_number} | Found {len(tracks)} tracks. Sample: {tracks[0]}")
+                 # 3. TRACE: Usage (As Detection)
+                 if frame_number % 60 == 0:
+                     logger.info(f"🛡️ [GT-TRACE-3] Using {len(tracks)} GT tracks as detections for Cam={camera_id} Frame={frame_number}.")
+                 
+                 logger.debug(f"🛡️ [GT-DEBUG] Cam={camera_id} Frame={frame_number} | Found {len(tracks)} tracks. Sample: {tracks[0]}")
                  tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
             elif frame_number % 30 == 0:
                  # Diagnostic: Why are there no tracks?
