@@ -1,0 +1,118 @@
+"""
+Ground Truth Service
+
+Responsible for loading and serving pre-computed detection/track data from disk.
+Simulates a perfect detector/tracker for testing and validation purposes.
+"""
+
+import logging
+import os
+from pathlib import Path
+from typing import Dict, Any, List, Optional
+import math
+
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
+
+class GroundTruthService:
+    """
+    Service to load and serve ground truth data from MOTChallenge-like format files.
+    """
+
+    def __init__(self, data_dir: str = None):
+        self.data_dir = data_dir or settings.GROUND_TRUTH_DATA_DIR
+        self._cache: Dict[str, Dict[int, List[Dict[str, Any]]]] = {} # camera_id -> {frame_num -> [tracks]}
+        logger.info(f"GroundTruthService initialized with data_dir: {self.data_dir}")
+
+    def load_tracks_for_camera(self, camera_id: str) -> bool:
+        """
+        Loads ground truth data for a specific camera.
+        Expected file path: <data_dir>/<camera_id>/gt/gt.txt or similar.
+        We will try standard MOT folder structure: {data_dir}/train/{camera_id}/gt/gt.txt
+        Or direct: {data_dir}/{camera_id}.txt
+        """
+        
+        # Try a few common path patterns
+        possible_paths = [
+            Path(self.data_dir) / camera_id / "gt" / "gt.txt",
+            Path(self.data_dir) / "train" / camera_id / "gt" / "gt.txt",
+            Path(self.data_dir) / f"{camera_id}.txt",
+        ]
+
+        gt_file = None
+        for p in possible_paths:
+            if p.exists():
+                gt_file = p
+                break
+        
+        if not gt_file:
+            logger.warning(f"Ground truth file not found for camera {camera_id}. Searched: {possible_paths}")
+            return False
+
+        logger.info(f"Loading ground truth for {camera_id} from {gt_file}")
+        
+        tracks_by_frame: Dict[int, List[Dict[str, Any]]] = {}
+        
+        try:
+            with open(gt_file, 'r') as f:
+                for line in f:
+                    parts = line.strip().split(',')
+                    if len(parts) < 6:
+                        continue
+                    
+                    # Format: frame, id, left, top, width, height, conf, class, visibility
+                    frame_num = int(parts[0])
+                    track_id = int(parts[1])
+                    left = float(parts[2])
+                    top = float(parts[3])
+                    width = float(parts[4])
+                    height = float(parts[5])
+                    
+                    # Optional fields
+                    conf = float(parts[6]) if len(parts) > 6 else 1.0
+                    class_id = int(float(parts[7])) if len(parts) > 7 else 1  # Default to person
+                    visibility = float(parts[8]) if len(parts) > 8 else 1.0
+
+                    # Simulate detection/track object
+                    track_data = {
+                        "track_id": track_id,
+                        "global_id": f"global_{track_id}", # Simple pass-through for now, or could come from file if format differs
+                        "class_id": class_id,
+                        "confidence": conf,
+                        "bbox_xyxy": [left, top, left + width, top + height],
+                        "bbox": {
+                            "x1": left,
+                            "y1": top,
+                            "x2": left + width,
+                            "y2": top + height,
+                            "width": width,
+                            "height": height,
+                            "center_x": left + width / 2,
+                            "center_y": top + height / 2
+                        }, 
+                        "visibility": visibility
+                    }
+                    
+                    if frame_num not in tracks_by_frame:
+                        tracks_by_frame[frame_num] = []
+                    tracks_by_frame[frame_num].append(track_data)
+            
+            self._cache[camera_id] = tracks_by_frame
+            logger.info(f"Loaded {len(tracks_by_frame)} frames of GT data for {camera_id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to load GT file {gt_file}: {e}")
+            return False
+
+    def get_tracks_for_frame(self, camera_id: str, frame_number: int) -> List[Dict[str, Any]]:
+        """
+        Retrieve tracks for a given frame and camera.
+        """
+        if camera_id not in self._cache:
+             # Lazy load
+             if not self.load_tracks_for_camera(camera_id):
+                 return []
+        
+        return self._cache.get(camera_id, {}).get(frame_number, [])

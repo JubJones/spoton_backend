@@ -624,6 +624,10 @@ class Settings(BaseSettings):
     # WebSocket payload limits
     WS_TRACKING_TRAJECTORY_POINTS_LIMIT: int = Field(default=50, description="Max trajectory points to include per person in WS payloads")
 
+    # Ground Truth Mode
+    USE_GROUND_TRUTH: bool = Field(default=False, description="Enable Ground Truth mode (bypasses ML inference)")
+    GROUND_TRUTH_DATA_DIR: str = Field(default="/data/mtmmc", description="Directory containing ground truth data files")
+
     # Export settings
     EXPORT_BASE_DIR: str = "./exports"
     EXPORT_EXPIRY_HOURS: int = 24

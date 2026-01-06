@@ -134,7 +134,9 @@ async def lifespan(app_instance: FastAPI):
             pass # logger.debug(f"YOLO configuration logging skipped: {e}")
 
         # Preload YOLO detector for configured environments
-        if settings.PRELOAD_YOLO_DETECTOR:
+        if settings.USE_GROUND_TRUTH:
+            logger.info("🛡️ STARTUP: Ground Truth Mode ENABLED. Skipping YOLO detector preload.")
+        elif settings.PRELOAD_YOLO_DETECTOR:
             try:
                 from app.models.yolo_detector import YOLODetector
                 for env_id in settings.PRELOAD_ENVIRONMENTS:
@@ -154,7 +156,9 @@ async def lifespan(app_instance: FastAPI):
                 logger.warning(f"YOLO preload failed (non-fatal): {e}")
 
         # Preload Re-ID model (FeatureExtractionService)
-        if settings.PRELOAD_REID_MODEL:
+        if settings.USE_GROUND_TRUTH:
+            logger.info("🛡️ STARTUP: Ground Truth Mode ENABLED. Skipping Re-ID model preload.")
+        elif settings.PRELOAD_REID_MODEL:
             try:
                 from app.services.feature_extraction_service import FeatureExtractionService
                 logger.info("Preloading Re-ID model (FeatureExtractionService)...")

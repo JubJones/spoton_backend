@@ -24,12 +24,15 @@ services:
       - ./scripts:/app/scripts # For running TensorRT export inside container
       - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
+      - /D/MTMMC:/data/mtmmc # Mount D:\MTMMC to /data/mtmmc (Docker Desktop syntax for Windows host)
     env_file:
       - .env
     environment:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
+      - USE_GROUND_TRUTH=true
+      - GROUND_TRUTH_DATA_DIR=/data/mtmmc
     depends_on:
       timescaledb:
         condition: service_healthy

@@ -53,6 +53,7 @@ from app.services.handoff_manager import HandoffManager
 from app.services.global_person_registry import GlobalPersonRegistry
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
+from app.services.ground_truth_service import GroundTruthService
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,9 @@ class DetectionVideoService(RawVideoService):
         # Phase 4: Spatial intelligence services
         self.homography_service: Optional[HomographyService] = homography_service
         self.handoff_service: Optional[HandoffDetectionService] = None
+
+        # Ground Truth Service
+        self.ground_truth_service: Optional[GroundTruthService] = None
         
         # Trail management service for 2D mapping feature
         self.trail_service = trail_service or TrailManagementService(trail_length=getattr(settings, 'TRAIL_LENGTH', 3))
@@ -237,25 +241,33 @@ class DetectionVideoService(RawVideoService):
                 logger.error("❌ DETECTION SERVICE INIT: Failed to initialize parent video services")
                 return False
             
-            # Initialize YOLO detector for the requested environment
-            weights_path = self._resolve_yolo_weights_for_environment(environment_id)
-
-            if environment_id not in self.detectors_by_env:
-                logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
-                detector = YOLODetector(
-                    model_name=weights_path,
-                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                )
-                await detector.load_model()
-                await detector.warmup()
-                self.detectors_by_env[environment_id] = detector
-                self.detector_weights_by_env[environment_id] = weights_path
+            # Check for Ground Truth Mode
+            if settings.USE_GROUND_TRUTH:
+                logger.info(f"🛡️ DETECTION SERVICE INIT: Ground Truth Mode ENABLED for '{environment_id}'. Bypassing ML model loading.")
+                self.ground_truth_service = GroundTruthService()
+                # We can return true here, ensuring minimal initialization for other components if needed
+                # But we still might want basic services like Homography for spatial coord simulation if GT doesn't have it?
+                # For now, let's proceed to initialize spatial services as they might be useful for coordinate transforms even with GT boxes.
             else:
-                # If already loaded (preloaded at startup), just use it
-                logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded YOLO model for '{environment_id}'")
-
-            # Maintain backward-compatible single-detector reference for existing methods
-            self.detector = self.detectors_by_env.get(environment_id)
+                # Initialize YOLO detector for the requested environment
+                weights_path = self._resolve_yolo_weights_for_environment(environment_id)
+    
+                if environment_id not in self.detectors_by_env:
+                    logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
+                    detector = YOLODetector(
+                        model_name=weights_path,
+                        confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                    )
+                    await detector.load_model()
+                    await detector.warmup()
+                    self.detectors_by_env[environment_id] = detector
+                    self.detector_weights_by_env[environment_id] = weights_path
+                else:
+                    # If already loaded (preloaded at startup), just use it
+                    logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded YOLO model for '{environment_id}'")
+    
+                # Maintain backward-compatible single-detector reference for existing methods
+                self.detector = self.detectors_by_env.get(environment_id)
             
             # Phase 4: Initialize spatial intelligence services (via DI if available)
             logger.info("🗺️ DETECTION SERVICE INIT: Initializing spatial intelligence services...")
@@ -281,7 +293,8 @@ class DetectionVideoService(RawVideoService):
                     logger.error(f"❌ RE-ID INIT FAILED: {e}")
                     self.feature_extraction_service = None
             else:
-                logger.info("🧠 RE-ID: Using preloaded FeatureExtractionService")
+                if not settings.USE_GROUND_TRUTH:
+                    logger.info("🧠 RE-ID: Using preloaded FeatureExtractionService")
             
             if self.handoff_manager is None:
                 self.handoff_manager = HandoffManager()
@@ -596,67 +609,82 @@ class DetectionVideoService(RawVideoService):
         
         # Step 1: Run detection pipeline (includes spatial intelligence)
         _det_start = _time.perf_counter()
-        detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
-        _det_time = (_time.perf_counter() - _det_start) * 1000
 
-        # Step 2: Tracking integration (via tracker factory)
-        # Step 2: Tracking integration (via tracker factory)
-        tracks: List[Dict[str, Any]] = []
-        tracker_used = False
-        _track_time = 0.0
-        _spatial_time = 0.0
-        _reid_time = 0.0
-        
-        try:
-            if settings.TRACKING_ENABLED:
-                # Lazy initialization check
-                if camera_id not in self.camera_trackers:
-                    try:
-                        # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
-                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
-                        if tracker:
-                            self.camera_trackers[camera_id] = tracker
-                            # logger.info(f"Lazy initialization successful for {camera_id}")
-                    except Exception as e:
-                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+        # GROUND TRUTH OVERRIDE
+        if settings.USE_GROUND_TRUTH and self.ground_truth_service:
+            # Bypass detection and tracking
+            detection_data = {"detections": []} # No raw detections needed, we go straight to tracks
+            tracks = self.ground_truth_service.get_tracks_for_frame(camera_id, frame_number)
 
-            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
-                tracker = self.camera_trackers.get(camera_id)
-                # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
-                np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                
-                _track_start = _time.perf_counter()
-                tracked_np = await tracker.update(np_dets, frame)
-                _track_time = (_time.perf_counter() - _track_start) * 1000
-                
-                # ... (logging skipped for brevity in replacement) ...
+            # Optional: Simulate spatial intelligence for GT tracks if they have boxes?
+            # For now, let's assume GT service provides what's needed or we add minimal transforms.
+            # If the GT data has boxes, we CAN run them through spatial enhancer to get map coords.
+            # Let's do that to ensure the frontend gets map coordinates (circles on map).
+            if tracks:
+                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
 
-                # Convert tracked output to track dicts
-                tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                
-                # Enhance with spatial intelligence (map coords + short trajectory)
-                _spatial_start = _time.perf_counter()
-                tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
-                
-                # Apply Re-ID (Phase 2)
-                _reid_start = _time.perf_counter()
-                frame_height, frame_width = frame.shape[:2]
-                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
-                _reid_time = (_time.perf_counter() - _reid_start) * 1000
-                
-                tracker_used = True
-            else:
-                if frame_number % 30 == 0:
-                    logger.info(
-                        "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
-                        camera_id,
-                        settings.TRACKING_ENABLED,
-                        camera_id in self.camera_trackers
-                    )
-        except Exception as e:
-            logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
-            tracks = []
+            _det_time = 0.0 # Effectively instant/amortized
+        else:
+            detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
+            _det_time = (_time.perf_counter() - _det_start) * 1000
+
+            # Step 2: Tracking integration (via tracker factory)
+            tracks: List[Dict[str, Any]] = []
+            tracker_used = False
+            _track_time = 0.0
+            _spatial_time = 0.0
+            _reid_time = 0.0
+            
+            try:
+                if settings.TRACKING_ENABLED:
+                    # Lazy initialization check
+                    if camera_id not in self.camera_trackers:
+                        try:
+                            # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
+                            tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                            if tracker:
+                                self.camera_trackers[camera_id] = tracker
+                                # logger.info(f"Lazy initialization successful for {camera_id}")
+                        except Exception as e:
+                            logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+    
+                if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    
+                    _track_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _track_time = (_time.perf_counter() - _track_start) * 1000
+                    
+                    # ... (logging skipped for brevity in replacement) ...
+    
+                    # Convert tracked output to track dicts
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    
+                    # Enhance with spatial intelligence (map coords + short trajectory)
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID (Phase 2)
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                    
+                    tracker_used = True
+                else:
+                    if frame_number % 30 == 0:
+                        logger.info(
+                            "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
+                            camera_id,
+                            settings.TRACKING_ENABLED,
+                            camera_id in self.camera_trackers
+                        )
+            except Exception as e:
+                logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
+                tracks = []
 
         # Step 3: Attach tracks to detection data for downstream consumers
         detection_data["tracks"] = tracks
