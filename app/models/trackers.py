@@ -5,17 +5,16 @@ import torch
 import asyncio
  
 
-# Delayed import to avoid initializing Ultralytics/YOLO when not needed
-# try:
-#     # Import specific tracker class directly (ByteTrack)
-#     from boxmot.trackers.bytetrack.bytetrack import ByteTrack
-#     from boxmot.trackers.basetracker import BaseTracker as BoxMOTBaseTracker
-#     BOXMOT_AVAILABLE = True
-# except ImportError as e:
-#     logging.critical(f"Failed to import BoxMOT components. Tracking unavailable. Error: {e}")
-#     BOXMOT_AVAILABLE = False
-#     ByteTrack = None  # Define as None if import fails
-#     BoxMOTBaseTracker = type(None)
+try:
+    # Import specific tracker class directly (ByteTrack)
+    from boxmot.trackers.bytetrack.bytetrack import ByteTrack
+    from boxmot.trackers.basetracker import BaseTracker as BoxMOTBaseTracker
+    BOXMOT_AVAILABLE = True
+except ImportError as e:
+    logging.critical(f"Failed to import BoxMOT components. Tracking unavailable. Error: {e}")
+    BOXMOT_AVAILABLE = False
+    ByteTrack = None  # Define as None if import fails
+    BoxMOTBaseTracker = type(None)
 
 from .base_models import AbstractTracker
 from app.core.config import settings
@@ -31,18 +30,11 @@ class ByteTrackTracker(AbstractTracker):
     """
     Implementation of the ByteTrack tracker using the BoxMOT library.
     """
-    """
     def __init__(self):
-        # Lazy import check
-        try:
-             # Just check if we can import to validate availability, but don't hold the reference yet
-             import boxmot
-             self._boxmot_available = True
-        except ImportError:
-             self._boxmot_available = False
-             raise ImportError("BoxMOT library is required but not available.")
+        if not BOXMOT_AVAILABLE or ByteTrack is None:  # Check if ByteTrack itself was imported
+            raise ImportError("BoxMOT library or ByteTrack class is required but not available.")
 
-        self.tracker_instance = None  # Type hint with ByteTrack if imported
+        self.tracker_instance: Optional[ByteTrack] = None  # Type hint with ByteTrack
         self.device: Optional[torch.device] = None
         # ByteTrack is motion-only; no identity model weights. Keep per-class behavior from settings.
         self.per_class: bool = settings.TRACKER_PER_CLASS
@@ -69,9 +61,6 @@ class ByteTrackTracker(AbstractTracker):
         # logger.info(f"Loading ByteTrack tracker on device: {self.device}...")
 
         try:
-            # Lazy import here
-            from boxmot.trackers.bytetrack.bytetrack import ByteTrack
-            
             # Instantiate with per_class and frame_rate; others use defaults
             self.tracker_instance = await asyncio.to_thread(
                 ByteTrack,

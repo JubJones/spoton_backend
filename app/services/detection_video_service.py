@@ -25,7 +25,7 @@ import json
 
 from app.core.config import settings
 from app.services.raw_video_service import RawVideoService
-# from app.models.yolo_detector import YOLODetector # Moved to type checking or lazy import
+from app.models.yolo_detector import YOLODetector
 from app.utils.detection_annotator import DetectionAnnotator
 from app.utils.mjpeg_streamer import mjpeg_streamer
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType

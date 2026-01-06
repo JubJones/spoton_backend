@@ -114,28 +114,26 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             pass # logger.debug(f"Startup validation checks skipped due to error: {e}")
         app_instance.state.homography_service = homography_service
-        
-        # Log YOLO model path configuration only if we are utilizing ML
-        if not settings.USE_GROUND_TRUTH:
+        # Log YOLO model path configuration and a resolved sample (campus)
+        try:
+            logger.info(
+                "YOLO configuration: default=%s, campus_override=%s, factory_override=%s",
+                settings.YOLO_MODEL_PATH,
+                settings.YOLO_MODEL_PATH_CAMPUS or "None",
+                settings.YOLO_MODEL_PATH_FACTORY or "None",
+            )
             try:
+                resolved_campus = detection_video_service._resolve_yolo_weights_for_environment("campus")
+                exists_str = "present" if Path(resolved_campus).exists() else "missing"
                 logger.info(
-                    "YOLO configuration: default=%s, campus_override=%s, factory_override=%s",
-                    settings.YOLO_MODEL_PATH,
-                    settings.YOLO_MODEL_PATH_CAMPUS or "None",
-                    settings.YOLO_MODEL_PATH_FACTORY or "None",
+                    "YOLO resolved weights for 'campus': %s (%s)",
+                    resolved_campus,
+                    exists_str,
                 )
-                try:
-                    resolved_campus = detection_video_service._resolve_yolo_weights_for_environment("campus")
-                    exists_str = "present" if Path(resolved_campus).exists() else "missing"
-                    logger.info(
-                        "YOLO resolved weights for 'campus': %s (%s)",
-                        resolved_campus,
-                        exists_str,
-                    )
-                except Exception as e:
-                    logger.warning(f"Could not resolve YOLO weights for 'campus': {e}")
             except Exception as e:
-                pass # logger.debug(f"YOLO configuration logging skipped: {e}")
+                logger.warning(f"Could not resolve YOLO weights for 'campus': {e}")
+        except Exception as e:
+            pass # logger.debug(f"YOLO configuration logging skipped: {e}")
 
         # Preload YOLO detector for configured environments
         if settings.USE_GROUND_TRUTH:
