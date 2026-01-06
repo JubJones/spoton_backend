@@ -136,13 +136,13 @@ class GroundTruthService:
                  return []
         
         tracks = self._cache.get(camera_id, {}).get(frame_number, [])
-        if not tracks and frame_number % 60 == 0:
-             # Data loaded, but no tracks for this frame
+        if not tracks:
+             # Force log on EVERY blank frame for a moment to verify execution path
              frames = sorted(list(self._cache[camera_id].keys()))
              min_frame = frames[0] if frames else 'N/A'
              max_frame = frames[-1] if frames else 'N/A'
              sample_frames = frames[:10] if frames else []
-             logger.warning(
+             logger.error(
                  f"🛡️ [GT-MISS] Cam={camera_id} Frame={frame_number} NOT FOUND. "
                  f"Total Frames: {len(frames)}. Range: [{min_frame}, {max_frame}]. "
                  f"Sample keys: {sample_frames}"
