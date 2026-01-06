@@ -19,3 +19,5 @@ services:
             - driver: nvidia
               count: all
               capabilities: [ gpu ]
+    volumes:
+      - D:/MTMMC:/data/mtmmc # Update for Windows PowerShell format

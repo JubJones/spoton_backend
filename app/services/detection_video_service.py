@@ -617,12 +617,17 @@ class DetectionVideoService(RawVideoService):
             tracks = self.ground_truth_service.get_tracks_for_frame(camera_id, frame_number)
 
             # Optional: Simulate spatial intelligence for GT tracks if they have boxes?
-            # For now, let's assume GT service provides what's needed or we add minimal transforms.
-            # If the GT data has boxes, we CAN run them through spatial enhancer to get map coords.
-            # Let's do that to ensure the frontend gets map coordinates (circles on map).
             if tracks:
                  tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-
+            elif frame_number % 30 == 0:
+                 # Diagnostic: Why are there no tracks?
+                 has_data = bool(self.ground_truth_service._cache.get(camera_id))
+                 logger.warning(
+                     f"🛡️ [GT-DIAGNOSTIC] Cam={camera_id} Frame={frame_number} | No tracks returned! "
+                     f"Tracks loaded in memory? {has_data}. "
+                     f"Frame {frame_number} in cache? {frame_number in self.ground_truth_service._cache.get(camera_id, {})}."
+                 )
+            
             _det_time = 0.0 # Effectively instant/amortized
         else:
             detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
@@ -715,13 +720,14 @@ class DetectionVideoService(RawVideoService):
         _total_time = (_time.perf_counter() - _total_start) * 1000
         
         # Log timing breakdown every 10 frames or if slow (>100ms)
-        if frame_number % 10 == 0 or _total_time > 100:
-            speed_optimize_logger.info(
-                "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
-                camera_id, frame_number, _total_time,
-                _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
-                len(tracks)
-            )
+        # Log timing breakdown every 10 frames or if slow (>100ms)
+        # if frame_number % 10 == 0 or _total_time > 100:
+        #     speed_optimize_logger.info(
+        #         "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
+        #         camera_id, frame_number, _total_time,
+        #         _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
+        #         len(tracks)
+        #     )
         
         return detection_data
 
