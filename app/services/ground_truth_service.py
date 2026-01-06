@@ -24,6 +24,18 @@ class GroundTruthService:
         self.data_dir = data_dir or settings.GROUND_TRUTH_DATA_DIR
         self._cache: Dict[str, Dict[int, List[Dict[str, Any]]]] = {} # camera_id -> {frame_num -> [tracks]}
         logger.info(f"GroundTruthService initialized with data_dir: {self.data_dir}")
+        self._inspect_data_dir()
+
+    def _inspect_data_dir(self):
+        """Helper to log contents of the data directory to debug mounting issues."""
+        try:
+            if os.path.exists(self.data_dir):
+                contents = os.listdir(self.data_dir)
+                logger.info(f"📂 [DEBUG] Contents of {self.data_dir}: {contents}")
+            else:
+                logger.error(f"❌ [DEBUG] Directory {self.data_dir} does NOT exist!")
+        except Exception as e:
+            logger.error(f"❌ [DEBUG] Error listing {self.data_dir}: {e}")
 
     def load_tracks_for_camera(self, camera_id: str) -> bool:
         """
@@ -48,6 +60,12 @@ class GroundTruthService:
         
         if not gt_file:
             logger.warning(f"Ground truth file not found for camera {camera_id}. Searched: {possible_paths}")
+            # Debug: Check if camera dir exists
+            cam_dir = Path(self.data_dir) / camera_id
+            if cam_dir.exists():
+                logger.info(f"📂 [DEBUG] Camera dir {cam_dir} exists. Contents: {os.listdir(cam_dir)}")
+            else:
+                logger.warning(f"⚠️ [DEBUG] Camera dir {cam_dir} does NOT exist.")
             return False
 
         logger.info(f"Loading ground truth for {camera_id} from {gt_file}")
