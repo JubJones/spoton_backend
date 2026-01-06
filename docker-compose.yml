@@ -23,7 +23,9 @@ services:
       - ./weights:/app/weights
       - ./scripts:/app/scripts # For running TensorRT export inside container
       - ./videos:/app/videos:ro
+      - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
+      - D:\MTMMC:/data/mtmmc:ro # Mount Host MTMMC data to Container
     env_file:
       - .env
     environment:
