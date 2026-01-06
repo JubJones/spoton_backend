@@ -76,7 +76,9 @@ class SpaceBasedMatcher:
         new_matches = self._find_spatial_matches(valid_tracks)
         
         # 3. Update global ID assignments
-        self._update_global_ids(new_matches)
+        # Build map of active global IDs to check for conflicts (prevent merging distinct people in same view)
+        active_global_ids = self._get_active_global_ids(camera_detections)
+        self._update_global_ids(new_matches, active_global_ids)
 
         # 3.5 Ensure ALL tracks have a global_id (even unmatched ones)
         # Iterate over all valid tracks and assign a new global_id if they don't have one
@@ -96,6 +98,21 @@ class SpaceBasedMatcher:
         
         # 5. Cleanup stale entries
         self._cleanup_state(valid_tracks)
+
+    def _get_active_global_ids(self, camera_detections: Dict[str, Dict[str, Any]]) -> Dict[str, Set[str]]:
+        """
+        Build a map of which global IDs are currently active in which cameras.
+        Used to prevent merging identities that are simultaneously present in the same camera.
+        """
+        active_map = defaultdict(set)
+        for camera_id, result in camera_detections.items():
+            for track in result.get("tracks", []):
+                track_id = track.get("track_id")
+                if track_id is not None:
+                    gid = self.registry.get_global_id(camera_id, int(track_id))
+                    if gid:
+                        active_map[gid].add(camera_id)
+        return active_map
 
     def _collect_tracks_with_coordinates(self, camera_detections: Dict[str, Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
         """Flatten input into a structure easier to process: {camera_id: [track_dicts...]}"""
@@ -250,7 +267,7 @@ class SpaceBasedMatcher:
         except (KeyError, TypeError):
             return None
 
-    def _update_global_ids(self, matches: List[Tuple[str, str, str, str]]):
+    def _update_global_ids(self, matches: List[Tuple[str, str, str, str]], active_global_ids: Dict[str, Set[str]]):
         for cam_a, track_a_id, cam_b, track_b_id in matches:
             key_a = (cam_a, str(track_a_id)) # Ensure string track ID
             key_b = (cam_b, str(track_b_id))
@@ -261,22 +278,54 @@ class SpaceBasedMatcher:
             
             if existing_global_a and existing_global_b:
                 if existing_global_a != existing_global_b:
-                    # MERGE
-                    if existing_global_a < existing_global_b:
-                         self.registry.merge_identities(target_global_id=existing_global_a, source_global_id=existing_global_b)
-                    else:
-                         self.registry.merge_identities(target_global_id=existing_global_b, source_global_id=existing_global_a)
+                    # MERGE with conflict check
+                    target_id = existing_global_a if existing_global_a < existing_global_b else existing_global_b
+                    source_id = existing_global_b if target_id == existing_global_a else existing_global_a
+                    
+                    # Check if merging would cause a camera conflict
+                    # A conflict exists if BOTH identities are active in the SAME camera set
+                    cameras_target = active_global_ids.get(target_id, set())
+                    cameras_source = active_global_ids.get(source_id, set())
+                    
+                    overlap = cameras_target.intersection(cameras_source)
+                    if overlap:
+                        logger.warning(
+                            f"[SpaceMatcher] ⚠️  MERGE ABORTED: {target_id} and {source_id} coexist in cameras {overlap}. "
+                            f"Skipping merge to prevent duplicate ID assignment."
+                        )
+                        continue
+
+                    self.registry.merge_identities(target_global_id=target_id, source_global_id=source_id)
+                    
+                    # Update active map to reflect merge (source becomes target)
+                    active_global_ids[target_id].update(cameras_source)
+                    if source_id in active_global_ids:
+                        del active_global_ids[source_id]
             
             elif existing_global_a:
                 self.registry.assign_identity(cam_b, track_b_id, existing_global_a)
+                # Update active map
+                if existing_global_a in active_global_ids:
+                    active_global_ids[existing_global_a].add(cam_b)
+                else:
+                    active_global_ids[existing_global_a] = {cam_b}
                 
             elif existing_global_b:
                 self.registry.assign_identity(cam_a, track_a_id, existing_global_b)
+                # Update active map
+                if existing_global_b in active_global_ids:
+                     active_global_ids[existing_global_b].add(cam_a)
+                else:
+                     active_global_ids[existing_global_b] = {cam_a}
                 
             else:
                 new_global_id = self.registry.allocate_new_id()
                 self.registry.assign_identity(cam_a, track_a_id, new_global_id)
                 self.registry.assign_identity(cam_b, track_b_id, new_global_id)
+                
+                # Update active map
+                active_global_ids[new_global_id] = {cam_a, cam_b}
+                
                 pass # logger.debug(f"Created new global ID {new_global_id} for match {cam_a}:{track_a_id} <-> {cam_b}:{track_b_id}")
 
     # Removed internal _assign_global_id and _merge_identities helpers as they are now in registry
