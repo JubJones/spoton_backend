@@ -59,7 +59,9 @@ class GroundTruthService:
                 break
         
         if not gt_file:
-            logger.warning(f"Ground truth file not found for camera {camera_id}. Searched: {possible_paths}")
+            msg = f"Ground truth file not found for camera {camera_id}. Searched: {possible_paths}"
+            logger.error(msg)
+            print(f"!!! PRINT DEBUG: {msg}") # Force stdout
             # Debug: Check if camera dir exists
             cam_dir = Path(self.data_dir) / camera_id
             if cam_dir.exists():
@@ -69,6 +71,7 @@ class GroundTruthService:
             return False
 
         logger.info(f"Loading ground truth for {camera_id} from {gt_file}")
+        print(f"!!! PRINT DEBUG: Found GT file for {camera_id}: {gt_file}")
         
         tracks_by_frame: Dict[int, List[Dict[str, Any]]] = {}
         
@@ -143,9 +146,11 @@ class GroundTruthService:
         """
         if camera_id not in self._cache:
              # Lazy load
+             print(f"!!! PRINT DEBUG: Cache miss for {camera_id}. Triggering load...")
              if not self.load_tracks_for_camera(camera_id):
                  if frame_number % 60 == 0:
-                     logger.warning(f"🛡️ [GT-FAIL] Cache miss for {camera_id}. Load FAILED. Path issue?")
+                     print(f"!!! PRINT DEBUG: Load failed for {camera_id}")
+                     logger.error(f"🛡️ [GT-FAIL] Cache miss for {camera_id}. Load FAILED. Path issue?")
                  return []
         
         tracks = self._cache.get(camera_id, {}).get(frame_number, [])
@@ -157,6 +162,7 @@ class GroundTruthService:
         if not tracks:
              # Force log on EVERY blank frame for a moment to verify execution path
              frames = sorted(list(self._cache[camera_id].keys()))
+             print(f"!!! PRINT DEBUG: No tracks for {camera_id} at {frame_number}. Total loaded frames: {len(frames)}")
              min_frame = frames[0] if frames else 'N/A'
              max_frame = frames[-1] if frames else 'N/A'
              sample_frames = frames[:10] if frames else []
