@@ -24,6 +24,7 @@ class GroundTruthService:
         self.data_dir = data_dir or settings.GROUND_TRUTH_DATA_DIR
         self._cache: Dict[str, Dict[int, List[Dict[str, Any]]]] = {} # camera_id -> {frame_num -> [tracks]}
         logger.info(f"GroundTruthService initialized with data_dir: {self.data_dir}")
+        print(f"!!! PRINT DEBUG: GroundTruthService initialized. Dir: {self.data_dir}")
         self._inspect_data_dir()
 
     def _inspect_data_dir(self):
