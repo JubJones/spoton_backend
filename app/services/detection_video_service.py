@@ -626,8 +626,6 @@ class DetectionVideoService(RawVideoService):
                  logger.info(f"🛡️ [GT-DEBUG] Cam={camera_id} Frame={frame_number} | Found {len(tracks)} tracks. Sample: {tracks[0]}")
                  tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
             elif frame_number % 30 == 0:
-                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-            elif frame_number % 30 == 0:
                  # Diagnostic: Why are there no tracks?
                  has_data = bool(self.ground_truth_service._cache.get(camera_id))
                  logger.warning(
@@ -1392,7 +1390,7 @@ class DetectionVideoService(RawVideoService):
                     "tracks": tracks, # Send FULL track data including spatial info
                     "detections": [] # Optional: send raw detections if needed for debug
                 }
-                logger.info(f"🛡️ [GT-WS-DEBUG] Sending WS message. Tracks: {len(tracks)}. Payload keys: {debug_message.keys()}")
+                logger.info(f"🛡️ [GT-WS-DEBUG] Sending WS message for Cam={camera_id} Frame={frame_number}. Tracks: {len(tracks)}")
 
             detection_message = {
                 "type": MessageType.TRACKING_UPDATE.value,
