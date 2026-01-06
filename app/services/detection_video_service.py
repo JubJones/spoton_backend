@@ -622,8 +622,10 @@ class DetectionVideoService(RawVideoService):
             detection_data = {"detections": []} # No raw detections needed, we go straight to tracks
             tracks = self.ground_truth_service.get_tracks_for_frame(camera_id, frame_number)
 
-            # Optional: Simulate spatial intelligence for GT tracks if they have boxes?
             if tracks:
+                 logger.info(f"🛡️ [GT-DEBUG] Cam={camera_id} Frame={frame_number} | Found {len(tracks)} tracks. Sample: {tracks[0]}")
+                 tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+            elif frame_number % 30 == 0:
                  tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
             elif frame_number % 30 == 0:
                  # Diagnostic: Why are there no tracks?
@@ -1199,12 +1201,12 @@ class DetectionVideoService(RawVideoService):
                         task_id, "PROCESSING", progress,
                         f"Processed frame {frame_index}/{total_frames} - Found {detection_count} detections"
                     )
-                    # FPS logging
+                    # FPS logging - REMOVED
                     fps_frame_count += 30
                     fps_elapsed = time.time() - fps_start_time
                     if fps_elapsed > 0:
-                        current_fps = fps_frame_count / fps_elapsed
-                        logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
+                         current_fps = fps_frame_count / fps_elapsed
+                         # logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
                     logger.info(f"🔍 DETECTION PROCESSING: Frame {frame_index}/{total_frames} - {detection_count} detections")
                 
                 frame_index += 1
@@ -1376,6 +1378,22 @@ class DetectionVideoService(RawVideoService):
 
             # Step 4: Create WebSocket message
             _msg_start = _time.perf_counter()
+            # Add data flow debug logs.
+            # This is a temporary structure for debugging ground truth data flow.
+            # It will be replaced by the standard detection_message structure below.
+            # For now, it allows sending raw tracks and detections for comparison.
+            if settings.USE_GROUND_TRUTH and frame_number % 30 == 0:
+                tracks = payload_data.get("tracks", []) # Assuming tracks are available in payload_data
+                debug_message = {
+                    "task_id": str(task_id) if task_id else "global", # Fallback for non-task events
+                    "camera_id": camera_id,
+                    "frame_number": frame_number,
+                    "timestamp": _time.time(),
+                    "tracks": tracks, # Send FULL track data including spatial info
+                    "detections": [] # Optional: send raw detections if needed for debug
+                }
+                logger.info(f"🛡️ [GT-WS-DEBUG] Sending WS message. Tracks: {len(tracks)}. Payload keys: {debug_message.keys()}")
+
             detection_message = {
                 "type": MessageType.TRACKING_UPDATE.value,
                 "task_id": str(task_id),
