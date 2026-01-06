@@ -633,111 +633,120 @@ class DetectionVideoService(RawVideoService):
             except Exception:
                 pass
                 
+            
+            # Frontend: emit auxiliary events (non-blocking)
+            try:
+                if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                    await self._emit_frontend_events(task_id=None, camera_id=camera_id, frame_number=frame_number, tracks=gt_tracks)
+            except Exception:
+                pass
+                
             return detection_data
-        # ----------------------------------
-
-        # Step 1: Run detection pipeline (includes spatial intelligence)
-        _det_start = _time.perf_counter()
-        detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
-        _det_time = (_time.perf_counter() - _det_start) * 1000
-
-        # Step 2: Tracking integration (via tracker factory)
-        # Step 2: Tracking integration (via tracker factory)
-        tracks: List[Dict[str, Any]] = []
-        tracker_used = False
-        _track_time = 0.0
-        _spatial_time = 0.0
-        _reid_time = 0.0
         
-        try:
-            if settings.TRACKING_ENABLED:
-                # Lazy initialization check
-                if camera_id not in self.camera_trackers:
-                    try:
-                        # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
-                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
-                        if tracker:
-                            self.camera_trackers[camera_id] = tracker
-                            # logger.info(f"Lazy initialization successful for {camera_id}")
-                    except Exception as e:
-                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+        # --- STANDARD ML PIPELINE (Skipped in GT Mode) ---
+        else:
+            # Step 1: Run detection pipeline (includes spatial intelligence)
+            _det_start = _time.perf_counter()
+            detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
+            _det_time = (_time.perf_counter() - _det_start) * 1000
 
-            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
-                tracker = self.camera_trackers.get(camera_id)
-                # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
-                np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                
-                _track_start = _time.perf_counter()
-                tracked_np = await tracker.update(np_dets, frame)
-                _track_time = (_time.perf_counter() - _track_start) * 1000
-                
-                # ... (logging skipped for brevity in replacement) ...
+            # Step 2: Tracking integration (via tracker factory)
+            # Step 2: Tracking integration (via tracker factory)
+            tracks: List[Dict[str, Any]] = []
+            tracker_used = False
+            _track_time = 0.0
+            _spatial_time = 0.0
+            _reid_time = 0.0
+            
+            try:
+                if settings.TRACKING_ENABLED:
+                    # Lazy initialization check
+                    if camera_id not in self.camera_trackers:
+                        try:
+                            # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
+                            tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                            if tracker:
+                                self.camera_trackers[camera_id] = tracker
+                                # logger.info(f"Lazy initialization successful for {camera_id}")
+                        except Exception as e:
+                            logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
 
-                # Convert tracked output to track dicts
-                tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                
-                # Enhance with spatial intelligence (map coords + short trajectory)
-                _spatial_start = _time.perf_counter()
-                tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
-                
-                # Apply Re-ID (Phase 2)
-                _reid_start = _time.perf_counter()
-                frame_height, frame_width = frame.shape[:2]
-                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
-                _reid_time = (_time.perf_counter() - _reid_start) * 1000
-                
-                tracker_used = True
-            else:
-                if frame_number % 30 == 0:
-                    logger.info(
-                        "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
-                        camera_id,
-                        settings.TRACKING_ENABLED,
-                        camera_id in self.camera_trackers
-                    )
-        except Exception as e:
-            logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
-            tracks = []
+                if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    
+                    _track_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _track_time = (_time.perf_counter() - _track_start) * 1000
+                    
+                    # ... (logging skipped for brevity in replacement) ...
 
-        # Step 3: Attach tracks to detection data for downstream consumers
-        detection_data["tracks"] = tracks
+                    # Convert tracked output to track dicts
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    
+                    # Enhance with spatial intelligence (map coords + short trajectory)
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID (Phase 2)
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                    
+                    tracker_used = True
+                else:
+                    if frame_number % 30 == 0:
+                        logger.info(
+                            "Tracking skipped for camera %s (enabled=%s, tracker_available=%s)",
+                            camera_id,
+                            settings.TRACKING_ENABLED,
+                            camera_id in self.camera_trackers
+                        )
+            except Exception as e:
+                logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
+                tracks = []
 
-        try:
-            self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
-            # if tracker_used and logger.isEnabledFor(logging.DEBUG):
-            #     pass
-        except Exception as exc:
-            pass
-            # logger.debug(
-            #     "Detection-track association failed for %s frame %s: %s",
-            #     camera_id,
-            #     frame_number,
-            #     exc,
-            # )
-        
-        # Frontend: emit auxiliary events (non-blocking)
-        _viz_start = _time.perf_counter()
-        try:
-            if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
-                await self._emit_frontend_events(task_id=None, camera_id=camera_id, frame_number=frame_number, tracks=tracks)
-        except Exception:
-            pass
-        _viz_time = (_time.perf_counter() - _viz_start) * 1000
-        
-        # Total time
-        _total_time = (_time.perf_counter() - _total_start) * 1000
-        
-        # Log timing breakdown every 10 frames or if slow (>100ms)
-        if frame_number % 10 == 0 or _total_time > 100:
-            speed_optimize_logger.info(
-                "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
-                camera_id, frame_number, _total_time,
-                _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
-                len(tracks)
-            )
-        
-        return detection_data
+            # Step 3: Attach tracks to detection data for downstream consumers
+            detection_data["tracks"] = tracks
+
+            try:
+                self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
+                # if tracker_used and logger.isEnabledFor(logging.DEBUG):
+                #     pass
+            except Exception as exc:
+                pass
+                # logger.debug(
+                #     "Detection-track association failed for %s frame %s: %s",
+                #     camera_id,
+                #     frame_number,
+                #     exc,
+                # )
+            
+            # Frontend: emit auxiliary events (non-blocking)
+            _viz_start = _time.perf_counter()
+            try:
+                if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                    await self._emit_frontend_events(task_id=None, camera_id=camera_id, frame_number=frame_number, tracks=tracks)
+            except Exception:
+                pass
+            _viz_time = (_time.perf_counter() - _viz_start) * 1000
+            
+            # Total time
+            _total_time = (_time.perf_counter() - _total_start) * 1000
+            
+            # Log timing breakdown every 10 frames or if slow (>100ms)
+            if frame_number % 10 == 0 or _total_time > 100:
+                speed_optimize_logger.info(
+                    "[SPEED_OPTIMIZE] Cam=%s Frame=%d | Total=%.1fms | Det=%.1fms Track=%.1fms Spatial=%.1fms ReID=%.1fms Viz=%.1fms | Tracks=%d",
+                    camera_id, frame_number, _total_time,
+                    _det_time, _track_time, _spatial_time, _reid_time, _viz_time,
+                    len(tracks)
+                )
+            
+            return detection_data
 
     def get_tracking_stats(self) -> Dict[str, Any]:
         """Return current tracking stats without affecting existing API."""
