@@ -78,7 +78,7 @@ async def lifespan(app_instance: FastAPI):
 
         # Preload tracker factory (ByteTrack prototype)
         tracker_factory = CameraTrackerFactory(device=device)
-        if settings.PRELOAD_TRACKER_FACTORY:
+        if settings.PRELOAD_TRACKER_FACTORY and not settings.USE_GROUND_TRUTH:
             try:
                 await tracker_factory.preload_prototype_tracker()
             except Exception as e:
