@@ -24,7 +24,7 @@ services:
       - ./scripts:/app/scripts # For running TensorRT export inside container
       - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
-      - /D/MTMMC:/data/mtmmc # Mount D:\MTMMC to /data/mtmmc (Docker Desktop syntax for Windows host)
+      - D:/MTMMC:/data/mtmmc # Update for Windows PowerShell format
     env_file:
       - .env
     environment:
