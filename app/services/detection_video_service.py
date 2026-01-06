@@ -310,8 +310,7 @@ class DetectionVideoService(RawVideoService):
 
             # Core Integration: Optionally initialize tracking scaffolding
             try:
-                # Disable tracking init if Ground Truth mode is active (we use pre-computed tracks)
-                if settings.TRACKING_ENABLED and task_id is not None and not settings.USE_GROUND_TRUTH:
+                if settings.TRACKING_ENABLED and task_id is not None:
                     await self.initialize_tracking_services(task_id, environment_id)
             except Exception as e:
                 logger.warning(f"TRACKING init skipped or failed (non-blocking): {e}")
