@@ -21,23 +21,8 @@ from .base_models import AbstractDetector, Detection, BoundingBox
 
 logger = logging.getLogger(__name__)
 
-# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY
-from pathlib import Path
-
-class SpeedDebugFilter(logging.Filter):
-    """Filter to only allow [SPEED_DEBUG] messages"""
-    def filter(self, record):
-        return '[SPEED_DEBUG]' in record.getMessage()
-
-speed_debug_logger = logging.getLogger("speed_debug_yolo")
-speed_debug_logger.setLevel(logging.INFO)
-_speed_log_path = Path("speed_debug.log")
-_speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
-_speed_file_handler.setLevel(logging.INFO)
-_speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-_speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
-speed_debug_logger.addHandler(_speed_file_handler)
-speed_debug_logger.propagate = True  # Also show in console
+# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY - REMOVED
+# SpeedDebugFilter and speed_debug_logger configuration removed.
 
 
 class YOLODetector(AbstractDetector):
@@ -232,10 +217,8 @@ class YOLODetector(AbstractDetector):
             _total_time = (_time.perf_counter() - _total_start) * 1000
             
             # Log detailed timing to file and console
-            speed_debug_logger.info(
-                "[SPEED_DEBUG] YOLO.detect | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | Dets=%d | ImgShape=%s",
-                _total_time, _thread_time, _gpu_infer_time, _parse_time, len(detections_result), image.shape[:2]
-            )
+            # Log detailed timing to file and console
+            # speed_debug_logger.info(...) - Removed
             
             return detections_result
             
@@ -304,10 +287,9 @@ class YOLODetector(AbstractDetector):
             
             # Detailed timing log to file and console
             total_dets = sum(len(d) for d in batch_detections)
-            speed_debug_logger.info(
-                "[SPEED_DEBUG] YOLO.detect_batch | BatchSize=%d | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | TotalDets=%d",
-                len(images), _batch_total_time, _thread_time, _gpu_infer_time, _parse_time, total_dets
-            )
+            # Detailed timing log to file and console
+            total_dets = sum(len(d) for d in batch_detections)
+            # speed_debug_logger.info(...) - Removed
             
             return batch_detections
             

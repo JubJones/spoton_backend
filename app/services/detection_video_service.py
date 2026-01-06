@@ -57,21 +57,21 @@ from app.services.ground_truth_service import GroundTruthService
 
 logger = logging.getLogger(__name__)
 
-# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY
-class SpeedDebugFilter(logging.Filter):
-    """Filter to only allow [SPEED_DEBUG] messages"""
-    def filter(self, record):
-        return '[SPEED_DEBUG]' in record.getMessage()
-
-speed_optimize_logger = logging.getLogger("speed_debug_pipeline")
-speed_optimize_logger.setLevel(logging.INFO)
-_speed_log_path = Path("speed_debug.log")
-_speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
-_speed_file_handler.setLevel(logging.INFO)
-_speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
-_speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
-speed_optimize_logger.addHandler(_speed_file_handler)
-speed_optimize_logger.propagate = True  # Also show in console
+# Dedicated file logger for [SPEED_DEBUG] timing logs ONLY - REMOVED per user request
+# class SpeedDebugFilter(logging.Filter):
+#     """Filter to only allow [SPEED_DEBUG] messages"""
+#     def filter(self, record):
+#         return '[SPEED_DEBUG]' in record.getMessage()
+# 
+# speed_optimize_logger = logging.getLogger("speed_debug_pipeline")
+# speed_optimize_logger.setLevel(logging.INFO)
+# # _speed_log_path = Path("speed_debug.log")
+# # _speed_file_handler = logging.FileHandler(_speed_log_path, mode='a', encoding='utf-8')
+# # _speed_file_handler.setLevel(logging.INFO)
+# # _speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
+# # _speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
+# # speed_optimize_logger.addHandler(_speed_file_handler)
+# # speed_optimize_logger.propagate = True  # Also show in console
 
 
 class DetectionVideoService(RawVideoService):
@@ -938,12 +938,8 @@ class DetectionVideoService(RawVideoService):
             _total_det_time = (_time.perf_counter() - _proc_start) * 1000
             
             # Log granular timing every 10 frames or if slow
-            if frame_number % 10 == 0 or _total_det_time > 50:
-                speed_optimize_logger.info(
-                    "[SPEED_OPTIMIZE] DET Cam=%s Frame=%d | Total=%.1fms | YOLO=%.1fms SpatialLoop=%.1fms | Dets=%d",
-                    camera_id, frame_number, _total_det_time,
-                    _yolo_time, _spatial_loop_time, len(detections)
-                )
+            # if frame_number % 10 == 0 or _total_det_time > 50:
+            #     pass # speed logger removed
             
             return detection_data
             
@@ -1432,11 +1428,7 @@ class DetectionVideoService(RawVideoService):
             _func_total = (_time.perf_counter() - _func_start) * 1000
             
             # Log granular timing
-            speed_optimize_logger.info(
-                "[SPEED_DEBUG] send_detection_update | Cam=%s Frame=%d | Total=%.1fms | FocusFilter=%.1fms MJPEG=%.1fms Mapping=%.1fms MsgBuild=%.1fms WsSend=%.1fms",
-                camera_id, frame_number, _func_total,
-                _focus_time, _mjpeg_time, _mapping_time, _msg_time, _ws_time
-            )
+            # speed_optimize_logger.info(..., ...) removed
             
             if success:
                 self.detection_stats["websocket_messages_sent"] += 1
@@ -2217,12 +2209,7 @@ class DetectionVideoService(RawVideoService):
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
                 
                 # Log frame batch timing EVERY FRAME for debugging
-                speed_optimize_logger.info(
-                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
-                    frame_index, _batch_time,
-                    _read_time, _batch_det_time, _track_time, _space_match_time, _ws_time,
-                    len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
-                )
+                # speed_optimize_logger.info(..., ...) - Removed
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:
@@ -2406,10 +2393,7 @@ class DetectionVideoService(RawVideoService):
         _func_total = (_time.perf_counter() - _func_start) * 1000
         
         # Log granular timing
-        speed_optimize_logger.info(
-            "[SPEED_DEBUG] _process_detections_to_format | Cam=%s Frame=%d | Total=%.1fms | Dets=%d",
-            camera_id, frame_number, _func_total, len(raw_detections)
-        )
+        # speed_optimize_logger.info(...) - Removed
         
         return detection_data
 
@@ -2502,12 +2486,7 @@ class DetectionVideoService(RawVideoService):
         _func_total = (_time.perf_counter() - _func_start) * 1000
         
         # Log granular timing
-        speed_optimize_logger.info(
-            "[SPEED_DEBUG] _process_tracking | Cam=%s Frame=%d | Total=%.1fms | TrackerInit=%.1fms ConvDets=%.1fms TrackerUpdate=%.1fms ConvTracks=%.1fms Spatial=%.1fms ReID=%.1fms | Tracks=%d",
-            camera_id, frame_number, _func_total,
-            _tracker_init_time, _convert_dets_time, _tracker_update_time, _convert_tracks_time, _spatial_intel_time, _reid_time,
-            len(tracks)
-        )
+        # speed_optimize_logger.info(...) - Removed
         
         return detection_data
 
