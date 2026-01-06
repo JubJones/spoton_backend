@@ -53,6 +53,7 @@ from app.services.handoff_manager import HandoffManager
 from app.services.global_person_registry import GlobalPersonRegistry
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
+from app.services.ground_truth_service import GroundTruthService
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,13 @@ class DetectionVideoService(RawVideoService):
 
         # Frontend event cache
 
+        # Ground Truth Service
+        self.ground_truth_service: Optional[GroundTruthService] = None
+        if getattr(settings, "ENABLE_GROUND_TRUTH_MODE", False):
+            logger.info("Ground Truth Mode ENABLED. Initializing GroundTruthService...")
+            gt_path = getattr(settings, "GROUND_TRUTH_DATASET_PATH", r"D:\MTMMC")
+            self.ground_truth_service = GroundTruthService(data_dir=gt_path)
+
         logger.info("DetectionVideoService initialized (Phase 4: Spatial Intelligence)")
 
     async def _emit_geometric_metrics(self, environment_id: str, camera_id: str) -> None:
@@ -238,9 +246,11 @@ class DetectionVideoService(RawVideoService):
                 return False
             
             # Initialize YOLO detector for the requested environment
-            weights_path = self._resolve_yolo_weights_for_environment(environment_id)
-
-            if environment_id not in self.detectors_by_env:
+            # SKIP IF GROUND TRUTH MODE ENABLED
+            if getattr(settings, "ENABLE_GROUND_TRUTH_MODE", False):
+                logger.info("⏩ GT MODE: Skipping YOLO model loading.")
+            elif environment_id not in self.detectors_by_env:
+                weights_path = self._resolve_yolo_weights_for_environment(environment_id)
                 logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
                 detector = YOLODetector(
                     model_name=weights_path,
@@ -594,6 +604,38 @@ class DetectionVideoService(RawVideoService):
         import time as _time
         _total_start = _time.perf_counter()
         
+        
+        # --- GROUND TRUTH MODE OVERRIDE ---
+        if self.ground_truth_service:
+            gt_tracks = self.ground_truth_service.get_tracks_for_frame(camera_id, frame_number)
+            
+            # Format as detection_data expectations
+            detection_data = {
+                "detections": [], # Raw detections skipped
+                "tracks": gt_tracks,
+                "frame_shape": frame.shape,
+                "camera_id": camera_id,
+                "frame_number": frame_number,
+                "mode": "ground_truth"
+            }
+            
+            # Skip all ML logic (tracker update, spatial match, Re-ID)
+            # But we still need to enhance tracks with spatial info for visualization if possible
+            if gt_tracks:
+                gt_tracks = await self._enhance_tracks_with_spatial_intelligence(gt_tracks, camera_id, frame_number)
+            
+            detection_data["tracks"] = gt_tracks
+            
+            # Frontend: emit auxiliary events (non-blocking)
+            try:
+                if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                    await self._emit_frontend_events(task_id=None, camera_id=camera_id, frame_number=frame_number, tracks=gt_tracks)
+            except Exception:
+                pass
+                
+            return detection_data
+        # ----------------------------------
+
         # Step 1: Run detection pipeline (includes spatial intelligence)
         _det_start = _time.perf_counter()
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)

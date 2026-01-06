@@ -539,6 +539,10 @@ class Settings(BaseSettings):
     USE_TENSORRT: bool = Field(default=False, description="Use TensorRT engine for YOLO inference (requires .engine file)")
     YOLO_MODEL_PATH: str = "weights/yolo11l_campus.pt"
     YOLO_MODEL_PATH_TENSORRT: str = Field(default="weights/yolo11l_campus.engine", description="TensorRT engine path (used when USE_TENSORRT=true)")
+    
+    # Ground Truth Mode
+    ENABLE_GROUND_TRUTH_MODE: bool = Field(default=False, description="Enable Ground Truth only mode (suppress ML models)")
+    GROUND_TRUTH_DATASET_PATH: str = Field(default=r"D:\MTMMC", description="Path to Ground Truth dataset (e.g. D:\MTMMC)")
     # Optional per-environment model overrides. If provided and file exists,
     # detection will use these weights for the corresponding environment.
     YOLO_MODEL_PATH_CAMPUS: Optional[str] = None
