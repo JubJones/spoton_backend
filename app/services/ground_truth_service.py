@@ -131,6 +131,15 @@ class GroundTruthService:
         if camera_id not in self._cache:
              # Lazy load
              if not self.load_tracks_for_camera(camera_id):
+                 if frame_number % 60 == 0:
+                     logger.warning(f"🛡️ [GT-FAIL] Cache miss for {camera_id}. Load FAILED. Path issue?")
                  return []
         
-        return self._cache.get(camera_id, {}).get(frame_number, [])
+        tracks = self._cache.get(camera_id, {}).get(frame_number, [])
+        if not tracks and frame_number % 60 == 0:
+             # Data loaded, but no tracks for this frame
+             min_frame = min(self._cache[camera_id].keys()) if self._cache[camera_id] else 'N/A'
+             max_frame = max(self._cache[camera_id].keys()) if self._cache[camera_id] else 'N/A'
+             logger.warning(f"🛡️ [GT-MISS] Cam={camera_id} Loaded=True Frame={frame_number} NOT FOUND. Range=[{min_frame}, {max_frame}]")
+        
+        return tracks
