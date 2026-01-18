@@ -1,137 +1,94 @@
-"""Redis client configuration and utilities."""
-
-import redis
-from redis.asyncio import Redis as AsyncRedis
-from typing import Optional, Any
-import json
 import logging
-import uuid
-from datetime import datetime
+from typing import Optional, Any
+import redis.asyncio as redis
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-class UUIDJSONEncoder(json.JSONEncoder):
-    """Custom JSON encoder to handle UUID and datetime objects."""
-    
-    def default(self, obj):
-        if isinstance(obj, uuid.UUID):
-            return str(obj)
-        elif isinstance(obj, datetime):
-            return obj.isoformat()
-        return super().default(obj)
-
 class RedisClient:
-    """Redis client wrapper for caching operations."""
-    
-    def __init__(self):
-        self.redis: Optional[redis.Redis] = None
-        self.async_redis: Optional[AsyncRedis] = None
-    
-    def connect(self) -> redis.Redis:
-        """Connect to Redis server."""
-        if self.redis is None:
-            self.redis = redis.Redis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                max_connections=20
-            )
-            # Test connection
-            try:
-                self.redis.ping()
-                logger.info("Redis connection established successfully")
-            except Exception as e:
-                logger.error(f"Failed to connect to Redis: {e}")
-                raise
-        return self.redis
-    
-    async def connect_async(self) -> AsyncRedis:
-        """Connect to Redis server asynchronously."""
-        if self.async_redis is None:
-            self.async_redis = AsyncRedis(
-                host=settings.REDIS_HOST,
-                port=settings.REDIS_PORT,
-                db=settings.REDIS_DB,
-                password=settings.REDIS_PASSWORD,
-                decode_responses=True,
-                socket_connect_timeout=5,
-                socket_timeout=5,
-                retry_on_timeout=True,
-                max_connections=20
-            )
-            # Test connection
-            try:
-                await self.async_redis.ping()
-                logger.info("Async Redis connection established successfully")
-            except Exception as e:
-                logger.error(f"Failed to connect to async Redis: {e}")
-                raise
-        return self.async_redis
-    
-    def set_json(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
-        """Set JSON value in Redis."""
-        try:
-            client = self.connect()
-            return client.set(key, json.dumps(value, cls=UUIDJSONEncoder), ex=ex)
-        except Exception as e:
-            logger.error(f"Failed to set JSON in Redis: {e}")
-            return False
-    
-    def get_json(self, key: str) -> Optional[Any]:
-        """Get JSON value from Redis."""
-        try:
-            client = self.connect()
-            value = client.get(key)
-            return json.loads(value) if value else None
-        except Exception as e:
-            logger.error(f"Failed to get JSON from Redis: {e}")
-            return None
-    
-    async def set_json_async(self, key: str, value: Any, ex: Optional[int] = None) -> bool:
-        """Set JSON value in Redis asynchronously."""
-        try:
-            client = await self.connect_async()
-            return await client.set(key, json.dumps(value, cls=UUIDJSONEncoder), ex=ex)
-        except Exception as e:
-            logger.error(f"Failed to set JSON in async Redis: {e}")
-            return False
-    
-    async def get_json_async(self, key: str) -> Optional[Any]:
-        """Get JSON value from Redis asynchronously."""
-        try:
-            client = await self.connect_async()
-            value = await client.get(key)
-            return json.loads(value) if value else None
-        except Exception as e:
-            logger.error(f"Failed to get JSON from async Redis: {e}")
-            return None
-    
-    def close(self):
-        """Close Redis connections."""
-        if self.redis:
-            self.redis.close()
-            self.redis = None
-        if self.async_redis:
-            # Note: async redis doesn't have close method, connection pool handles it
-            self.async_redis = None
+    """
+    Async Redis client wrapper with connection pooling and error handling.
+    """
+    _instance: Optional['RedisClient'] = None
+    _client: Optional[redis.Redis] = None
 
-# Global Redis client instance
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(RedisClient, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self):
+        # Singleton initialization check
+        if self._client is not None:
+            return
+
+        try:
+            # redis.asyncio.from_url handles connection pooling automatically
+            logger.info(f"Connecting to Redis at {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+            self._client = redis.from_url(
+                settings.REDIS_URL, 
+                encoding="utf-8", 
+                decode_responses=True,
+                socket_connect_timeout=5,
+                socket_keepalive=True
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize Redis client: {e}")
+            self._client = None
+
+    async def get_client(self) -> redis.Redis:
+        """Get the underlying redis client instance."""
+        if self._client is None:
+             # Re-try initialization if it failed previously
+             self.__init__()
+        return self._client
+
+    async def close(self):
+        """Close the redis connection."""
+        if self._client:
+            await self._client.close()
+            logger.info("Redis connection closed")
+
+    async def ping(self) -> bool:
+        """Check redis connection health."""
+        if not self._client:
+            return False
+        try:
+            return await self._client.ping()
+        except Exception as e:
+            logger.error(f"Redis ping failed: {e}")
+            return False
+
+    async def get(self, key: str) -> Optional[str]:
+        """Get a value by key."""
+        if not self._client: return None
+        try:
+            return await self._client.get(key)
+        except Exception as e:
+            logger.error(f"Redis get error for key {key}: {e}")
+            return None
+
+    async def set(self, key: str, value: Any, ttl: Optional[int] = None) -> bool:
+        """Set a value with optional TTL (seconds)."""
+        if not self._client: return False
+        try:
+            return await self._client.set(key, value, ex=ttl)
+        except Exception as e:
+            logger.error(f"Redis set error for key {key}: {e}")
+            return False
+
+    async def delete(self, key: str) -> bool:
+        """Delete a key."""
+        if not self._client: return False
+        try:
+            return await self._client.delete(key) > 0
+        except Exception as e:
+            logger.error(f"Redis delete error for key {key}: {e}")
+            return False
+
+# Global instance
 redis_client = RedisClient()
 
-def get_redis() -> redis.Redis:
-    """Dependency to get Redis client."""
-    return redis_client.connect()
-
-async def get_redis_async() -> AsyncRedis:
-    """Dependency to get async Redis client."""
-    return await redis_client.connect_async()
-
-def get_redis_client() -> RedisClient:
-    """Dependency to get RedisClient instance."""
-    return redis_client
+async def get_redis_async() -> redis.Redis:
+    """Compatibility helper for legacy code."""
+    return await redis_client.get_client()

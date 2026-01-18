@@ -515,7 +515,9 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_DB: int = 0
+    REDIS_DB: int = 0
     REDIS_PASSWORD: Optional[str] = None
+    REDIS_URL: Optional[str] = None
     POSTGRES_USER: str = "spoton_user"
     POSTGRES_PASSWORD: str = "spoton_password"
     POSTGRES_SERVER: str = "localhost"
@@ -639,6 +641,14 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         super().model_post_init(__context)
         self._apply_environment_templates()
+        
+        if not self.DATABASE_URL:
+            self.DATABASE_URL = f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+            
+        if not hasattr(self, 'REDIS_URL') or not self.REDIS_URL:
+             # Construct Redis URL if not present (although not explicitly defined as a field yet, useful for clients)
+            auth_part = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+            self.REDIS_URL = f"redis://{auth_part}{self.REDIS_HOST}:{self.REDIS_PORT}/{self.REDIS_DB}"
 
     def _apply_environment_templates(self) -> None:
         templates = self.ENVIRONMENT_TEMPLATES

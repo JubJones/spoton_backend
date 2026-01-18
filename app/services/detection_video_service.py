@@ -53,6 +53,8 @@ from app.services.handoff_manager import HandoffManager
 from app.services.global_person_registry import GlobalPersonRegistry
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
+from app.infrastructure.cache.redis_client import redis_client
+from app.infrastructure.database.models import TrackingEvent, PersonTrajectory
 
 logger = logging.getLogger(__name__)
 
@@ -1397,6 +1399,13 @@ class DetectionVideoService(RawVideoService):
             
             _func_total = (_time.perf_counter() - _func_start) * 1000
             
+            # Phase 6: Persistence Integration
+            await self._persist_tracking_data(
+                camera_id, 
+                detection_data, 
+                datetime.now(timezone.utc)
+            )
+
             # Log granular timing
             speed_optimize_logger.info(
                 "[SPEED_DEBUG] send_detection_update | Cam=%s Frame=%d | Total=%.1fms | FocusFilter=%.1fms MJPEG=%.1fms Mapping=%.1fms MsgBuild=%.1fms WsSend=%.1fms",
@@ -2898,5 +2907,99 @@ class DetectionVideoService(RawVideoService):
             return None
 
 
+    async def _persist_tracking_data(
+        self,
+        camera_id: str,
+        detection_data: Dict[str, Any],
+        timestamp: datetime
+    ):
+        """
+        Persist tracking events to TimescaleDB and cache active state to Redis.
+        Run asynchronously to avoid blocking the main processing loop.
+        """
+        try:
+            tracks = detection_data.get("tracks", [])
+            if not tracks:
+                return
+
+            # 1. Redis Caching (Fire and forget)
+            # Cache active tracks for this camera
+            cache_key = f"active_tracks:{camera_id}"
+            await redis_client.set(cache_key, json.dumps(tracks), ttl=5)
+            
+            # 2. Database Persistence (Background thread)
+            if settings.DB_ENABLED:
+                await asyncio.to_thread(self._save_events_to_db, camera_id, tracks, timestamp)
+
+        except Exception as e:
+            logger.error(f"Persistence error for {camera_id}: {e}")
+
+    def _save_events_to_db(self, camera_id: str, tracks: List[Dict[str, Any]], timestamp: datetime):
+        """Synchronous DB write function to be run in a thread."""
+        try:
+            from app.infrastructure.database.base import get_session_factory
+            SessionLocal = get_session_factory()
+            
+            if SessionLocal is None:
+                return
+            
+            # Get environment ID
+            environment_id = self._get_environment_for_camera(camera_id) or "default_env"
+                
+            session = SessionLocal()
+            try:
+                events = []
+                for track in tracks:
+                    # Extract map coords safely
+                    map_coords = track.get("map_coords") or {}
+                    mx = map_coords.get("map_x")
+                    my = map_coords.get("map_y")
+                    
+                    bbox = track.get("bbox_xyxy") or [0,0,0,0]
+                    
+                    # Ensure global_id is present
+                    global_id = track.get("global_id")
+                    if not global_id:
+                        continue 
+
+                    event = TrackingEvent(
+                        timestamp=timestamp, # Using timestamp field from model
+                        global_person_id=global_id,
+                        camera_id=camera_id,
+                        environment_id=environment_id,
+                        event_type="detection",
+                        
+                        # Location
+                        position_x=mx,
+                        position_y=my,
+                        
+                        # Local track info
+                        track_id=str(track.get("track_id")),
+                        
+                        # Bounding Box
+                        bbox_x1=float(bbox[0]),
+                        bbox_y1=float(bbox[1]),
+                        bbox_x2=float(bbox[2]),
+                        bbox_y2=float(bbox[3]),
+                        
+                        # Confidence
+                        detection_confidence=track.get("confidence"),
+                        
+                        # Metadata
+                        event_metadata=track.get("spatial_data")
+                    )
+                    events.append(event)
+                
+                if events:
+                    session.add_all(events)
+                    session.commit()
+            except Exception as e:
+                logger.error(f"DB Insert failed: {e}")
+                session.rollback()
+            finally:
+                session.close()
+
+        except Exception as e:
+            logger.error(f"Error in _save_events_to_db: {e}")
 # Global detection video service instance
 detection_video_service = DetectionVideoService()
