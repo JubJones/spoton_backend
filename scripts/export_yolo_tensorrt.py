@@ -56,8 +56,28 @@ def check_tensorrt_available():
         print("⚠️  TensorRT Python package not found.")
         print("   Ultralytics will attempt to use TensorRT via the engine export.")
         print("   If export fails, install TensorRT:")
-        print("   pip install tensorrt")
         return False
+
+
+def fix_yolo_serialization():
+    """
+    Workaround for 'AttributeError: Can't get attribute 'PatchedC3k2' on <module '__main__'...'.
+    This happens when loading certain YOLO checkpoint versions.
+    We map the missing class to the standard C3k2 block.
+    """
+    try:
+        import sys
+        from ultralytics.nn.modules import block
+        
+        # Check if C3k2 exists (YOLO11 specific)
+        if hasattr(block, 'C3k2'):
+            # Map __main__.PatchedC3k2 to real C3k2
+            if not hasattr(sys.modules['__main__'], 'PatchedC3k2'):
+                setattr(sys.modules['__main__'], 'PatchedC3k2', block.C3k2)
+                print("🔧 Applied fix: Mapped __main__.PatchedC3k2 to ultralytics.nn.modules.block.C3k2")
+    except Exception as e:
+        print(f"⚠️  Could not apply serialization fix: {e}")
+
 
 
 def export_to_tensorrt(
@@ -100,6 +120,7 @@ def export_to_tensorrt(
     print(f"{'='*60}\n")
     
     # Load the model
+    fix_yolo_serialization() # Apply patch before loading
     print("Loading PyTorch model...")
     model = YOLO(str(model_path))
     

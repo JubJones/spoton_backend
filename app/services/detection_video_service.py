@@ -366,28 +366,29 @@ class DetectionVideoService(RawVideoService):
                 if os.path.isfile(candidate):
                     return candidate
 
-            # 2) External base dir (YOLO-specific naming)
+            # 2) External base dir (Generic environment specific naming)
             if getattr(settings, "EXTERNAL_WEIGHTS_BASE_DIR", None):
                 # Try TensorRT first if enabled
                 if use_tensorrt:
-                    candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"yolo11l_{env_key}.engine")
+                    candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.engine")
                     if os.path.isfile(candidate):
                         logger.info(f"🚀 Using TensorRT engine: {candidate}")
                         return candidate
                 # Fallback to .pt
-                candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"yolo11l_{env_key}.pt")
+                candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.pt")
                 if os.path.isfile(candidate):
                     return candidate
 
-            # 3) Local weights dir (YOLO-specific naming)
+            # 3) Local weights dir (Generic environment specific naming)
+            # Try specific environment naming if files exist (e.g. campus.pt)
             # Try TensorRT first if enabled
             if use_tensorrt:
-                candidate = os.path.join("weights", f"yolo11l_{env_key}.engine")
+                candidate = os.path.join("weights", f"{env_key}.engine")
                 if os.path.isfile(candidate):
                     logger.info(f"🚀 Using TensorRT engine: {candidate}")
                     return candidate
             # Fallback to .pt
-            candidate = os.path.join("weights", f"yolo11l_{env_key}.pt")
+            candidate = os.path.join("weights", f"{env_key}.pt")
             if os.path.isfile(candidate):
                 return candidate
 

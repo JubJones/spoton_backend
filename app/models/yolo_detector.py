@@ -46,7 +46,7 @@ class YOLODetector(AbstractDetector):
     Uses YOLO11-L model for person detection with real-time performance.
     """
     
-    def __init__(self, model_name: str = "yolo11l.pt", confidence_threshold: float = 0.5):
+    def __init__(self, model_name: str = "yolo26n.pt", confidence_threshold: float = 0.5):
         """
         Initialize YOLO detector.
         
