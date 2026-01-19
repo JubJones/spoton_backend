@@ -76,6 +76,7 @@ ARG LOCAL_FRAME_EXTRACTION_DIR="./extracted_frames"
 # Define container paths for weights and homography data relative to WORKDIR /app
 ENV CONTAINER_WEIGHTS_DIR_REL="./weights"
 ENV CONTAINER_HOMOGRAPHY_DIR_REL="./homography_data"
+ENV YOLO_MODEL_PATH="weights/yolo26n.pt"
 
 # Create all necessary directories as root BEFORE copying files into them
 RUN mkdir -p "${CONTAINER_WEIGHTS_DIR_REL}" \
