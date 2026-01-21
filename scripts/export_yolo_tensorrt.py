@@ -175,13 +175,14 @@ def export_to_tensorrt(
         sys.exit(1)
 
 
-def benchmark_comparison(pt_model_path: str, engine_path: str, num_runs: int = 50):
+def benchmark_comparison(pt_model_path: str, engine_path: str, batch_size: int = 4, num_runs: int = 50):
     """
     Benchmark PyTorch vs TensorRT inference speed.
     
     Args:
         pt_model_path: Path to PyTorch .pt model
         engine_path: Path to TensorRT .engine model
+        batch_size: Batch size to use for benchmarking
         num_runs: Number of inference runs for benchmarking
     """
     import numpy as np
@@ -191,10 +192,10 @@ def benchmark_comparison(pt_model_path: str, engine_path: str, num_runs: int = 5
     print("BENCHMARK: PyTorch vs TensorRT")
     print(f"{'='*60}")
     
-    # Create dummy batch of 4 images (simulating 4 cameras)
+    # Create dummy batch of 'batch_size' images
     dummy_images = [
         np.random.randint(0, 255, (480, 640, 3), dtype=np.uint8)
-        for _ in range(4)
+        for _ in range(batch_size)
     ]
     
     def benchmark_model(model_path: str, name: str):
@@ -232,7 +233,7 @@ def benchmark_comparison(pt_model_path: str, engine_path: str, num_runs: int = 5
     
     # Print results
     print(f"\n{'='*60}")
-    print("RESULTS (batch of 4 images)")
+    print(f"RESULTS (batch of {batch_size} images)")
     print(f"{'='*60}")
     
     for r in [pt_results, trt_results]:
@@ -339,6 +340,7 @@ def main():
     pt_results, trt_results = benchmark_comparison(
         pt_model_path=str(pt_model),
         engine_path=engine_path,
+        batch_size=32, # Test with full batch capability
         num_runs=50,
     )
     
@@ -358,7 +360,7 @@ def main():
     print(f"   Before: weights/yolo26n.pt")
     print(f"   After:  {Path(engine_path).name}")
     print(f"\nExpected speedup: {pt_results['mean'] / trt_results['mean']:.1f}x faster")
-    print(f"Expected latency: ~{trt_results['mean']:.0f}ms per batch of 4 images")
+    print(f"Expected latency: ~{trt_results['mean']:.0f}ms per batch of 32 images")
     print()
 
 
