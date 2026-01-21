@@ -1258,12 +1258,16 @@ class DetectionVideoService(RawVideoService):
             return False
     
     async def send_detection_update(self, task_id: uuid.UUID, camera_id: str, frame: np.ndarray,
-                                   detection_data: Dict[str, Any], frame_number: int):
+                                   detection_data: Dict[str, Any], frame_number: int,
+                                   pre_encoded_jpeg_bytes: Optional[bytes] = None):
         """
         Send detection update via WebSocket with Phase 4 spatial intelligence data.
         
         Follows DETECTION.md schema with populated homography and handoff data
         replacing the previous static null values with actual spatial intelligence results.
+        
+        Args:
+            pre_encoded_jpeg_bytes: Optional pre-encoded MJPEG frame bytes to avoid re-encoding overhead.
         """
         import time as _time
         _func_start = _time.perf_counter()
@@ -1284,10 +1288,16 @@ class DetectionVideoService(RawVideoService):
 
             # Step 2: MJPEG Streaming - encode and push frame
             _mjpeg_start = _time.perf_counter()
-            if frame is not None:
+            jpeg_bytes = None
+            
+            # Use pre-encoded bytes if available, otherwise encode
+            if pre_encoded_jpeg_bytes is not None:
+                jpeg_bytes = pre_encoded_jpeg_bytes
+            elif frame is not None:
                 jpeg_bytes = self.annotator.frame_to_jpeg_bytes(frame)
-                if jpeg_bytes:
-                    await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
+                
+            if jpeg_bytes:
+                await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
             _mjpeg_time = (_time.perf_counter() - _mjpeg_start) * 1000
 
             # Step 3: Prepare homography and mapping data
@@ -1359,8 +1369,8 @@ class DetectionVideoService(RawVideoService):
                     "frame_image_base64": None,
                     "original_frame_base64": None,
                     "tracks": payload_data.get("tracks", []),
-                    "frame_width": frame.shape[1],
-                    "frame_height": frame.shape[0], 
+                    "frame_width": frame.shape[1] if frame is not None else 0,
+                    "frame_height": frame.shape[0] if frame is not None else 0, 
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 },
                 "detection_data": payload_data,
@@ -1379,16 +1389,16 @@ class DetectionVideoService(RawVideoService):
             
             # Optional on-disk frame cache (sampled)
             try:
-                if getattr(settings, 'STORE_EXTRACTED_FRAMES', False) and annotated_frame is not None:
+                if getattr(settings, 'STORE_EXTRACTED_FRAMES', False):
                     sample_rate = int(getattr(settings, 'FRAME_CACHE_SAMPLE_RATE', 0))
                     if sample_rate and frame_number % sample_rate == 0:
                         cache_dir = Path(getattr(settings, 'FRAME_CACHE_DIR', './extracted_frames')) / str(task_id) / str(camera_id)
                         cache_dir.mkdir(parents=True, exist_ok=True)
                         out_path = cache_dir / f"frame_{frame_number:06d}.jpg"
                         
-                        bytes_to_write = locals().get('jpeg_bytes')
-                        if not bytes_to_write:
-                             bytes_to_write = self.annotator.frame_to_jpeg_bytes(annotated_frame)
+                        bytes_to_write = jpeg_bytes
+                        if not bytes_to_write and frame is not None:
+                             bytes_to_write = self.annotator.frame_to_jpeg_bytes(frame)
                         
                         if bytes_to_write:
                             await asyncio.to_thread(out_path.write_bytes, bytes_to_write)
@@ -2156,6 +2166,33 @@ class DetectionVideoService(RawVideoService):
                                 pass # logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
                 _space_match_time = (_time.perf_counter() - _space_start) * 1000
 
+                # === PARALLELIZATION FIX: Encode MJPEG frames concurrently ===
+                # This avoids sequential blocking in WsSend (Cause 1 bottleneck)
+                _enc_start = _time.perf_counter()
+                pre_encoded_frames = {}
+                
+                async def _encode_frame(cid, frm):
+                     try:
+                         # Run CPU-bound encoding in thread pool
+                         if frm is not None:
+                             return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm)
+                         return cid, None
+                     except Exception:
+                         return cid, None
+
+                # Create encoding tasks for all cameras
+                encoding_tasks = [
+                    _encode_frame(cid, data[0]) 
+                    for cid, data in frame_camera_data.items()
+                ]
+                
+                # Run all in parallel
+                if encoding_tasks:
+                    encoded_results = await asyncio.gather(*encoding_tasks)
+                    pre_encoded_frames = {cid: b for cid, b in encoded_results if b is not None}
+                
+                _enc_time = (_time.perf_counter() - _enc_start) * 1000
+
                 # 3. Send Updates and Emit Debug
                 _ws_start = _time.perf_counter()
                 for camera_id, (frame, detection_data) in frame_camera_data.items():
@@ -2169,9 +2206,10 @@ class DetectionVideoService(RawVideoService):
                         if world_points:
                             frame_debug_payload[camera_id] = {"world_points": world_points}
                     
-                    # Send WebSocket update
+                    # Send WebSocket update (using pre-encoded bytes)
                     await self.send_detection_update(
-                        task_id, camera_id, frame, detection_data, frame_index
+                        task_id, camera_id, frame, detection_data, frame_index,
+                        pre_encoded_jpeg_bytes=pre_encoded_frames.get(camera_id)
                     )
                     if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
                          await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
@@ -2198,9 +2236,9 @@ class DetectionVideoService(RawVideoService):
                 
                 # Log frame batch timing EVERY FRAME for debugging
                 speed_optimize_logger.info(
-                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
+                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
                     frame_index, _batch_time,
-                    _read_time, _batch_det_time, _track_time, _space_match_time, _ws_time,
+                    _read_time, _batch_det_time, _track_time, _space_match_time, _enc_time, _ws_time,
                     len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
                 )
                 
