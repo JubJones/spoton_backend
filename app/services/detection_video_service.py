@@ -330,77 +330,81 @@ class DetectionVideoService(RawVideoService):
             env_key = (environment_id or "").strip().lower()
             use_tensorrt_setting = getattr(settings, "USE_TENSORRT", False)
             
-            # TensorRT requires CUDA - automatically disable on CPU/Mac
+            # AUTO-CONFIGURATION logic for Hybrid Deployment
+            # If CUDA is available, we check for .engine files and prefer them.
+            # If CUDA is NOT available (CPU image), we fall back to .pt files.
             cuda_available = torch.cuda.is_available()
-            use_tensorrt = use_tensorrt_setting and cuda_available
             
+            # Helper to check if we should use engine
+            def should_use_engine(engine_path):
+                if cuda_available and os.path.isfile(engine_path):
+                    return True
+                return False
+
             if use_tensorrt_setting and not cuda_available:
+                # Only warn if explicitly requested but not available
                 logger.warning(
                     "USE_TENSORRT=true but CUDA not available (running on CPU/Mac). "
                     "Falling back to PyTorch model (.pt)"
                 )
             
-            # Determine file extension based on TensorRT setting
-            ext = ".engine" if use_tensorrt else ".pt"
-            
             # 1) Settings override
             if env_key == "factory" and getattr(settings, "YOLO_MODEL_PATH_FACTORY", None):
                 candidate = settings.YOLO_MODEL_PATH_FACTORY
-                # If TensorRT enabled, try .engine version first
-                if use_tensorrt:
-                    engine_candidate = candidate.replace(".pt", ".engine")
-                    if os.path.isfile(engine_candidate):
-                        logger.info(f"🚀 Using TensorRT engine: {engine_candidate}")
-                        return engine_candidate
+                # Try .engine version first if on CUDA
+                engine_candidate = candidate.replace(".pt", ".engine")
+                if should_use_engine(engine_candidate):
+                    logger.info(f"🚀 Using TensorRT engine (Auto-detected): {engine_candidate}")
+                    return engine_candidate
                 if os.path.isfile(candidate):
+                    logger.info(f"📂 Using PyTorch model: {candidate}")
                     return candidate
                     
             if env_key == "campus" and getattr(settings, "YOLO_MODEL_PATH_CAMPUS", None):
                 candidate = settings.YOLO_MODEL_PATH_CAMPUS
-                # If TensorRT enabled, try .engine version first
-                if use_tensorrt:
-                    engine_candidate = candidate.replace(".pt", ".engine")
-                    if os.path.isfile(engine_candidate):
-                        logger.info(f"🚀 Using TensorRT engine: {engine_candidate}")
-                        return engine_candidate
+                # Try .engine version first if on CUDA
+                engine_candidate = candidate.replace(".pt", ".engine")
+                if should_use_engine(engine_candidate):
+                    logger.info(f"🚀 Using TensorRT engine (Auto-detected): {engine_candidate}")
+                    return engine_candidate
                 if os.path.isfile(candidate):
+                    logger.info(f"📂 Using PyTorch model: {candidate}")
                     return candidate
 
-            # 2) External base dir (Generic environment specific naming)
+            # 2) External base dir
             if getattr(settings, "EXTERNAL_WEIGHTS_BASE_DIR", None):
-                # Try TensorRT first if enabled
-                if use_tensorrt:
-                    candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.engine")
-                    if os.path.isfile(candidate):
-                        logger.info(f"🚀 Using TensorRT engine: {candidate}")
-                        return candidate
-                # Fallback to .pt
+                # Check for engine first
+                engine_candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.engine")
+                if should_use_engine(engine_candidate):
+                     logger.info(f"🚀 Using TensorRT engine (Auto-detected): {engine_candidate}")
+                     return engine_candidate
+                     
                 candidate = os.path.join(settings.EXTERNAL_WEIGHTS_BASE_DIR, f"{env_key}.pt")
                 if os.path.isfile(candidate):
+                    logger.info(f"📂 Using PyTorch model: {candidate}")
                     return candidate
 
-            # 3) Local weights dir (Generic environment specific naming)
-            # Try specific environment naming if files exist (e.g. campus.pt)
-            # Try TensorRT first if enabled
-            if use_tensorrt:
-                candidate = os.path.join("weights", f"{env_key}.engine")
-                if os.path.isfile(candidate):
-                    logger.info(f"🚀 Using TensorRT engine: {candidate}")
-                    return candidate
-            # Fallback to .pt
+            # 3) Local weights dir
+            # Check for engine first
+            engine_candidate = os.path.join("weights", f"{env_key}.engine")
+            if should_use_engine(engine_candidate):
+                logger.info(f"🚀 Using TensorRT engine (Auto-detected): {engine_candidate}")
+                return engine_candidate
+                
             candidate = os.path.join("weights", f"{env_key}.pt")
             if os.path.isfile(candidate):
+                logger.info(f"📂 Using PyTorch model: {candidate}")
                 return candidate
 
-            # 4) Global default - TensorRT path if enabled, else PyTorch
-            if use_tensorrt:
-                tensorrt_path = getattr(settings, "YOLO_MODEL_PATH_TENSORRT", None)
-                if tensorrt_path and os.path.isfile(tensorrt_path):
-                    logger.info(f"🚀 Using TensorRT engine: {tensorrt_path}")
-                    return tensorrt_path
-                # Warn if TensorRT enabled but no engine found
-                logger.warning(f"USE_TENSORRT=true but no .engine file found. Falling back to PyTorch model.")
-            
+            # 4) Global default
+            # Check for generic yolo26n.engine
+            tensorrt_path = getattr(settings, "YOLO_MODEL_PATH_TENSORRT", "weights/yolo26n.engine")
+            if should_use_engine(tensorrt_path):
+                logger.info(f"🚀 Using TensorRT engine (Auto-detected): {tensorrt_path}")
+                return tensorrt_path
+                
+            # Default to PT
+            logger.info(f"📂 Using PyTorch model (Default): {settings.YOLO_MODEL_PATH}")
             return settings.YOLO_MODEL_PATH
         except Exception:
             return settings.YOLO_MODEL_PATH
