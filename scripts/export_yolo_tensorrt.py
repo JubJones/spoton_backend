@@ -75,6 +75,13 @@ def fix_yolo_serialization():
             if not hasattr(sys.modules['__main__'], 'PatchedC3k2'):
                 setattr(sys.modules['__main__'], 'PatchedC3k2', block.C3k2)
                 print("🔧 Applied fix: Mapped __main__.PatchedC3k2 to ultralytics.nn.modules.block.C3k2")
+
+        # Check if SPPF exists (common in YOLO)
+        if hasattr(block, 'SPPF'):
+            # Map __main__.PatchedSPPF to real SPPF
+            if not hasattr(sys.modules['__main__'], 'PatchedSPPF'):
+                setattr(sys.modules['__main__'], 'PatchedSPPF', block.SPPF)
+                print("🔧 Applied fix: Mapped __main__.PatchedSPPF to ultralytics.nn.modules.block.SPPF")
     except Exception as e:
         print(f"⚠️  Could not apply serialization fix: {e}")
 
