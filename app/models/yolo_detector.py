@@ -40,6 +40,51 @@ speed_debug_logger.addHandler(_speed_file_handler)
 speed_debug_logger.propagate = True  # Also show in console
 
 
+
+def fix_yolo_serialization():
+    """
+    Workaround for 'AttributeError: Can't get attribute 'PatchedC3k2' on <module '__main__'...'.
+    This happens when loading certain YOLO checkpoint versions (like YOLO11/26).
+    We map the missing class to the standard C3k2 block in ultralytics.
+    """
+    try:
+        import sys
+        from ultralytics.nn.modules import block
+        
+        # Check if C3k2 exists (YOLO11 specific)
+        if hasattr(block, 'C3k2'):
+            # Map __main__.PatchedC3k2 to real C3k2
+            # Use 'app.main' if running via uvicorn/fastapi, or '__main__' for scripts
+            # The error log showed <module '__mp_main__' ...> or similar, often mapping to main scope.
+            # We'll try to set it on sys.modules['__main__'] and maybe others if needed.
+            
+            # Define the mapping of patched names to real classes
+            # We add PatchedSPPF based on the latest error report
+            mapping = {
+                'PatchedC3k2': 'C3k2',
+                'PatchedSPPF': 'SPPF',
+                'PatchedConv': 'Conv', # Pre-emptive add: common in some exports
+                'PatchedBottleneck': 'Bottleneck', # Pre-emptive add
+            }
+
+            target_modules = ['__main__', 'app.main']
+            patched = False
+            
+            for mod_name in target_modules:
+                if mod_name in sys.modules:
+                    mod = sys.modules[mod_name]
+                    for patched_name, real_name in mapping.items():
+                        if not hasattr(mod, patched_name) and hasattr(block, real_name):
+                            setattr(mod, patched_name, getattr(block, real_name))
+                            patched = True
+            
+            if patched:
+                logger.debug("🔧 Applied serialization fix: Mapped patched classes to ultralytics.nn.modules.block")
+                
+    except Exception as e:
+        logger.warning(f"⚠️ Could not apply serialization fix: {e}")
+
+
 class YOLODetector(AbstractDetector):
     """
     YOLO detector implementation using Ultralytics.
@@ -112,6 +157,7 @@ class YOLODetector(AbstractDetector):
             
             # Ultralytics YOLO automatically handles .engine files
             # For TensorRT engines, explicitly specify task='detect' to avoid auto-detection warning
+            fix_yolo_serialization()
             if self.is_tensorrt:
                 self.model = YOLO(self.model_name, task='detect')
             else:
