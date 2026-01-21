@@ -475,9 +475,11 @@ class BinaryWebSocketManager:
                 # logger.debug(f"Empty connection list for task_id: {task_id}")
                 return False
             
-            # Convert to JSON
-            message_json = json.dumps(message)
-            message_bytes = message_json.encode('utf-8')
+            # Convert to JSON (Offloaded to thread)
+            def _serialize():
+                return json.dumps(message).encode('utf-8')
+            
+            message_bytes = await asyncio.to_thread(_serialize)
             
             # Check message size limits
             if len(message_bytes) > self.max_message_size:
@@ -485,17 +487,16 @@ class BinaryWebSocketManager:
                 
                 # Try aggressive compression for large messages
                 try:
-                    compressed_data = gzip.compress(message_bytes, compresslevel=9)
+                    compressed_data = await asyncio.to_thread(gzip.compress, message_bytes, 9)
                     if len(compressed_data) > self.max_message_size:
                         logger.error(f"❌ WS DEBUG: Message still too large after compression ({len(compressed_data)} bytes) for task_id: {task_id}")
                         # Try to reduce frame data or split message
                         message = await self._reduce_message_size(message)
-                        message_json = json.dumps(message)
-                        message_bytes = message_json.encode('utf-8')
+                        message_bytes = await asyncio.to_thread(json.dumps(message).encode, 'utf-8')
                         # logger.info(f"🔧 WS DEBUG: Reduced message size to {len(message_bytes)} bytes for task_id: {task_id}")
                     else:
                         message_bytes = compressed_data
-                        # logger.info(f"✅ WS DEBUG: Compressed large message from {len(message_json.encode('utf-8'))} to {len(compressed_data)} bytes for task_id: {task_id}")
+                        # logger.info(f"✅ WS DEBUG: Compressed large message from {len(message_bytes)} to {len(compressed_data)} bytes for task_id: {task_id}")
                 except Exception as e:
                     logger.error(f"❌ WS DEBUG: Failed to compress large message for task_id: {task_id}: {e}")
                     return False
@@ -505,7 +506,7 @@ class BinaryWebSocketManager:
             compressed_data = message_bytes
             
             if self.enable_compression and len(message_bytes) > self.compression_threshold and len(message_bytes) <= self.max_message_size:
-                test_compressed = gzip.compress(message_bytes, compresslevel=self.compression_level)
+                test_compressed = await asyncio.to_thread(gzip.compress, message_bytes, self.compression_level)
                 compression_ratio = len(test_compressed) / len(message_bytes)
                 
                 if compression_ratio < 0.9:
