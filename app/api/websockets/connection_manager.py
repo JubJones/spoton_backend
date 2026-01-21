@@ -477,9 +477,10 @@ class BinaryWebSocketManager:
             
             # Convert to JSON (Offloaded to thread)
             def _serialize():
-                return json.dumps(message).encode('utf-8')
+                return json.dumps(message)
             
-            message_bytes = await asyncio.to_thread(_serialize)
+            message_json = await asyncio.to_thread(_serialize)
+            message_bytes = await asyncio.to_thread(message_json.encode, 'utf-8')
             
             # Check message size limits
             if len(message_bytes) > self.max_message_size:
@@ -492,7 +493,8 @@ class BinaryWebSocketManager:
                         logger.error(f"❌ WS DEBUG: Message still too large after compression ({len(compressed_data)} bytes) for task_id: {task_id}")
                         # Try to reduce frame data or split message
                         message = await self._reduce_message_size(message)
-                        message_bytes = await asyncio.to_thread(json.dumps(message).encode, 'utf-8')
+                        message_json = await asyncio.to_thread(json.dumps, message)
+                        message_bytes = await asyncio.to_thread(message_json.encode, 'utf-8')
                         # logger.info(f"🔧 WS DEBUG: Reduced message size to {len(message_bytes)} bytes for task_id: {task_id}")
                     else:
                         message_bytes = compressed_data
