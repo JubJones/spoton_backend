@@ -69,19 +69,30 @@ def fix_yolo_serialization():
         import sys
         from ultralytics.nn.modules import block
         
-        # Check if C3k2 exists (YOLO11 specific)
-        if hasattr(block, 'C3k2'):
-            # Map __main__.PatchedC3k2 to real C3k2
-            if not hasattr(sys.modules['__main__'], 'PatchedC3k2'):
-                setattr(sys.modules['__main__'], 'PatchedC3k2', block.C3k2)
-                print("🔧 Applied fix: Mapped __main__.PatchedC3k2 to ultralytics.nn.modules.block.C3k2")
+        # Helper to safely set main attribute
+        def safe_set_main(name, cls):
+            if not hasattr(sys.modules['__main__'], name):
+                setattr(sys.modules['__main__'], name, cls)
+                print(f"🔧 Applied fix: Mapped __main__.{name} to {cls.__module__}.{cls.__name__}")
 
-        # Check if SPPF exists (common in YOLO)
-        if hasattr(block, 'SPPF'):
-            # Map __main__.PatchedSPPF to real SPPF
-            if not hasattr(sys.modules['__main__'], 'PatchedSPPF'):
-                setattr(sys.modules['__main__'], 'PatchedSPPF', block.SPPF)
-                print("🔧 Applied fix: Mapped __main__.PatchedSPPF to ultralytics.nn.modules.block.SPPF")
+        # Fix C3k2
+        if hasattr(block, 'C3k2'):
+            safe_set_main('PatchedC3k2', block.C3k2)
+
+        # Fix SPPF - Try multiple ways to get it
+        SPPF = getattr(block, 'SPPF', None)
+        if SPPF is None:
+            try:
+                from ultralytics.nn.modules.block import SPPF as _SPPF
+                SPPF = _SPPF
+            except ImportError:
+                 pass
+        
+        if SPPF:
+            safe_set_main('PatchedSPPF', SPPF)
+        else:
+             print("⚠️ Warning: SPPF class not found in ultralytics modules for patching.")
+
     except Exception as e:
         print(f"⚠️  Could not apply serialization fix: {e}")
 
