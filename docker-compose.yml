@@ -23,7 +23,9 @@ services:
       - ./weights:/app/weights
       - ./scripts:/app/scripts # For running TensorRT export inside container
       - ./videos:/app/videos:ro
+      - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
+      - ./speed_debug.log:/app/speed_debug.log
     env_file:
       - .env
     environment:
