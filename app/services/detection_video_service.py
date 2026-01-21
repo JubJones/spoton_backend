@@ -2193,28 +2193,47 @@ class DetectionVideoService(RawVideoService):
                 
                 _enc_time = (_time.perf_counter() - _enc_start) * 1000
 
-                # 3. Send Updates and Emit Debug
+                # 3. Send Updates and Emit Debug (PARALLELIZED)
                 _ws_start = _time.perf_counter()
-                for camera_id, (frame, detection_data) in frame_camera_data.items():
-                    # Collect debug points (now with global_ids injected)
+                
+                async def _process_camera_update(cid, frm, data, pre_encoded_bytes):
+                    local_debug = None
+                    # Collect debug points
                     if self.enable_debug_reprojection:
-                        world_points = self._collect_world_points(
-                            detection_data=detection_data,
-                            camera_id=camera_id,
-                            frame_number=frame_index,
-                        )
-                        if world_points:
-                            frame_debug_payload[camera_id] = {"world_points": world_points}
+                         world_points = self._collect_world_points(
+                            detection_data=data,
+                            camera_id=cid,
+                            frame_number=frame_index
+                         )
+                         if world_points:
+                            local_debug = {"world_points": world_points}
                     
-                    # Send WebSocket update (using pre-encoded bytes)
+                    # Send WebSocket update
                     await self.send_detection_update(
-                        task_id, camera_id, frame, detection_data, frame_index,
-                        pre_encoded_jpeg_bytes=pre_encoded_frames.get(camera_id)
+                        task_id, cid, frm, data, frame_index,
+                        pre_encoded_jpeg_bytes=pre_encoded_bytes
                     )
-                    if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
-                         await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
                     
-                    frames_processed += 1
+                    if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                         await self._emit_frontend_events(task_id, cid, frame_index, data.get("tracks", []))
+                    
+                    return cid, local_debug
+
+                # Create update tasks
+                update_tasks = [
+                    _process_camera_update(cid, *data, pre_encoded_frames.get(cid))
+                    for cid, data in frame_camera_data.items()
+                ]
+
+                # Run parallel
+                if update_tasks:
+                    results = await asyncio.gather(*update_tasks)
+                    # Aggregate results
+                    for cid, debug_data in results:
+                        if debug_data:
+                            frame_debug_payload[cid] = debug_data
+                        frames_processed += 1
+
                 _ws_time = (_time.perf_counter() - _ws_start) * 1000
 
                 # 4. Emit Debug Frame
