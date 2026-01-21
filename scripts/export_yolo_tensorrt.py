@@ -156,6 +156,7 @@ def export_to_tensorrt(
             half=half,
             workspace=workspace_gb,
             device=0,
+            dynamic=True,  # Allow variable batch sizes (1 to batch_size)
             verbose=True,
         )
         
@@ -267,8 +268,16 @@ def validate_detections(pt_model_path: str, engine_path: str):
     pt_model = YOLO(pt_model_path)
     trt_model = YOLO(engine_path)
     
-    pt_results = pt_model(test_image, verbose=False, conf=0.5)
-    trt_results = trt_model(test_image, verbose=False, conf=0.5)
+    # Test 1: Single image inference (validates dynamic batch size support)
+    print("  Testing Batch=1...")
+    pt_results_1 = pt_model(test_image, verbose=False, conf=0.5)
+    trt_results_1 = trt_model(test_image, verbose=False, conf=0.5)
+
+    # Test 2: Batch inference (validates max throughput)
+    print("  Testing Batch=4...")
+    batch_images = [test_image] * 4
+    pt_results = pt_model(batch_images, verbose=False, conf=0.5)
+    trt_results = trt_model(batch_images, verbose=False, conf=0.5)
     
     pt_boxes = pt_results[0].boxes
     trt_boxes = trt_results[0].boxes
