@@ -364,9 +364,10 @@ class YOLODetector(AbstractDetector):
             
             # Detailed timing log to file and console
             total_dets = sum(len(d) for d in batch_detections)
+            model_type = "TRT" if self.is_tensorrt else ("ONNX" if self.is_onnx else "PT")
             speed_debug_logger.info(
-                "[SPEED_DEBUG] YOLO.detect_batch | BatchSize=%d | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | TotalDets=%d",
-                len(images), _batch_total_time, _thread_time, _gpu_infer_time, _parse_time, total_dets
+                "[SPEED_DEBUG] YOLO.detect_batch | Type=%s | BatchSize=%d | Total=%.1fms | Thread=%.1fms | Inference=%.1fms | Parse=%.1fms | TotalDets=%d",
+                model_type, len(images), _batch_total_time, _thread_time, _gpu_infer_time, _parse_time, total_dets
             )
             
             return batch_detections
