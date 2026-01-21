@@ -2126,20 +2126,32 @@ class DetectionVideoService(RawVideoService):
                     
                 _batch_det_time = (_time.perf_counter() - _det_start) * 1000
                 
-                # === PHASE 3: Process each camera with pre-computed detections ===
+                # === PHASE 3: Process each camera with pre-computed detections (PARALLELIZED) ===
                 _track_start = _time.perf_counter()
-                for (camera_id, frame), raw_detections in zip(camera_order, batch_detections):
-                    # Convert raw detections to enhanced format with spatial intelligence
-                    detection_data = self._process_detections_to_format(
-                        raw_detections, frame, camera_id, frame_index
+                
+                async def _process_single_tracking(cid, frm, raw_dets):
+                    # Convert raw detections
+                    d_data = self._process_detections_to_format(
+                        raw_dets, frm, cid, frame_index
                     )
-                    
-                    # Run tracking on the detections (without re-running detection)
-                    detection_data = await self._process_tracking_with_predetected(
-                        frame, camera_id, frame_index, detection_data
+                    # Run tracking (awaitable)
+                    d_data = await self._process_tracking_with_predetected(
+                        frm, cid, frame_index, d_data
                     )
-                    
-                    frame_camera_data[camera_id] = (frame, detection_data)
+                    return cid, frm, d_data
+
+                # Create tasks
+                track_tasks = [
+                    _process_single_tracking(cid, frm, raw_dets)
+                    for (cid, frm), raw_dets in zip(camera_order, batch_detections)
+                ]
+                
+                # Execute parallel
+                if track_tasks:
+                    track_results = await asyncio.gather(*track_tasks)
+                    for cid, frm, d_data in track_results:
+                        frame_camera_data[cid] = (frm, d_data)
+
                 _track_time = (_time.perf_counter() - _track_start) * 1000
 
 
