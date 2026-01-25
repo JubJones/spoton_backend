@@ -91,7 +91,7 @@ class YOLODetector(AbstractDetector):
     Uses YOLO11-L model for person detection with real-time performance.
     """
     
-    def __init__(self, model_name: str = "yolo26n.pt", confidence_threshold: float = 0.5):
+    def __init__(self, model_name: str = "yolo26m.pt", confidence_threshold: float = 0.5):
         """
         Initialize YOLO detector.
         
@@ -169,6 +169,16 @@ class YOLODetector(AbstractDetector):
             
             # Ultralytics YOLO automatically handles .engine files
             # For TensorRT engines, explicitly specify task='detect' to avoid auto-detection warning
+            
+            # CRITICAL CHECK: Ensure model file exists before attempting to load
+            import os
+            import sys
+            if not os.path.exists(self.model_name):
+                logger.critical(f"❌ FATAL: Model file not found at: {self.model_name}")
+                logger.critical("   The container cannot start without the required model weights.")
+                logger.critical("   Please ensure 'yolo26m.pt' (or configured model) is in the weights directory.")
+                sys.exit(1)
+
             fix_yolo_serialization()
             if self.is_tensorrt or self.is_onnx:
                 self.model = YOLO(self.model_name, task='detect')

@@ -539,8 +539,8 @@ class Settings(BaseSettings):
     # YOLO Configuration (YOLO11-L)
     # TensorRT Optimization: Set USE_TENSORRT=true and provide .engine file path for 3-5x speedup
     USE_TENSORRT: bool = Field(default=False, description="Use TensorRT engine for YOLO inference (requires .engine file)")
-    YOLO_MODEL_PATH: str = "weights/yolo26n.pt"
-    YOLO_MODEL_PATH_TENSORRT: str = Field(default="weights/yolo26n.engine", description="TensorRT engine path (used when USE_TENSORRT=true)")
+    YOLO_MODEL_PATH: str = "weights/yolo26m.pt"
+    YOLO_MODEL_PATH_TENSORRT: str = Field(default="weights/yolo26m.engine", description="TensorRT engine path (used when USE_TENSORRT=true)")
     # Optional per-environment model overrides. If provided and file exists,
     # detection will use these weights for the corresponding environment.
     YOLO_MODEL_PATH_CAMPUS: Optional[str] = None

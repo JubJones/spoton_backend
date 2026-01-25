@@ -10,7 +10,7 @@ Usage:
     python scripts/export_yolo_tensorrt.py
 
 The script will:
-1. Load the PyTorch model (yolo26n.pt)
+1. Load the PyTorch model (yolo26m.pt)
 2. Export to TensorRT engine with FP16 precision
 3. Run a benchmark comparison between PyTorch and TensorRT
 4. Validate that detections are consistent
@@ -309,7 +309,7 @@ def main():
     
     # Model paths
     weights_dir = PROJECT_ROOT / "weights"
-    pt_model = weights_dir / "yolo26n.pt"
+    pt_model = weights_dir / "yolo26m.pt"
     
     # Check for model file
     if not pt_model.exists():
@@ -357,7 +357,7 @@ def main():
     print(f"\nTensorRT engine saved to:")
     print(f"   {engine_path}")
     print(f"\nTo use in your application, update the model path in your config:")
-    print(f"   Before: weights/yolo26n.pt")
+    print(f"   Before: weights/yolo26m.pt")
     print(f"   After:  {Path(engine_path).name}")
     print(f"\nExpected speedup: {pt_results['mean'] / trt_results['mean']:.1f}x faster")
     print(f"Expected latency: ~{trt_results['mean']:.0f}ms per batch of 32 images")
