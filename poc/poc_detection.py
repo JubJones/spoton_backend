@@ -119,4 +119,9 @@ async def video_feed():
     return StreamingResponse(frame_generator(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 if __name__ == "__main__":
+    logger.info("🚀 PoC Server Starting!")
+    logger.info("👉 Access via Browser:")
+    logger.info("   - If on the same PC:  http://localhost:8000")
+    logger.info("   - If remote:          http://<YOUR_PC_IP>:8000")
+    
     uvicorn.run(app, host="0.0.0.0", port=8000)
