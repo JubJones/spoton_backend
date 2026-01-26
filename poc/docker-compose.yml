@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  yolo_poc:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      args:
+        PYTORCH_VARIANT: ${PYTORCH_VARIANT_BUILD:-cpu}
+    image: spoton_backend_image:${PYTORCH_VARIANT_BUILD:-cpu}
+    container_name: spoton_yolo_poc
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../app:/app/app
+      - ../weights:/app/weights
+      - ../videos:/app/videos
+      - ./:/app/poc
+    environment:
+      - PYTHONPATH=/app
+      - DETECTION_IMGSZ=640
+    command: python /app/poc/poc_detection.py

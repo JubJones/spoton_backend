@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  yolo_poc_gpu:
+    build:
+      context: ..
+      dockerfile: Dockerfile.gpu
+    image: spoton_backend_image:gpu
+    container_name: spoton_yolo_poc_gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../app:/app/app
+      - ../weights:/app/weights
+      - ../videos:/app/videos
+      - ./:/app/poc
+    environment:
+      - PYTHONPATH=/app
+      - DETECTION_IMGSZ=640
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,video
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    command: python /app/poc/poc_detection.py
