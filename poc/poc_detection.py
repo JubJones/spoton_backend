@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 # Global variables
 model = None
 video_path = "/app/videos/campus/c01/sub_video_01.mp4"
-model_path = "weights/yolo26m.pt"
+model_path = "weights/yolo26m.engine"
 
 
 # Workaround for 'AttributeError: Can't get attribute 'PatchedC3k2'
