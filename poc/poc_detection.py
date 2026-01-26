@@ -21,7 +21,7 @@ logger.setLevel(logging.INFO)
 # Global variables
 model = None
 video_path = "/app/videos/campus/c01/sub_video_01.mp4"
-model_path = "weights/yolo26m.engine"
+model_path = "/app/weights/yolo26m.engine"
 
 
 # Workaround for 'AttributeError: Can't get attribute 'PatchedC3k2'
@@ -61,7 +61,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Loading YOLO model: {model_path}")
     # Load model
     try:
-        model = YOLO(model_path)
+        model = YOLO(model_path, task='detect')
         
         # Warmup
         logger.info("Warming up model...")
