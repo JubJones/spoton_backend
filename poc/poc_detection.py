@@ -20,7 +20,12 @@ logger.setLevel(logging.INFO)
 
 # Global variables
 model = None
-video_path = "/app/videos/campus/c01/sub_video_01.mp4"
+video_paths = [
+    "/app/videos/c09.mp4",
+    "/app/videos/c12.mp4",
+    "/app/videos/c13.mp4",
+    "/app/videos/c16.mp4"
+]
 model_path = "/app/weights/yolo26m.engine"
 
 
@@ -91,11 +96,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 async def frame_generator():
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        logger.error(f"Could not open video file: {video_path}")
-        return
-
+    caps = [cv2.VideoCapture(vp) for vp in video_paths]
+    for i, cap in enumerate(caps):
+        if not cap.isOpened():
+            logger.error(f"Could not open video file: {video_paths[i]}")
+            # Continue anyway, might just have black frames for that one
+    
     # Profiler buckets
     prof_read = []
     prof_detect = []
@@ -108,87 +114,109 @@ async def frame_generator():
     # JPEG Compression Params (Quality 70 = Faster)
     encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 70]
     
+    # Target size for each quadrant
+    target_w = 640
+    target_h = 360  # 16:9 aspect ratio approximation
+    
     while True:
         # --- SPEED PROFILING ---
-        # 1. READ
+        # 1. READ (All 4 streams)
         t0 = time.perf_counter()
-        success, frame = cap.read()
+        frames = []
+        for cap in caps:
+            if not cap.isOpened():
+                # Push blank frame
+                frames.append(np.zeros((target_h, target_w, 3), dtype=np.uint8))
+                continue
+                
+            success, frame = cap.read()
+            if not success:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                success, frame = cap.read()
+                if not success: # Still failed?
+                     frames.append(np.zeros((target_h, target_w, 3), dtype=np.uint8))
+                     continue
+
+            frames.append(frame)
+            
         t_read = (time.perf_counter() - t0) * 1000
-        
-        if not success:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            continue
         
         frame_count += 1
         
-        # 2. DETECT
+        # 2. DETECT & DRAW Loop
         t1 = time.perf_counter()
-        try:
-            # Resize
-            h, w = frame.shape[:2]
-            target_w = 640
-            scale = target_w / w
-            target_h = int(h * scale)
-            resized_frame = cv2.resize(frame, (target_w, target_h))
-            
-            # Predict
-            # classes=[0] -> Person only (Optimization)
-            # half=True -> FP16 (Optimization)
-            # verbose=False -> No stdout noise (Optimization)
-            results = model.predict(
-                resized_frame, 
-                conf=0.5, 
-                classes=[0], 
-                half=True, 
-                verbose=False,
-                device=0 if torch.cuda.is_available() else 'cpu' 
-            )
-            
-            # Parse results
-            detections = []
-            if len(results) > 0:
-                boxes = results[0].boxes
-                if boxes is not None:
-                    # Move to CPU once
-                    xyxy = boxes.xyxy.cpu().numpy()
-                    conf = boxes.conf.cpu().numpy()
-                    # cls = boxes.cls.cpu().numpy() # We know it's person (0)
-                    
-                    for i in range(len(xyxy)):
-                        detections.append((xyxy[i], conf[i]))
-                        
-            # Draw (Coordinate scaling)
-            # We draw on the ORIGINAL frame, so we scale the boxes back up
-            # Alternatively: Draw on resized frame and send that (faster encode), 
-            # but user might want high res view? Let's stick to scaling coordinates back for now.
-            for (box, score) in detections:
-                x1, y1, x2, y2 = box
-                x1 /= scale
-                y1 /= scale
-                x2 /= scale
-                y2 /= scale
+        
+        processed_frames = []
+        
+        for i, frame in enumerate(frames):
+            if frame is None or frame.size == 0: # Should be handled above but double check
+                processed_frames.append(np.zeros((target_h, target_w, 3), dtype=np.uint8))
+                continue
                 
-                cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), (0, 255, 0), 2)
-                cv2.putText(frame, f"Person {score:.2f}", (int(x1), int(y1) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+            try:
+                # Resize first to target quadrant size
+                # Note: We resize BEFORE detection to keep it fast, 
+                # but depending on original resolution we might want to detect on original then resize. 
+                # For POC speed, resize first is better.
+                resized_frame = cv2.resize(frame, (target_w, target_h))
+                
+                # Predict
+                # classes=[0] -> Person only
+                results = model.predict(
+                    resized_frame, 
+                    conf=0.5, 
+                    classes=[0], 
+                    half=True, 
+                    verbose=False,
+                    device=0 if torch.cuda.is_available() else 'cpu' 
+                )
+                
+                # Draw
+                # Plot results directly on the resized frame
+                # .plot() returns BGR numpy array
+                if results:
+                    annotated_frame = results[0].plot(img=resized_frame)
+                else:
+                    annotated_frame = resized_frame
+                
+                # Add Camera Label
+                cv2.putText(annotated_frame, f"CAM {i+1}", (10, 30), 
+                           cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                           
+                processed_frames.append(annotated_frame)
 
-        except Exception as e:
-            logger.error(f"Detection error: {e}")
+            except Exception as e:
+                logger.error(f"Detection error on cam {i}: {e}")
+                # Fallback to just resized frame
+                resized = cv2.resize(frame, (target_w, target_h)) if frame.size > 0 else np.zeros((target_h, target_w, 3), dtype=np.uint8)
+                processed_frames.append(resized)
+
         t_detect = (time.perf_counter() - t1) * 1000
 
-        # 3. DRAW EXTRAS (Info)
+        # 3. COMPOSE GRID & FPS
         t2 = time.perf_counter()
+        
+        # Grid:
+        # [0] [1]
+        # [2] [3]
+        top_row = cv2.hconcat([processed_frames[0], processed_frames[1]])
+        bot_row = cv2.hconcat([processed_frames[2], processed_frames[3]])
+        composite = cv2.vconcat([top_row, bot_row])
+        
         # Simple FPS Calc
-        if frame_count % 10 == 0:
-             curr_time = time.time()
-             fps = 10 / (curr_time - t_last_log)
-             t_last_log = curr_time
-             cv2.putText(frame, f"FPS: {fps:.1f}", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
-        t_draw = (time.perf_counter() - t2) * 1000 # This includes the loop drawing above actually, splitting hairs for PoC
+        curr_time = time.time()
+        fps = 1 / (curr_time - t_last_log) if (curr_time - t_last_log) > 0 else 0
+        t_last_log = curr_time
+        
+        # Smoothed FPS for display
+        cv2.putText(composite, f"TOTAL FPS: {fps:.1f}", (composite.shape[1] - 250, 40), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
+                   
+        t_draw = (time.perf_counter() - t2) * 1000
 
         # 4. ENCODE
-        # OPTIMIZATION: Lower JPEG quality
         t3 = time.perf_counter()
-        ret, buffer = cv2.imencode('.jpg', frame, encode_param)
+        ret, buffer = cv2.imencode('.jpg', composite, encode_param)
         frame_bytes = buffer.tobytes()
         t_encode = (time.perf_counter() - t3) * 1000
 
@@ -198,7 +226,7 @@ async def frame_generator():
         prof_draw.append(t_draw)
         prof_encode.append(t_encode)
         
-        # Log Speed
+        # Log Speed every 20 frames
         if frame_count % 20 == 0:
             avg_read = sum(prof_read) / len(prof_read)
             avg_detect = sum(prof_detect) / len(prof_detect)
@@ -206,7 +234,7 @@ async def frame_generator():
             avg_encode = sum(prof_encode) / len(prof_encode)
             
             logger.info(
-                f"[SPEED] Avg 20 frames: Read={avg_read:.1f}ms | Det={avg_detect:.1f}ms | Enc={avg_encode:.1f}ms | Total={avg_read+avg_detect+avg_encode:.1f}ms"
+                f"[SPEED] Avg 20 frames: Read={avg_read:.1f}ms | Det (4x)={avg_detect:.1f}ms | Grid={avg_draw:.1f}ms | Enc={avg_encode:.1f}ms"
             )
             prof_read = []
             prof_detect = []
