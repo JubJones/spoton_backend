@@ -331,7 +331,7 @@ def main():
     engine_path = export_to_tensorrt(
         model_path=str(pt_model),
         imgsz=640,
-        batch_size=4,   # User requested batch size 4
+        batch_size=2,   # User requested batch size 2 (Should fit in 5GB VRAM)
         half=True,      # FP16 for RTX 4060
         workspace_gb=5, # Optimized based on nvidia-smi (Free ~6.5GB)
     )
