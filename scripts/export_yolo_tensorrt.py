@@ -331,7 +331,7 @@ def main():
     engine_path = export_to_tensorrt(
         model_path=str(pt_model),
         imgsz=640,
-        batch_size=1,   # Reverted to 1 (safest for 8GB GPU with Display)
+        batch_size=16,  # Increased to 16 for batch inference support
         half=True,      # FP16 for RTX 4060
         workspace_gb=4, # 4GB Safe limit
     )
@@ -340,7 +340,7 @@ def main():
     pt_results, trt_results = benchmark_comparison(
         pt_model_path=str(pt_model),
         engine_path=engine_path,
-        batch_size=32, # Test with full batch capability
+        batch_size=16, # Match export batch size
         num_runs=50,
     )
     
