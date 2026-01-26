@@ -23,10 +23,35 @@ model = None
 video_path = "/app/videos/campus/c01/sub_video_01.mp4"
 model_path = "weights/yolo26m.pt"
 
+
+# Workaround for 'AttributeError: Can't get attribute 'PatchedC3k2'
+def fix_yolo_serialization():
+    try:
+        from ultralytics.nn.modules import block
+        
+        # Helper to safely set main attribute
+        def safe_set_main(name, cls):
+            if not hasattr(sys.modules['__main__'], name):
+                setattr(sys.modules['__main__'], name, cls)
+
+        # Fix C3k2
+        if hasattr(block, 'C3k2'):
+            safe_set_main('PatchedC3k2', block.C3k2)
+
+        # Fix SPPF
+        SPPF = getattr(block, 'SPPF', None)
+        if SPPF:
+            safe_set_main('PatchedSPPF', SPPF)
+    except Exception as e:
+        logger.warning(f"Could not apply serialization fix: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global model
     logger.info("Starting Standalone YOLO PoC...")
+    
+    # Apply serialization fix needed for some custom YOLO weights
+    fix_yolo_serialization()
     
     # OPTIMIZATION 1: CUDNN Benchmark
     if torch.cuda.is_available():
