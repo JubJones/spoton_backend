@@ -67,11 +67,16 @@ async def lifespan(app: FastAPI):
         logger.info("Warming up model...")
         # Check if CUDA available for half precision
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
-        model.to(device)
+        
+        # TensorRT/ONNX models don't support .to(), they are device specific or auto-handled
+        if not model_path.endswith('.engine') and not model_path.endswith('.onnx'):
+            model.to(device)
         
         # Dummy inference
         dummy = np.zeros((480, 640, 3), dtype=np.uint8)
-        model.predict(dummy, half=(device=='cuda'), verbose=False)
+        # Pass device argument explicitly for exported models to avoid ambiguity
+        dev_arg = 0 if device == 'cuda' else 'cpu'
+        model.predict(dummy, half=(device=='cuda'), verbose=False, device=dev_arg)
         
         logger.info(f"✅ Model Loaded on {device.upper()}")
         if device == 'cuda':
