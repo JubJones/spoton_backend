@@ -548,7 +548,7 @@ class Settings(BaseSettings):
     YOLO_MODEL_PATH_FACTORY: Optional[str] = None
     # Optional external weights directory (e.g., sibling repo with weights)
     EXTERNAL_WEIGHTS_BASE_DIR: Optional[str] = None
-    YOLO_CONFIDENCE_THRESHOLD: float = 0.5
+    YOLO_CONFIDENCE_THRESHOLD: float = 0.3  # Lowered from 0.5 for NMS-free YOLO26
     YOLO_NMS_THRESHOLD: float = 0.45
     YOLO_INPUT_SIZE: int = 480  # Reduced from 640 to 480 for higher FPS
     DETECTION_ANNOTATION_ENABLED: bool = True
