@@ -368,7 +368,8 @@ class DetectionVideoService(RawVideoService):
             
             # Helper to check if we should use engine
             def should_use_engine(engine_path):
-                if cuda_available and os.path.isfile(engine_path):
+                # Only use engine if USE_TENSORRT is true, CUDA is available, and engine exists
+                if use_tensorrt_setting and cuda_available and os.path.isfile(engine_path):
                     return True
                 return False
 
