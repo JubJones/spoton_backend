@@ -1531,7 +1531,8 @@ class DetectionVideoService(RawVideoService):
                 y2 = float(row[3])
                 track_id = int(row[4]) if row.shape[0] > 4 else -1
                 confidence = float(row[5]) if row.shape[0] > 5 else None
-                class_id = int(row[6]) if row.shape[0] > 6 else 0
+                # Force class_id to 1 (person) for frontend contract, ignoring tracker output which might be 0
+                class_id = 1 
                 track = {
                     "track_id": track_id,
                     "global_id": None,
