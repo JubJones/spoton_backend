@@ -1434,11 +1434,11 @@ class DetectionVideoService(RawVideoService):
             )
 
             # Log granular timing
-            speed_optimize_logger.info(
-                "[SPEED_DEBUG] send_detection_update | Cam=%s Frame=%d | Total=%.1fms | FocusFilter=%.1fms MJPEG=%.1fms Mapping=%.1fms MsgBuild=%.1fms WsSend=%.1fms",
-                camera_id, frame_number, _func_total,
-                _focus_time, _mjpeg_time, _mapping_time, _msg_time, _ws_time
-            )
+            # speed_optimize_logger.info(
+            #     "[SPEED_DEBUG] send_detection_update | Cam=%s Frame=%d | Total=%.1fms | FocusFilter=%.1fms MJPEG=%.1fms Mapping=%.1fms MsgBuild=%.1fms WsSend=%.1fms",
+            #     camera_id, frame_number, _func_total,
+            #     _focus_time, _mjpeg_time, _mapping_time, _msg_time, _ws_time
+            # )
             
             if success:
                 self.detection_stats["websocket_messages_sent"] += 1

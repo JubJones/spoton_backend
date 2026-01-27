@@ -512,6 +512,11 @@ class YOLODetector(AbstractDetector):
                                     class_name=class_name
                                 )
                             )
+                        else:
+                            logger.warning(f"DEBUG_REJECTED: Box clipped to zero area. Original: {box} Clipped: {x1_clipped},{y1_clipped},{x2_clipped},{y2_clipped} Image: {original_w}x{original_h}")
+                    else:
+                        if score_val > 0.3: # Only log if reasonably confident
+                             logger.debug(f"DEBUG_REJECTED: Low confidence. Score: {score_val} Threshold: {self.confidence_threshold}")
         
         return detections_result
 
