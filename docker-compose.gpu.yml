@@ -1,3 +1,10 @@
+x-backend-healthcheck: &backend-healthcheck
+  test: [ "CMD", "curl", "-f", "http://localhost:3847/health" ]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 30s
+
 services:
   backend:
     build:
@@ -5,6 +12,10 @@ services:
       args:
         PYTORCH_VARIANT: gpu
     image: spoton_backend_image:gpu
+    container_name: spoton_backend_service
+    ports:
+      - "3847:3847"
+    healthcheck: *backend-healthcheck
     # GPU access configuration
     runtime: nvidia
     env_file:
