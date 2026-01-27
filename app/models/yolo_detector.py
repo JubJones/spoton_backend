@@ -511,18 +511,7 @@ class YOLODetector(AbstractDetector):
                 confidences = boxes.conf.to('cpu', non_blocking=True).numpy()
                 class_ids = boxes.cls.to('cpu', non_blocking=True).numpy().astype(int)
                 
-                # DEBUG: Log raw detections with class names for easier debugging
-                if len(box_coords) > 0:
-                     # Try to map IDs to names if available
-                     class_names = []
-                     if hasattr(self.model, 'names'):
-                         class_names = [self.model.names.get(int(cid), str(cid)) for cid in class_ids]
-                     else:
-                         class_names = [str(cid) for cid in class_ids]
-                         
-                     logger.info(f"DEBUG_RAW: Found {len(box_coords)} raw boxes. Classes: {class_names} (IDs: {class_ids}) Conf: {confidences}")
-                else:
-                     logger.debug("DEBUG_RAW: No boxes in result.boxes")
+
 
                 original_h, original_w = image.shape[:2]
                 
