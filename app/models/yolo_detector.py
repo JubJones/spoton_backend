@@ -10,7 +10,7 @@ import numpy as np
  
 try:
     import torch
-    from ultralytics import YOLO
+    from ultralytics import YOLO, RTDETR
     ULTRALYTICS_AVAILABLE = True
     TORCH_AVAILABLE = True
 except ImportError:
@@ -180,10 +180,23 @@ class YOLODetector(AbstractDetector):
                 sys.exit(1)
 
             fix_yolo_serialization()
-            if self.is_tensorrt or self.is_onnx:
-                self.model = YOLO(self.model_name, task='detect')
+            
+            # Use RTDETR class for RT-DETR models to ensure correct output decoding
+            is_rtdetr = "rtdetr" in self.model_name.lower() or "rt-detr" in self.model_name.lower()
+            
+            if is_rtdetr:
+                 logger.info(f"🔄 Detected RT-DETR model. Using ultralytics.RTDETR class.")
+                 # RT-DETR class usage
+                 if self.is_tensorrt or self.is_onnx:
+                     self.model = RTDETR(self.model_name) # RTDETR might not accept task='detect' freely or might default correctly
+                 else:
+                     self.model = RTDETR(self.model_name)
             else:
-                self.model = YOLO(self.model_name)
+                # Standard YOLO usage
+                if self.is_tensorrt or self.is_onnx:
+                    self.model = YOLO(self.model_name, task='detect')
+                else:
+                    self.model = YOLO(self.model_name)
             
             # For PyTorch models, explicitly set device
             # TensorRT engines are already device-optimized during export
