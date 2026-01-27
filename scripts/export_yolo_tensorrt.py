@@ -331,16 +331,16 @@ def main():
     engine_path = export_to_tensorrt(
         model_path=str(pt_model),
         imgsz=640,
-        batch_size=8,   # Batch=8 for higher throughput (8GB VRAM)
+        batch_size=16,  # Aggressive: batch=16 for max throughput
         half=True,      # FP16 for RTX 4060
-        workspace_gb=2, # Keep at 2GB to leave room for batch
+        workspace_gb=1, # Aggressive: 1GB to leave room for batch
     )
     
     # Benchmark comparison
     pt_results, trt_results = benchmark_comparison(
         pt_model_path=str(pt_model),
         engine_path=engine_path,
-        batch_size=8,  # Match export batch size
+        batch_size=16, # Match export batch size
         num_runs=50,
     )
     
