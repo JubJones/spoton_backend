@@ -115,6 +115,11 @@ class YOLODetector(AbstractDetector):
         self.is_tensorrt = model_name.endswith('.engine')
         self.is_onnx = model_name.endswith('.onnx')
         
+        # GPU Optimization: CUDA stream for overlapped execution
+        self._cuda_stream: Optional[torch.cuda.Stream] = None
+        if self.device.type == 'cuda':
+            self._cuda_stream = torch.cuda.Stream()
+        
         # Performance optimization settings (configurable via env vars)
         import os
         self.imgsz = int(os.environ.get("DETECTION_IMGSZ", "640"))
@@ -132,7 +137,7 @@ class YOLODetector(AbstractDetector):
         else:
             model_type = "PyTorch"
             
-        logger.info(f"YOLODetector configured: type={model_type}, imgsz={self.imgsz}, half={self.use_half}, device={self.device}")
+        logger.info(f"YOLODetector configured: type={model_type}, imgsz={self.imgsz}, half={self.use_half}, device={self.device}, cuda_stream={self._cuda_stream is not None}")
         
         # COCO class names (YOLO is trained on COCO)
         self.coco_classes = [
@@ -296,14 +301,25 @@ class YOLODetector(AbstractDetector):
 
             _thread_start = _time.perf_counter()
             
+            # GPU Optimization: Use CUDA stream for overlapped execution
+            # For TensorRT, skip asyncio.to_thread overhead and run directly with stream
             def _infer():
                 _infer_start = _time.perf_counter()
                 with torch.inference_mode():
-                    result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    if self._cuda_stream is not None:
+                        with torch.cuda.stream(self._cuda_stream):
+                            result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                        self._cuda_stream.synchronize()
+                    else:
+                        result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
                 _infer_time = (_time.perf_counter() - _infer_start) * 1000
                 return result, _infer_time
 
-            results, _gpu_infer_time = await asyncio.to_thread(_infer)
+            # For TensorRT on CUDA, run directly to avoid thread overhead
+            if self.is_tensorrt and self._cuda_stream is not None:
+                results, _gpu_infer_time = _infer()
+            else:
+                results, _gpu_infer_time = await asyncio.to_thread(_infer)
             _thread_time = (_time.perf_counter() - _thread_start) * 1000
             
             # Process results
@@ -316,10 +332,11 @@ class YOLODetector(AbstractDetector):
                 if hasattr(result, 'boxes') and result.boxes is not None:
                     boxes = result.boxes
                     
+                    # GPU Optimization: Non-blocking transfers from GPU to CPU
                     if boxes.xyxy is not None:
-                        box_coords = boxes.xyxy.cpu().numpy()
-                        confidences = boxes.conf.cpu().numpy()
-                        class_ids = boxes.cls.cpu().numpy().astype(int)
+                        box_coords = boxes.xyxy.to('cpu', non_blocking=True).numpy()
+                        confidences = boxes.conf.to('cpu', non_blocking=True).numpy()
+                        class_ids = boxes.cls.to('cpu', non_blocking=True).numpy().astype(int)
                         
                         original_h, original_w = image.shape[:2]
                         
@@ -398,8 +415,14 @@ class YOLODetector(AbstractDetector):
             def _batch_infer():
                 _infer_start = _time.perf_counter()
                 with torch.inference_mode():
-                    # Ultralytics supports list of images for batch inference
-                    result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    # GPU Optimization: Use CUDA stream for overlapped execution
+                    if self._cuda_stream is not None:
+                        with torch.cuda.stream(self._cuda_stream):
+                            result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                        self._cuda_stream.synchronize()
+                    else:
+                        # Ultralytics supports list of images for batch inference
+                        result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
                 _infer_time = (_time.perf_counter() - _infer_start) * 1000
                 return result, _infer_time
 
@@ -407,7 +430,11 @@ class YOLODetector(AbstractDetector):
             try:
                 # TRT models exported with batch=1 may fail when passed a list > 1
                 # We attempt batch inference, catch specific RuntimeErrors, and fallback.
-                results, _gpu_infer_time = await asyncio.to_thread(_batch_infer)
+                # GPU Optimization: For TensorRT on CUDA, run directly to avoid thread overhead
+                if self.is_tensorrt and self._cuda_stream is not None:
+                    results, _gpu_infer_time = _batch_infer()
+                else:
+                    results, _gpu_infer_time = await asyncio.to_thread(_batch_infer)
             except RuntimeError as rte:
                 # Common TRT error: "The engine plan file is generated for a different batch size"
                 if "batch" in str(rte).lower() and self.is_tensorrt:
@@ -479,9 +506,10 @@ class YOLODetector(AbstractDetector):
             boxes = result.boxes
             
             if boxes.xyxy is not None:
-                box_coords = boxes.xyxy.cpu().numpy()
-                confidences = boxes.conf.cpu().numpy()
-                class_ids = boxes.cls.cpu().numpy().astype(int)
+                # GPU Optimization: Non-blocking transfers from GPU to CPU
+                box_coords = boxes.xyxy.to('cpu', non_blocking=True).numpy()
+                confidences = boxes.conf.to('cpu', non_blocking=True).numpy()
+                class_ids = boxes.cls.to('cpu', non_blocking=True).numpy().astype(int)
                 
                 # DEBUG: Log raw detections with class names for easier debugging
                 if len(box_coords) > 0:

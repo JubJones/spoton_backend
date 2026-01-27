@@ -47,14 +47,27 @@ class RTDETRDetector(AbstractDetector):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self._model_loaded_flag = False
         
+        # Detect if this is a TensorRT engine
+        self.is_tensorrt = model_name.endswith('.engine')
+        
+        # GPU Optimization: CUDA stream for overlapped execution
+        self._cuda_stream: Optional[torch.cuda.Stream] = None
+        if self.device.type == 'cuda':
+            self._cuda_stream = torch.cuda.Stream()
+        
         # Performance optimization settings (configurable via env vars)
         import os
         self.imgsz = int(os.getenv("DETECTION_IMGSZ", "640"))
-        # Only use half precision if on CUDA
-        self.use_half = self.device.type == 'cuda'
+        # Only use half precision if on CUDA (and not TensorRT where it's baked in)
+        if self.is_tensorrt:
+            self.use_half = False
+        else:
+            self.use_half = self.device.type == 'cuda'
         
         # Person class ID in COCO (0-indexed)
         self.person_class_id = 0
+        
+        logger.info(f"RTDETRDetector configured: imgsz={self.imgsz}, half={self.use_half}, device={self.device}, cuda_stream={self._cuda_stream is not None}")
             
     async def load_model(self):
         """
@@ -130,11 +143,22 @@ class RTDETRDetector(AbstractDetector):
             import asyncio
             import torch
 
+            # GPU Optimization: Use CUDA stream for overlapped execution
             def _infer():
                 with torch.inference_mode():
-                    return self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    if self._cuda_stream is not None:
+                        with torch.cuda.stream(self._cuda_stream):
+                            result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                        self._cuda_stream.synchronize()
+                    else:
+                        result = self.model(image, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                return result
 
-            results = await asyncio.to_thread(_infer)
+            # GPU Optimization: For TensorRT on CUDA, run directly to avoid thread overhead
+            if self.is_tensorrt and self._cuda_stream is not None:
+                results = _infer()
+            else:
+                results = await asyncio.to_thread(_infer)
             
             # Process results
             detections_result: List[Detection] = []
@@ -145,10 +169,11 @@ class RTDETRDetector(AbstractDetector):
                 if hasattr(result, 'boxes') and result.boxes is not None:
                     boxes = result.boxes
                     
+                    # GPU Optimization: Non-blocking transfers from GPU to CPU
                     if boxes.xyxy is not None:
-                        box_coords = boxes.xyxy.cpu().numpy()
-                        confidences = boxes.conf.cpu().numpy()
-                        class_ids = boxes.cls.cpu().numpy().astype(int)
+                        box_coords = boxes.xyxy.to('cpu', non_blocking=True).numpy()
+                        confidences = boxes.conf.to('cpu', non_blocking=True).numpy()
+                        class_ids = boxes.cls.to('cpu', non_blocking=True).numpy().astype(int)
                         
                         original_h, original_w = image.shape[:2]
                         
@@ -212,12 +237,22 @@ class RTDETRDetector(AbstractDetector):
         try:
             import torch
 
+            # GPU Optimization: Use CUDA stream for overlapped execution
             def _batch_infer():
                 with torch.inference_mode():
-                    # Ultralytics supports list of images for batch inference
-                    return self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                    if self._cuda_stream is not None:
+                        with torch.cuda.stream(self._cuda_stream):
+                            result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                        self._cuda_stream.synchronize()
+                    else:
+                        result = self.model(images, conf=self.confidence_threshold, imgsz=self.imgsz, half=self.use_half, verbose=False)
+                return result
 
-            results = await asyncio.to_thread(_batch_infer)
+            # GPU Optimization: For TensorRT on CUDA, run directly to avoid thread overhead
+            if self.is_tensorrt and self._cuda_stream is not None:
+                results = _batch_infer()
+            else:
+                results = await asyncio.to_thread(_batch_infer)
             
             # Parse each result
             batch_detections: List[List[Detection]] = []
@@ -252,9 +287,10 @@ class RTDETRDetector(AbstractDetector):
             boxes = result.boxes
             
             if boxes.xyxy is not None:
-                box_coords = boxes.xyxy.cpu().numpy()
-                confidences = boxes.conf.cpu().numpy()
-                class_ids = boxes.cls.cpu().numpy().astype(int)
+                # GPU Optimization: Non-blocking transfers from GPU to CPU
+                box_coords = boxes.xyxy.to('cpu', non_blocking=True).numpy()
+                confidences = boxes.conf.to('cpu', non_blocking=True).numpy()
+                class_ids = boxes.cls.to('cpu', non_blocking=True).numpy().astype(int)
                 
                 original_h, original_w = image.shape[:2]
                 
