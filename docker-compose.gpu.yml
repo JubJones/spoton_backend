@@ -33,3 +33,47 @@ services:
       - ./videos:/app/videos:ro
       - ./debug_outputs:/app/debug_outputs
       - ./speed_debug.log:/app/speed_debug.log
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+
+  redis:
+    image: redis:7.2.4-alpine
+    container_name: spoton_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --save 60 1 --loglevel warning
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 512m
+
+  timescaledb:
+    image: timescale/timescaledb:latest-pg17
+    container_name: spoton_timescaledb
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-spoton_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-spoton_password}
+      POSTGRES_DB: ${POSTGRES_DB:-spotondb}
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-spoton_user} -d $${POSTGRES_DB:-spotondb}" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 1g
+
+volumes:
+  redis_data:
+    driver: local
+  timescaledb_data:
+    driver: local
