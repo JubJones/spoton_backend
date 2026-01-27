@@ -26,6 +26,7 @@ import json
 from app.core.config import settings
 from app.services.raw_video_service import RawVideoService
 from app.models.yolo_detector import YOLODetector
+from app.models.rtdetr_detector import RTDETRDetector
 from app.utils.detection_annotator import DetectionAnnotator
 from app.utils.mjpeg_streamer import mjpeg_streamer
 from app.api.websockets.connection_manager import binary_websocket_manager, MessageType
@@ -265,11 +266,22 @@ class DetectionVideoService(RawVideoService):
                         self.detectors_by_env[environment_id] = existing_detector
                         self.detector_weights_by_env[environment_id] = weights_path
                     else:
-                        logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
-                        detector = YOLODetector(
-                            model_name=weights_path,
-                            confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                        )
+                        logger.info(f"🧠 DETECTION SERVICE INIT: Loading model for '{environment_id}' from: {weights_path}")
+                        
+                        is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
+                        
+                        if is_rtdetr:
+                            logger.info(f"🔄 Using dedicated RTDETRDetector for: {weights_path}")
+                            detector = RTDETRDetector(
+                                model_name=weights_path,
+                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                            )
+                        else:
+                            detector = YOLODetector(
+                                model_name=weights_path,
+                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                            )
+                            
                         await detector.load_model()
                         await detector.warmup()
                         self.detectors_by_env[environment_id] = detector
