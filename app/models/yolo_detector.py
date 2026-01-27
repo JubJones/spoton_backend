@@ -7,7 +7,7 @@ import logging
 import asyncio
 from typing import List, Optional, Tuple
 import numpy as np
-
+ 
 try:
     import torch
     from ultralytics import YOLO
