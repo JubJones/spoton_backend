@@ -2431,7 +2431,7 @@ class DetectionVideoService(RawVideoService):
             enhanced_detection = {
                 "detection_id": f"det_{i:03d}",
                 "class_name": "person",
-                "class_id": 0,
+                "class_id": 1, # Frontend expects 1 for person
                 "confidence": detection.confidence,
                 "bbox": bbox_dict,
                 "track_id": None,
