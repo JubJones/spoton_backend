@@ -7,7 +7,12 @@ services:
     image: spoton_backend_image:gpu
     # GPU access configuration
     runtime: nvidia
+    env_file:
+      - .env
     environment:
+      - PYTHONUNBUFFERED=1
+      - REDIS_HOST=redis
+      - POSTGRES_SERVER=timescaledb
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - USE_TENSORRT=true
@@ -19,3 +24,12 @@ services:
             - driver: nvidia
               count: all
               capabilities: [ gpu ]
+    volumes:
+      - ./app:/app/app # Mount local code for development; remove for production-like build
+      - ./data:/app/data
+      - ./homography_data:/app/homography_data
+      - ./weights:/app/weights
+      - ./scripts:/app/scripts # For running TensorRT export inside container
+      - ./videos:/app/videos:ro
+      - ./debug_outputs:/app/debug_outputs
+      - ./speed_debug.log:/app/speed_debug.log
