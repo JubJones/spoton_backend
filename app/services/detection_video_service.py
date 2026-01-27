@@ -2252,13 +2252,20 @@ class DetectionVideoService(RawVideoService):
                 
                 # Total batch time
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
+                if _batch_time > 0:
+                    raw_fps = 1000.0 / _batch_time
+                    frame_skip = getattr(settings, 'FRAME_SKIP', 1)
+                    effective_fps = raw_fps * frame_skip
+                else:
+                    raw_fps = 0.0
+                    effective_fps = 0.0
                 
                 # Log frame batch timing EVERY FRAME for debugging
                 speed_optimize_logger.info(
-                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f",
+                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f (Eff: %.1f)",
                     frame_index, _batch_time,
                     _read_time, _batch_det_time, _track_time, _space_match_time, _enc_time, _ws_time,
-                    len(frame_camera_data), 1000.0 / _batch_time if _batch_time > 0 else 0
+                    len(frame_camera_data), raw_fps, effective_fps
                 )
                 
                 # Update progress every 30 frames
