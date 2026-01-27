@@ -295,10 +295,11 @@ class YOLODetector(AbstractDetector):
         self._inference_done_event: Optional[torch.cuda.Event] = None
         
         if self.device.type == 'cuda':
-            # Create streams with different priorities (lower = higher priority)
+            # Create streams with different priorities (lower number = higher priority, must be <= 0)
+            # Use priority=-1 for high priority, 0 for normal priority
             self._preprocess_stream = torch.cuda.Stream(priority=-1)  # High priority
-            self._inference_stream = torch.cuda.Stream(priority=0)    # Normal priority
-            self._postprocess_stream = torch.cuda.Stream(priority=1)  # Lower priority
+            self._inference_stream = torch.cuda.Stream(priority=-1)   # High priority (main work)
+            self._postprocess_stream = torch.cuda.Stream(priority=0)  # Normal priority
             
             # Create events for synchronization
             self._preprocess_done_event = torch.cuda.Event()

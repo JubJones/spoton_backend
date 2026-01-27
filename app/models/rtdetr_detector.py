@@ -216,9 +216,10 @@ class RTDETRDetector(AbstractDetector):
         self._inference_done_event: Optional[torch.cuda.Event] = None
         
         if self.device.type == 'cuda':
-            self._preprocess_stream = torch.cuda.Stream(priority=-1)
-            self._inference_stream = torch.cuda.Stream(priority=0)
-            self._postprocess_stream = torch.cuda.Stream(priority=1)
+            # Stream priorities must be <= 0 (lower number = higher priority)
+            self._preprocess_stream = torch.cuda.Stream(priority=-1)  # High priority
+            self._inference_stream = torch.cuda.Stream(priority=-1)   # High priority (main work)
+            self._postprocess_stream = torch.cuda.Stream(priority=0)  # Normal priority
             
             self._preprocess_done_event = torch.cuda.Event()
             self._inference_done_event = torch.cuda.Event()
