@@ -93,7 +93,7 @@ class MJPEGStreamer:
                 if not self._subscribers[task_id]:
                     del self._subscribers[task_id]
                 
-                logger.debug(f"MJPEG subscriber {subscriber_id} disconnected from {task_id}/{camera_id} (remaining: {subscriber_count})")
+                # logger.debug(f"MJPEG subscriber {subscriber_id} disconnected from {task_id}/{camera_id} (remaining: {subscriber_count})")
 
     async def push_frame(self, task_id: str, camera_id: str, frame_bytes: bytes):
         """
@@ -166,7 +166,7 @@ class MJPEGStreamer:
                     continue
                     
         except asyncio.CancelledError:
-            logger.debug(f"MJPEG client {subscriber_id} cancelled for {task_id}/{camera_id}")
+            # logger.debug(f"MJPEG client {subscriber_id} cancelled for {task_id}/{camera_id}")
             raise
         except GeneratorExit:
             pass

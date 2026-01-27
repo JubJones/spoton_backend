@@ -487,7 +487,8 @@ class YOLODetector(AbstractDetector):
                 
                 for box, score_val, label_id in zip(box_coords, confidences, class_ids):
                     # Filter for person class only (class_id = 0 in COCO)
-                    if int(label_id) == self.person_class_id and score_val >= self.confidence_threshold:
+                    # DEBUG: Temporarily allowing ALL classes to debug missing boxes issue
+                    if score_val >= self.confidence_threshold: # and int(label_id) == self.person_class_id:
                         x1, y1, x2, y2 = box
                         
                         # Clip coordinates to image bounds
@@ -498,7 +499,10 @@ class YOLODetector(AbstractDetector):
                         
                         # Ensure box has positive area after clipping
                         if x2_clipped > x1_clipped and y2_clipped > y1_clipped:
+                             # Resolve class name
                             class_name = "person"
+                            if hasattr(self.model, 'names') and isinstance(self.model.names, dict):
+                                class_name = str(self.model.names.get(int(label_id), "person"))
                             
                             detections_result.append(
                                 Detection(
