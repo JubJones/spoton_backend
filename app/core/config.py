@@ -549,7 +549,7 @@ class Settings(BaseSettings):
     EXTERNAL_WEIGHTS_BASE_DIR: Optional[str] = None
     YOLO_CONFIDENCE_THRESHOLD: float = 0.5
     YOLO_NMS_THRESHOLD: float = 0.45
-    YOLO_INPUT_SIZE: int = 640
+    YOLO_INPUT_SIZE: int = 480  # Reduced from 640 to 480 for higher FPS
     DETECTION_ANNOTATION_ENABLED: bool = True
     DETECTION_SAVE_ORIGINAL_FRAMES: bool = True
     TRACKER_TYPE: str = "bytetrack"
@@ -575,7 +575,7 @@ class Settings(BaseSettings):
     TRACKER_CONFIG_PATH: Optional[str] = None
     
     # Performance Optimization Settings
-    FRAME_SKIP: int = Field(default=1, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
+    FRAME_SKIP: int = Field(default=2, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
     SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
 
     # (Re-ID similarity settings removed)
