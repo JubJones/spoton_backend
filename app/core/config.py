@@ -480,7 +480,7 @@ class Settings(BaseSettings):
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
-    HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
+    HOMOGRAPHY_FILE_PATH: str = Field(default="/app/homography_data/homography_20251024-103317.json", description="JSON file containing camera-to-world homography matrices")
     WORLD_BOUNDS_X_MIN: float = Field(default=-2000.0, description="Minimum world X coordinate (meters)")
     WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
     WORLD_BOUNDS_Y_MIN: float = Field(default=-2000.0, description="Minimum world Y coordinate (meters)")
@@ -538,9 +538,9 @@ class Settings(BaseSettings):
     
     # YOLO Configuration (YOLO11-L)
     # TensorRT Optimization: Set USE_TENSORRT=true and provide .engine file path for 3-5x speedup
-    USE_TENSORRT: bool = Field(default=False, description="Use TensorRT engine for YOLO inference (requires .engine file)")
-    YOLO_MODEL_PATH: str = "weights/yolo26m.pt"
-    YOLO_MODEL_PATH_TENSORRT: str = Field(default="weights/yolo26m.engine", description="TensorRT engine path (used when USE_TENSORRT=true)")
+    USE_TENSORRT: bool = Field(default=True, description="Use TensorRT engine for YOLO inference (requires .engine file)")
+    YOLO_MODEL_PATH: str = "/app/weights/yolo26m.engine"
+    YOLO_MODEL_PATH_TENSORRT: str = Field(default="/app/weights/yolo26m.engine", description="TensorRT engine path (used when USE_TENSORRT=true)")
     # Optional per-environment model overrides. If provided and file exists,
     # detection will use these weights for the corresponding environment.
     YOLO_MODEL_PATH_CAMPUS: Optional[str] = None

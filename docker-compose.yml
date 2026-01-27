@@ -32,6 +32,8 @@ services:
       - PYTHONUNBUFFERED=1
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
+      - USE_TENSORRT=false
+      - YOLO_MODEL_PATH=/app/weights/yolo26m.pt
     depends_on:
       timescaledb:
         condition: service_healthy

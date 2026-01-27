@@ -91,12 +91,12 @@ class YOLODetector(AbstractDetector):
     Uses YOLO11-L model for person detection with real-time performance.
     """
     
-    def __init__(self, model_name: str = "yolo26m.pt", confidence_threshold: float = 0.5):
+    def __init__(self, model_name: str = "/app/weights/yolo26m.engine", confidence_threshold: float = 0.5):
         """
         Initialize YOLO detector.
         
         Args:
-            model_name: Model weights filename (default: yolo11l.pt)
+            model_name: Model weights filename (default: yolo26m.engine)
             confidence_threshold: Minimum confidence for detections
         """
         if not TORCH_AVAILABLE:
@@ -176,7 +176,7 @@ class YOLODetector(AbstractDetector):
             if not os.path.exists(self.model_name):
                 logger.critical(f"❌ FATAL: Model file not found at: {self.model_name}")
                 logger.critical("   The container cannot start without the required model weights.")
-                logger.critical("   Please ensure 'yolo26m.pt' (or configured model) is in the weights directory.")
+                logger.critical("   Please ensure '/app/weights/yolo26m.engine' (or configured model) is in the weights directory.")
                 sys.exit(1)
 
             fix_yolo_serialization()

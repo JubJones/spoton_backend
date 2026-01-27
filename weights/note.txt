@@ -7,6 +7,7 @@ named as clip_market1501.pt
 "yolo11l_campus.engine": "https://drive.google.com/file/d/12dGBBpXV6dCTY3wwK0L3uUcwPX5xyKZy/view?usp=sharing"
 "yolo26n.pt": "https://drive.google.com/file/d/1Mtl0mW_mX0MeDF8wHuQP0KwxYojZIOtH/view?usp=sharing"
 "yolo26n.engine": "https://drive.google.com/file/d/10XxBcwKla13J1z3_xmOqV_98cYAAOC5w/view?usp=sharing"
+"yolo26m.pt": "https://drive.google.com/file/d/1i2JFfzrxMAoO2PK-LKtRLf3mB84xKLTA/view?usp=sharing"
 --
 Alternative from Nota
 "market_aic_sbs_R50-ibn.pth": "https://drive.google.com/file/d/17e9fuLWWorTEPweZJwnM0_4on0cLjiBb/view?usp=sharing"

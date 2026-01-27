@@ -10,6 +10,8 @@ services:
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - USE_TENSORRT=true
+      - YOLO_MODEL_PATH=/app/weights/yolo26m.engine
     deploy:
       resources:
         reservations:
