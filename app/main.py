@@ -133,25 +133,45 @@ async def lifespan(app_instance: FastAPI):
         except Exception as e:
             pass # logger.debug(f"YOLO configuration logging skipped: {e}")
 
-        # Preload YOLO detector for configured environments
+        # Preload detector for configured environments
         if settings.PRELOAD_YOLO_DETECTOR:
             try:
                 from app.models.yolo_detector import YOLODetector
+                from app.models.rtdetr_detector import RTDETRDetector
+                
+                # Track loaded detectors by weights path to prevent duplicate loading (saves GPU memory)
+                loaded_detectors_by_path: Dict[str, Any] = {}
+                
                 for env_id in settings.PRELOAD_ENVIRONMENTS:
                     weights_path = detection_video_service._resolve_yolo_weights_for_environment(env_id)
                     if env_id not in detection_video_service.detectors_by_env:
-                        logger.info(f"Preloading YOLO detector for environment '{env_id}' from: {weights_path}")
-                        detector = YOLODetector(
-                            model_name=weights_path,
-                            confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                        )
-                        await detector.load_model()
-                        await detector.warmup()
+                        # Check if this weights path is already loaded (reuse to save VRAM)
+                        if weights_path in loaded_detectors_by_path:
+                            detector = loaded_detectors_by_path[weights_path]
+                            logger.info(f"Reusing detector for environment '{env_id}' (same weights: {weights_path})")
+                        else:
+                            is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
+                            if is_rtdetr:
+                                logger.info(f"Preloading RT-DETR detector for environment '{env_id}' from: {weights_path}")
+                                detector = RTDETRDetector(
+                                    model_name=weights_path,
+                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                                )
+                            else:
+                                logger.info(f"Preloading YOLO detector for environment '{env_id}' from: {weights_path}")
+                                detector = YOLODetector(
+                                    model_name=weights_path,
+                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                                )
+                            await detector.load_model()
+                            await detector.warmup()
+                            loaded_detectors_by_path[weights_path] = detector
+                            logger.info(f"Detector preloaded for '{env_id}'")
+                        
                         detection_video_service.detectors_by_env[env_id] = detector
                         detection_video_service.detector_weights_by_env[env_id] = weights_path
-                        logger.info(f"YOLO detector preloaded for '{env_id}'")
             except Exception as e:
-                logger.warning(f"YOLO preload failed (non-fatal): {e}")
+                logger.warning(f"Detector preload failed (non-fatal): {e}")
 
         # Preload Re-ID model (FeatureExtractionService)
         if settings.PRELOAD_REID_MODEL:
