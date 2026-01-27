@@ -434,6 +434,12 @@ class YOLODetector(AbstractDetector):
                 confidences = boxes.conf.cpu().numpy()
                 class_ids = boxes.cls.cpu().numpy().astype(int)
                 
+                # DEBUG: Log raw detections to see what the model is outputting
+                if len(box_coords) > 0:
+                     logger.info(f"DEBUG_RAW: Found {len(box_coords)} raw boxes. Classes: {class_ids} Conf: {confidences}")
+                else:
+                     logger.debug("DEBUG_RAW: No boxes in result.boxes")
+
                 original_h, original_w = image.shape[:2]
                 
                 for box, score_val, label_id in zip(box_coords, confidences, class_ids):
