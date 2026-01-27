@@ -355,12 +355,39 @@ class YOLODetector(AbstractDetector):
                 return result, _infer_time
 
             _thread_start = _time.perf_counter()
-            results, _gpu_infer_time = await asyncio.to_thread(_batch_infer)
+            try:
+                # TRT models exported with batch=1 may fail when passed a list > 1
+                # We attempt batch inference, catch specific RuntimeErrors, and fallback.
+                results, _gpu_infer_time = await asyncio.to_thread(_batch_infer)
+            except RuntimeError as rte:
+                # Common TRT error: "The engine plan file is generated for a different batch size"
+                if "batch" in str(rte).lower() and self.is_tensorrt:
+                    logger.warning(f"⚠️ Batch inference failed for TensorRT engine (likely exported with batch=1). Falling back to sequential inference. Error: {rte}")
+                    # Fallback to sequential
+                    _seq_start = _time.perf_counter()
+                    batch_detections = []
+                    for img in images:
+                         d = await self.detect(img)
+                         batch_detections.append(d)
+                    
+                    _seq_time = (_time.perf_counter() - _seq_start) * 1000
+                    speed_debug_logger.info(
+                        "[SPEED_DEBUG] YOLO.detect_batch (FALLBACK) | Type=TRT-Seq | BatchSize=%d | Total=%.1fms | Dets=%d",
+                        len(images), _seq_time, sum(len(x) for x in batch_detections)
+                    )
+                    return batch_detections
+                raise rte
+
             _thread_time = (_time.perf_counter() - _thread_start) * 1000
             
             # Parse each result
             _parse_start = _time.perf_counter()
             batch_detections: List[List[Detection]] = []
+            
+            # Handling results: Ultralytics result can be a list or single object
+            if not isinstance(results, list):
+                 results = [results]
+            
             for i, (result, image) in enumerate(zip(results, images)):
                 try:
                     detections = self._parse_single_result(result, image)
