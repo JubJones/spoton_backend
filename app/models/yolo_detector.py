@@ -200,6 +200,30 @@ class YOLODetector(AbstractDetector):
             elif self.is_onnx:
                 logger.info("🚀 ONNX optimization active - optimized for CPU inference")
             
+            # --- Dynamic Class Mapping ---
+            # Attempt to find the correct 'person' class ID from the model's metadata
+            # This handles models trained on different datasets (COCO, Objects365, OpenImages, etc.)
+            if hasattr(self.model, 'names') and self.model.names:
+                # Log a few classes to help debugging
+                logger.info(f"📋 Model classes loaded (first 5): {dict(list(self.model.names.items())[:5])}")
+                
+                found_person_id = None
+                # Search for 'person' or 'Person'
+                for cid, cname in self.model.names.items():
+                    if str(cname).lower() == 'person':
+                        found_person_id = cid
+                        break
+                
+                if found_person_id is not None:
+                    self.person_class_id = int(found_person_id)
+                    logger.info(f"✅ Auto-detected 'person' class ID: {self.person_class_id}")
+                else:
+                    logger.warning(f"⚠️ Could not find class 'person' in model names. Defaulting to ID {self.person_class_id} (COCO standard).")
+                    logger.warning(f"   Available classes example: {dict(list(self.model.names.items())[:10])}")
+            else:
+                 logger.warning("⚠️ Model does not have 'names' attribute. Using default specific COCO ID 0 for 'person'.")
+
+            
         except Exception as e:
             logger.exception(f"Error loading YOLO model: {e}")
             self.model = None
@@ -434,9 +458,16 @@ class YOLODetector(AbstractDetector):
                 confidences = boxes.conf.cpu().numpy()
                 class_ids = boxes.cls.cpu().numpy().astype(int)
                 
-                # DEBUG: Log raw detections to see what the model is outputting
+                # DEBUG: Log raw detections with class names for easier debugging
                 if len(box_coords) > 0:
-                     logger.info(f"DEBUG_RAW: Found {len(box_coords)} raw boxes. Classes: {class_ids} Conf: {confidences}")
+                     # Try to map IDs to names if available
+                     class_names = []
+                     if hasattr(self.model, 'names'):
+                         class_names = [self.model.names.get(int(cid), str(cid)) for cid in class_ids]
+                     else:
+                         class_names = [str(cid) for cid in class_ids]
+                         
+                     logger.info(f"DEBUG_RAW: Found {len(box_coords)} raw boxes. Classes: {class_names} (IDs: {class_ids}) Conf: {confidences}")
                 else:
                      logger.debug("DEBUG_RAW: No boxes in result.boxes")
 
