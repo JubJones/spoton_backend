@@ -577,6 +577,7 @@ class Settings(BaseSettings):
     
     # Performance Optimization Settings
     FRAME_SKIP: int = Field(default=2, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
+    BATCH_ACCUMULATION_SIZE: int = Field(default=4, description="Number of frames to accumulate per camera before batch inference (e.g., 4 cams × 4 frames = 16 batch)")
     SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
 
     # (Re-ID similarity settings removed)
