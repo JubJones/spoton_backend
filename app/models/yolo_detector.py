@@ -203,25 +203,37 @@ class YOLODetector(AbstractDetector):
             # --- Dynamic Class Mapping ---
             # Attempt to find the correct 'person' class ID from the model's metadata
             # This handles models trained on different datasets (COCO, Objects365, OpenImages, etc.)
-            if hasattr(self.model, 'names') and self.model.names:
-                # Log a few classes to help debugging
-                logger.info(f"📋 Model classes loaded (first 5): {dict(list(self.model.names.items())[:5])}")
-                
-                found_person_id = None
-                # Search for 'person' or 'Person'
-                for cid, cname in self.model.names.items():
-                    if str(cname).lower() == 'person':
-                        found_person_id = cid
-                        break
-                
-                if found_person_id is not None:
-                    self.person_class_id = int(found_person_id)
-                    logger.info(f"✅ Auto-detected 'person' class ID: {self.person_class_id}")
+            # --- Dynamic Class Mapping ---
+            # Attempt to find the correct 'person' class ID from the model's metadata
+            try:
+                if hasattr(self.model, 'names') and isinstance(self.model.names, dict):
+                    # Log a few classes to help debugging
+                    logger.info(f"📋 Model classes loaded (first 5): {dict(list(self.model.names.items())[:5])}")
+                    
+                    found_person_id = None
+                    # Search for 'person' or 'Person'
+                    for cid, cname in self.model.names.items():
+                        if str(cname).lower() == 'person':
+                            found_person_id = cid
+                            break
+                    
+                    # Fallback: If only 1 class exists (e.g., 'item'), assume it is the person class
+                    if found_person_id is None and len(self.model.names) == 1:
+                        single_id = list(self.model.names.keys())[0]
+                        single_name = list(self.model.names.values())[0]
+                        logger.warning(f"⚠️ 'person' class not found, but model has only 1 class: '{single_name}' (ID {single_id}). Assuming this is the target.")
+                        found_person_id = single_id
+
+                    if found_person_id is not None:
+                        self.person_class_id = int(found_person_id)
+                        logger.info(f"✅ Auto-detected target class ID: {self.person_class_id}")
+                    else:
+                        logger.warning(f"⚠️ Could not find class 'person' in model names. Defaulting to ID {self.person_class_id} (COCO standard).")
+                        logger.warning(f"   Available classes example: {dict(list(self.model.names.items())[:10])}")
                 else:
-                    logger.warning(f"⚠️ Could not find class 'person' in model names. Defaulting to ID {self.person_class_id} (COCO standard).")
-                    logger.warning(f"   Available classes example: {dict(list(self.model.names.items())[:10])}")
-            else:
-                 logger.warning("⚠️ Model does not have 'names' attribute. Using default specific COCO ID 0 for 'person'.")
+                     logger.warning("⚠️ Model does not have valid 'names' attribute. Using default specific COCO ID 0 for 'person'.")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to auto-detect class ID (using default 0): {e}")
 
             
         except Exception as e:

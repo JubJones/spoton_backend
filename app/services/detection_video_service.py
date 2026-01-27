@@ -242,16 +242,28 @@ class DetectionVideoService(RawVideoService):
             # Initialize YOLO detector for the requested environment
             weights_path = self._resolve_yolo_weights_for_environment(environment_id)
 
+            # Check if this model path is already loaded for another environment (to save VRAM)
+            existing_detector = None
+            for env, path in self.detector_weights_by_env.items():
+                if path == weights_path and env in self.detectors_by_env:
+                    existing_detector = self.detectors_by_env[env]
+                    logger.info(f"🧠 DETECTION SERVICE INIT: Reusing existing detector instance from '{env}' for '{environment_id}' (Path: {weights_path})")
+                    break
+
             if environment_id not in self.detectors_by_env:
-                logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
-                detector = YOLODetector(
-                    model_name=weights_path,
-                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                )
-                await detector.load_model()
-                await detector.warmup()
-                self.detectors_by_env[environment_id] = detector
-                self.detector_weights_by_env[environment_id] = weights_path
+                if existing_detector:
+                    self.detectors_by_env[environment_id] = existing_detector
+                    self.detector_weights_by_env[environment_id] = weights_path
+                else:
+                    logger.info(f"🧠 DETECTION SERVICE INIT: Loading YOLO model for '{environment_id}' from: {weights_path}")
+                    detector = YOLODetector(
+                        model_name=weights_path,
+                        confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                    )
+                    await detector.load_model()
+                    await detector.warmup()
+                    self.detectors_by_env[environment_id] = detector
+                    self.detector_weights_by_env[environment_id] = weights_path
             else:
                 # If already loaded (preloaded at startup), just use it
                 logger.info(f"🧠 DETECTION SERVICE INIT: Using preloaded YOLO model for '{environment_id}'")
