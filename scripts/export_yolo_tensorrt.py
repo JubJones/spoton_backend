@@ -330,7 +330,7 @@ def main():
     # Export to TensorRT
     engine_path = export_to_tensorrt(
         model_path=str(pt_model),
-        imgsz=640,
+        imgsz=480,      # Reduced from 640 for ~30% faster inference
         batch_size=16,  # Aggressive: batch=16 for max throughput
         half=True,      # FP16 for RTX 4060
         workspace_gb=1, # Aggressive: 1GB to leave room for batch
