@@ -2174,26 +2174,40 @@ class DetectionVideoService(RawVideoService):
                     
                 _batch_det_time = (_time.perf_counter() - _det_start) * 1000
                 
-                # === PHASE 3: Process each frame with pre-computed detections ===
+                # === PHASE 3: Process each frame with pre-computed detections (PARALLELIZED) ===
                 _track_start = _time.perf_counter()
                 
                 # Group results by frame index for proper ordering
                 frame_results: Dict[int, Dict[str, Tuple[np.ndarray, Dict[str, Any]]]] = {}
                 
-                for (camera_id, fidx, frame), raw_detections in zip(frame_metadata, batch_detections):
+                # Parallel tracking: process all frame-camera pairs concurrently
+                async def _process_single_track(camera_id: str, fidx: int, frame: np.ndarray, raw_detections):
+                    """Process format conversion and tracking for a single frame-camera pair."""
                     # Convert raw detections to enhanced format
                     detection_data = self._process_detections_to_format(
                         raw_detections, frame, camera_id, fidx
                     )
-                    
                     # Run tracking on the detections
                     detection_data = await self._process_tracking_with_predetected(
                         frame, camera_id, fidx, detection_data
                     )
+                    return camera_id, fidx, frame, detection_data
+                
+                # Create all tracking tasks
+                tracking_tasks = [
+                    _process_single_track(camera_id, fidx, frame, raw_dets)
+                    for (camera_id, fidx, frame), raw_dets in zip(frame_metadata, batch_detections)
+                ]
+                
+                # Run all tracking in parallel
+                if tracking_tasks:
+                    tracking_results = await asyncio.gather(*tracking_tasks)
                     
-                    if fidx not in frame_results:
-                        frame_results[fidx] = {}
-                    frame_results[fidx][camera_id] = (frame, detection_data)
+                    # Organize results by frame index
+                    for camera_id, fidx, frame, detection_data in tracking_results:
+                        if fidx not in frame_results:
+                            frame_results[fidx] = {}
+                        frame_results[fidx][camera_id] = (frame, detection_data)
                 
                 _track_time = (_time.perf_counter() - _track_start) * 1000
                 
