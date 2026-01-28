@@ -2102,218 +2102,238 @@ class DetectionVideoService(RawVideoService):
                 _space_match_time = 0.0
                 _ws_time = 0.0
                 
-                # === PHASE 1: Collect all frames from cameras ===
+                # === PHASE 1: Collect frames from all cameras (with accumulation) ===
                 _read_start = _time.perf_counter()
-                frames_batch: List[np.ndarray] = []
-                camera_order: List[Tuple[str, np.ndarray]] = []
                 
-                for camera_id, data in video_data.items():
-                    cap = data.get("video_capture")
-                    if cap and cap.isOpened():
-                        ret, frame = cap.read()
-                        if ret:
-                            if self.enable_debug_reprojection:
-                                self._debug_frame_store[(camera_id, frame_index)] = frame.copy()
-                            frames_batch.append(frame)
-                            camera_order.append((camera_id, frame))
-                            any_frame_processed = True
-                        else:
-                            pass # End of video
-                            break
-                    else:
+                # Batch accumulation: collect multiple frames per camera to fill batch=16
+                batch_accumulation_size = getattr(settings, 'BATCH_ACCUMULATION_SIZE', 4)
+                num_cameras = len(video_data)
+                
+                # Initialize accumulators for this batch
+                accumulated_frames: List[np.ndarray] = []  # All frames for batch inference
+                frame_metadata: List[Tuple[str, int, np.ndarray]] = []  # (camera_id, frame_idx, frame)
+                
+                # Collect batch_accumulation_size frames from each camera
+                for acc_idx in range(batch_accumulation_size):
+                    current_frame_idx = frame_index + acc_idx
+                    if current_frame_idx >= total_frames:
                         break
+                    
+                    for camera_id, data in video_data.items():
+                        cap = data.get("video_capture")
+                        if cap and cap.isOpened():
+                            ret, frame = cap.read()
+                            if ret:
+                                if self.enable_debug_reprojection:
+                                    self._debug_frame_store[(camera_id, current_frame_idx)] = frame.copy()
+                                accumulated_frames.append(frame)
+                                frame_metadata.append((camera_id, current_frame_idx, frame))
+                                any_frame_processed = True
+                            else:
+                                # End of video for this camera
+                                pass
+                        else:
+                            pass
+                
                 _read_time = (_time.perf_counter() - _read_start) * 1000
                 
-                # Check if all cameras finished
-                if not any_frame_processed or not frames_batch:
+                # Check if we got any frames
+                if not any_frame_processed or not accumulated_frames:
                     logger.info(f"🔍 SIMPLE DETECTION: All cameras finished at frame {frame_index}")
                     break
                 
-                # === PHASE 2: Run batch detection (single GPU call) ===
+                # Calculate how many frame indices we actually read
+                frames_read_per_camera = len(accumulated_frames) // num_cameras if num_cameras > 0 else 0
+                
+                # === PHASE 2: Run batch detection (single GPU call for ALL accumulated frames) ===
                 _det_start = _time.perf_counter()
                 
-                # Get detector (use first camera's environment, they should all match)
-                first_camera_id = camera_order[0][0] if camera_order else None
+                # Get detector
+                first_camera_id = frame_metadata[0][0] if frame_metadata else None
                 env_for_batch = self._get_environment_for_camera(first_camera_id) or "default" if first_camera_id else "default"
                 detector = self.detectors_by_env.get(env_for_batch) or self.detector
                 
-                if detector and len(frames_batch) > 1:
-                    # Use batch inference for multiple cameras
+                batch_detections = []
+                if detector and len(accumulated_frames) > 1:
+                    # Use batch inference for all accumulated frames (up to batch=16)
                     try:
-                        batch_detections = await detector.detect_batch(frames_batch)
+                        batch_detections = await detector.detect_batch(accumulated_frames)
                     except Exception as e:
                         logger.error(f"Batch detection failed, falling back to sequential: {e}")
-                        # Fallback: sequential detection
                         batch_detections = []
-                        for frame in frames_batch:
+                        for frame in accumulated_frames:
                             try:
                                 dets = await detector.detect(frame)
                                 batch_detections.append(dets)
                             except Exception:
                                 batch_detections.append([])
-                elif detector:
-                    # Single camera, use regular detect
-                    batch_detections = [await detector.detect(frames_batch[0])]
+                elif detector and accumulated_frames:
+                    batch_detections = [await detector.detect(accumulated_frames[0])]
                 else:
-                    batch_detections = [[] for _ in frames_batch]
+                    batch_detections = [[] for _ in accumulated_frames]
                     
                 _batch_det_time = (_time.perf_counter() - _det_start) * 1000
                 
-                # === PHASE 3: Process each camera with pre-computed detections ===
+                # === PHASE 3: Process each frame with pre-computed detections ===
                 _track_start = _time.perf_counter()
-                for (camera_id, frame), raw_detections in zip(camera_order, batch_detections):
-                    # Convert raw detections to enhanced format with spatial intelligence
+                
+                # Group results by frame index for proper ordering
+                frame_results: Dict[int, Dict[str, Tuple[np.ndarray, Dict[str, Any]]]] = {}
+                
+                for (camera_id, fidx, frame), raw_detections in zip(frame_metadata, batch_detections):
+                    # Convert raw detections to enhanced format
                     detection_data = self._process_detections_to_format(
-                        raw_detections, frame, camera_id, frame_index
+                        raw_detections, frame, camera_id, fidx
                     )
                     
-                    # Run tracking on the detections (without re-running detection)
+                    # Run tracking on the detections
                     detection_data = await self._process_tracking_with_predetected(
-                        frame, camera_id, frame_index, detection_data
+                        frame, camera_id, fidx, detection_data
                     )
                     
-                    frame_camera_data[camera_id] = (frame, detection_data)
+                    if fidx not in frame_results:
+                        frame_results[fidx] = {}
+                    frame_results[fidx][camera_id] = (frame, detection_data)
+                
                 _track_time = (_time.perf_counter() - _track_start) * 1000
-
-
-                # 2. Run Space-Based Matching (Cross-Camera)
-                _space_start = _time.perf_counter()
-                if self.space_based_matcher and self.space_based_matcher.enabled:
-                    try:
-                        # Extract detection dicts for matcher
-                        camera_detections_map = {cid: ddata for cid, (_, ddata) in frame_camera_data.items()}
-                        self.space_based_matcher.match_across_cameras(camera_detections_map)
-                    except Exception as e:
-                         logger.error(f"Space-based matching failed in simple loop: {e}")
-
-                # Update 'is_matched' flag for correct coloring (Fix for Simple Loop)
-                if self.space_based_matcher:
-                    for camera_id, (frame, detection_data) in frame_camera_data.items():
-                         for track in detection_data.get("tracks", []):
-                            gid = track.get("global_id")
-                            if gid:
-                                is_shared = self.space_based_matcher.is_global_id_shared(gid)
-                                track["is_matched"] = is_shared
-                                # DEBUG LOG (Temporary)
-                                pass # logger.warning(f"COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
-                                pass # logger.info(f"[INFO]COLOR DEBUG SIMPLE: Cam {camera_id} Track {track.get('track_id')} Global {gid} Shared={is_shared}")
-                _space_match_time = (_time.perf_counter() - _space_start) * 1000
-
-                # === PARALLELIZATION FIX: Encode MJPEG frames concurrently ===
-                # This avoids sequential blocking in WsSend (Cause 1 bottleneck)
-                _enc_start = _time.perf_counter()
-                pre_encoded_frames = {}
                 
-                async def _encode_frame(cid, frm):
-                     try:
-                         # Run CPU-bound encoding in thread pool
-                         if frm is not None:
-                             return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm)
-                         return cid, None
-                     except Exception:
-                         return cid, None
-
-                # Create encoding tasks for all cameras
-                encoding_tasks = [
-                    _encode_frame(cid, data[0]) 
-                    for cid, data in frame_camera_data.items()
-                ]
+                # === PHASE 3b: Process each frame group (for space matching and WS send) ===
+                _space_match_time = 0.0
+                _enc_time = 0.0
+                _ws_time = 0.0
                 
-                # Run all in parallel
-                if encoding_tasks:
-                    encoded_results = await asyncio.gather(*encoding_tasks)
-                    pre_encoded_frames = {cid: b for cid, b in encoded_results if b is not None}
-                
-                _enc_time = (_time.perf_counter() - _enc_start) * 1000
-
-                # 3. Send Updates and Emit Debug (PARALLELIZED)
-                _ws_start = _time.perf_counter()
-                
-                async def _process_camera_update(cid, frm, data, pre_encoded_bytes):
-                    local_debug = None
-                    # Collect debug points
-                    if self.enable_debug_reprojection:
-                         world_points = self._collect_world_points(
-                            detection_data=data,
-                            camera_id=cid,
-                            frame_number=frame_index
-                         )
-                         if world_points:
-                            local_debug = {"world_points": world_points}
+                for fidx in sorted(frame_results.keys()):
+                    frame_camera_data = frame_results[fidx]
+                    frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                     
-                    # Send WebSocket update
-                    await self.send_detection_update(
-                        task_id, cid, frm, data, frame_index,
-                        pre_encoded_jpeg_bytes=pre_encoded_bytes
-                    )
+                    # Run Space-Based Matching (Cross-Camera)
+                    _space_start = _time.perf_counter()
+                    if self.space_based_matcher and self.space_based_matcher.enabled:
+                        try:
+                            camera_detections_map = {cid: ddata for cid, (_, ddata) in frame_camera_data.items()}
+                            self.space_based_matcher.match_across_cameras(camera_detections_map)
+                        except Exception as e:
+                            logger.error(f"Space-based matching failed: {e}")
+
+                    # Update 'is_matched' flag
+                    if self.space_based_matcher:
+                        for camera_id, (frame, detection_data) in frame_camera_data.items():
+                            for track in detection_data.get("tracks", []):
+                                gid = track.get("global_id")
+                                if gid:
+                                    is_shared = self.space_based_matcher.is_global_id_shared(gid)
+                                    track["is_matched"] = is_shared
+                    _space_match_time += (_time.perf_counter() - _space_start) * 1000
+
+                    # Encode MJPEG frames concurrently
+                    _enc_start = _time.perf_counter()
+                    pre_encoded_frames = {}
                     
-                    if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
-                         await self._emit_frontend_events(task_id, cid, frame_index, data.get("tracks", []))
+                    async def _encode_frame(cid, frm):
+                        try:
+                            if frm is not None:
+                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm)
+                            return cid, None
+                        except Exception:
+                            return cid, None
+
+                    encoding_tasks = [
+                        _encode_frame(cid, data[0]) 
+                        for cid, data in frame_camera_data.items()
+                    ]
                     
-                    return cid, local_debug
+                    if encoding_tasks:
+                        encoded_results = await asyncio.gather(*encoding_tasks)
+                        pre_encoded_frames = {cid: b for cid, b in encoded_results if b is not None}
+                    
+                    _enc_time += (_time.perf_counter() - _enc_start) * 1000
 
-                # Create update tasks
-                update_tasks = [
-                    _process_camera_update(cid, *data, pre_encoded_frames.get(cid))
-                    for cid, data in frame_camera_data.items()
-                ]
+                    # Send Updates
+                    _ws_start = _time.perf_counter()
+                    
+                    async def _process_camera_update(cid, frm, data, pre_encoded_bytes):
+                        local_debug = None
+                        if self.enable_debug_reprojection:
+                            world_points = self._collect_world_points(
+                                detection_data=data,
+                                camera_id=cid,
+                                frame_number=fidx
+                            )
+                            if world_points:
+                                local_debug = {"world_points": world_points}
+                        
+                        await self.send_detection_update(
+                            task_id, cid, frm, data, fidx,
+                            pre_encoded_jpeg_bytes=pre_encoded_bytes
+                        )
+                        
+                        if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
+                            await self._emit_frontend_events(task_id, cid, fidx, data.get("tracks", []))
+                        
+                        return cid, local_debug
 
-                # Run parallel
-                if update_tasks:
-                    results = await asyncio.gather(*update_tasks)
-                    # Aggregate results
-                    for cid, debug_data in results:
-                        if debug_data:
-                            frame_debug_payload[cid] = debug_data
-                        frames_processed += 1
+                    update_tasks = [
+                        _process_camera_update(cid, *data, pre_encoded_frames.get(cid))
+                        for cid, data in frame_camera_data.items()
+                    ]
 
-                _ws_time = (_time.perf_counter() - _ws_start) * 1000
+                    if update_tasks:
+                        results = await asyncio.gather(*update_tasks)
+                        for cid, debug_data in results:
+                            if debug_data:
+                                frame_debug_payload[cid] = debug_data
+                            frames_processed += 1
 
-                # 4. Emit Debug Frame
-                if self.enable_debug_reprojection and frame_debug_payload:
-                    self._emit_reprojection_debug_frame(
-                        environment_id=environment_id,
-                        frame_number=frame_index,
-                        frame_payload=frame_debug_payload,
-                    )
-                    for cam_key in frame_debug_payload.keys():
-                        self._debug_frame_store.pop((cam_key, frame_index), None)
-                elif self.enable_debug_reprojection:
-                    for key in list(self._debug_frame_store.keys()):
-                        if key[1] == frame_index:
-                            self._debug_frame_store.pop(key, None)
+                    _ws_time += (_time.perf_counter() - _ws_start) * 1000
+
+                    # Emit Debug Frame
+                    if self.enable_debug_reprojection and frame_debug_payload:
+                        self._emit_reprojection_debug_frame(
+                            environment_id=environment_id,
+                            frame_number=fidx,
+                            frame_payload=frame_debug_payload,
+                        )
+                        for cam_key in frame_debug_payload.keys():
+                            self._debug_frame_store.pop((cam_key, fidx), None)
+                    elif self.enable_debug_reprojection:
+                        for key in list(self._debug_frame_store.keys()):
+                            if key[1] == fidx:
+                                self._debug_frame_store.pop(key, None)
+                    
+                    await self._record_playback_progress(task_id, fidx)
                 
                 # Total batch time
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
                 if _batch_time > 0:
-                    raw_fps = 1000.0 / _batch_time
+                    # Calculate FPS based on total frames processed in this mega-batch
+                    total_frames_in_batch = len(accumulated_frames)
+                    raw_fps = (1000.0 / _batch_time) * total_frames_in_batch / num_cameras if num_cameras > 0 else 0
                     frame_skip = getattr(settings, 'FRAME_SKIP', 1)
                     effective_fps = raw_fps * frame_skip
                 else:
                     raw_fps = 0.0
                     effective_fps = 0.0
                 
-                # Log frame batch timing EVERY FRAME for debugging
+                # Log batch timing
                 speed_optimize_logger.info(
-                    "[SPEED_DEBUG] BATCH Frame=%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d FPS=%.1f (Eff: %.1f)",
-                    frame_index, _batch_time,
+                    "[SPEED_DEBUG] MEGA-BATCH Frames=%d-%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d BatchSize=%d FPS=%.1f (Eff: %.1f)",
+                    frame_index, frame_index + frames_read_per_camera - 1, _batch_time,
                     _read_time, _batch_det_time, _track_time, _space_match_time, _enc_time, _ws_time,
-                    len(frame_camera_data), raw_fps, effective_fps
+                    num_cameras, len(accumulated_frames), raw_fps, effective_fps
                 )
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:
-                    progress = 0.60 + (frame_index / total_frames) * 0.35  # 0.60-0.95 range
+                    progress = 0.60 + (frame_index / total_frames) * 0.35
                     await self._update_task_status(
                         task_id, "PROCESSING", progress,
                         f"Processed frame {frame_index}/{total_frames} - {frames_processed} detections sent"
                     )
 
-                await self._record_playback_progress(task_id, frame_index)
-
-                frame_index += 1
+                # Advance by the number of frames we actually processed
+                frame_index += frames_read_per_camera if frames_read_per_camera > 0 else 1
                 
-                # Yield to event loop (no delay for max FPS)
+                # Yield to event loop
                 await asyncio.sleep(0)
             
             # Cleanup video captures
