@@ -583,8 +583,7 @@ class Settings(BaseSettings):
     # (Re-ID similarity settings removed)
 
     TARGET_FPS: int = 23 
-    FRAME_JPEG_QUALITY: int = 75  # Reduced from 90 for faster encoding (barely visible difference)
-    STREAM_RESIZE_FACTOR: float = Field(default=1.0, description="Resize factor for streaming (0.5 = half size, 1.0 = original). Lower = faster encode/transmit")
+    FRAME_JPEG_QUALITY: int = 75
 
     # WebSocket client connection guards
     STREAMING_CLIENT_INITIAL_GRACE_SECONDS: float = Field(
