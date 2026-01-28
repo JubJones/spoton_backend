@@ -2174,13 +2174,15 @@ class DetectionVideoService(RawVideoService):
                     
                 _batch_det_time = (_time.perf_counter() - _det_start) * 1000
                 
-                # === PHASE 3: Process each frame with pre-computed detections ===
+                # === PHASE 3: Process each frame with pre-computed detections (PARALLELIZED) ===
                 _track_start = _time.perf_counter()
                 
                 # Group results by frame index for proper ordering
                 frame_results: Dict[int, Dict[str, Tuple[np.ndarray, Dict[str, Any]]]] = {}
                 
-                for (camera_id, fidx, frame), raw_detections in zip(frame_metadata, batch_detections):
+                # Prepare all tracking tasks for parallel execution
+                async def _process_single_track(camera_id: str, fidx: int, frame: np.ndarray, raw_detections):
+                    """Process format conversion and tracking for a single frame-camera pair."""
                     # Convert raw detections to enhanced format
                     detection_data = self._process_detections_to_format(
                         raw_detections, frame, camera_id, fidx
@@ -2191,9 +2193,23 @@ class DetectionVideoService(RawVideoService):
                         frame, camera_id, fidx, detection_data
                     )
                     
-                    if fidx not in frame_results:
-                        frame_results[fidx] = {}
-                    frame_results[fidx][camera_id] = (frame, detection_data)
+                    return camera_id, fidx, frame, detection_data
+                
+                # Create all tracking tasks
+                tracking_tasks = [
+                    _process_single_track(camera_id, fidx, frame, raw_dets)
+                    for (camera_id, fidx, frame), raw_dets in zip(frame_metadata, batch_detections)
+                ]
+                
+                # Run all tracking in parallel
+                if tracking_tasks:
+                    tracking_results = await asyncio.gather(*tracking_tasks)
+                    
+                    # Organize results by frame index
+                    for camera_id, fidx, frame, detection_data in tracking_results:
+                        if fidx not in frame_results:
+                            frame_results[fidx] = {}
+                        frame_results[fidx][camera_id] = (frame, detection_data)
                 
                 _track_time = (_time.perf_counter() - _track_start) * 1000
                 
@@ -2228,11 +2244,12 @@ class DetectionVideoService(RawVideoService):
                     # Encode MJPEG frames concurrently
                     _enc_start = _time.perf_counter()
                     pre_encoded_frames = {}
+                    jpeg_quality = getattr(settings, 'FRAME_JPEG_QUALITY', 75)
                     
                     async def _encode_frame(cid, frm):
                         try:
                             if frm is not None:
-                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm)
+                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm, jpeg_quality)
                             return cid, None
                         except Exception:
                             return cid, None
