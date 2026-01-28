@@ -583,7 +583,7 @@ class Settings(BaseSettings):
     # (Re-ID similarity settings removed)
 
     TARGET_FPS: int = 23 
-    FRAME_JPEG_QUALITY: int = 90
+    FRAME_JPEG_QUALITY: int = 75
 
     # WebSocket client connection guards
     STREAMING_CLIENT_INITIAL_GRACE_SECONDS: float = Field(
