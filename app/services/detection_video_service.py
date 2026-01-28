@@ -2180,19 +2180,21 @@ class DetectionVideoService(RawVideoService):
                 # Group results by frame index for proper ordering
                 frame_results: Dict[int, Dict[str, Tuple[np.ndarray, Dict[str, Any]]]] = {}
                 
+<<<<<<< HEAD
                 # Prepare all tracking tasks for parallel execution
+=======
+                # Parallel tracking: process all frame-camera pairs concurrently
+>>>>>>> ae0296c476da0d8f8fea2401f5091d2c472b4309
                 async def _process_single_track(camera_id: str, fidx: int, frame: np.ndarray, raw_detections):
                     """Process format conversion and tracking for a single frame-camera pair."""
                     # Convert raw detections to enhanced format
                     detection_data = self._process_detections_to_format(
                         raw_detections, frame, camera_id, fidx
                     )
-                    
                     # Run tracking on the detections
                     detection_data = await self._process_tracking_with_predetected(
                         frame, camera_id, fidx, detection_data
                     )
-                    
                     return camera_id, fidx, frame, detection_data
                 
                 # Create all tracking tasks
@@ -2205,6 +2207,21 @@ class DetectionVideoService(RawVideoService):
                 if tracking_tasks:
                     tracking_results = await asyncio.gather(*tracking_tasks)
                     
+<<<<<<< HEAD
+                    return camera_id, fidx, frame, detection_data
+                
+                # Create all tracking tasks
+                tracking_tasks = [
+                    _process_single_track(camera_id, fidx, frame, raw_dets)
+                    for (camera_id, fidx, frame), raw_dets in zip(frame_metadata, batch_detections)
+                ]
+                
+                # Run all tracking in parallel
+                if tracking_tasks:
+                    tracking_results = await asyncio.gather(*tracking_tasks)
+                    
+=======
+>>>>>>> ae0296c476da0d8f8fea2401f5091d2c472b4309
                     # Organize results by frame index
                     for camera_id, fidx, frame, detection_data in tracking_results:
                         if fidx not in frame_results:
