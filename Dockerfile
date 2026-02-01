@@ -89,4 +89,4 @@ RUN chown -R appuser:appgroup /app && \
 
 USER appuser
 EXPOSE 3847
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3847"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "3847", "--no-access-log"]
