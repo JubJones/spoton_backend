@@ -2233,7 +2233,10 @@ class DetectionVideoService(RawVideoService):
                             if frm is not None:
                                 # Annotate frame with tracks (and optionally zones)
                                 handoff_zones = None
-                                if draw_handoff_zones and self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
+                                if draw_handoff_zones and self.handoff_service:
+                                    # Lazy-load default zones if none configured
+                                    if cid not in self.handoff_service.camera_zones:
+                                        self.handoff_service.camera_zones[cid] = self.handoff_service._create_default_zones(cid)
                                     handoff_zones = self.handoff_service.camera_zones.get(cid)
                                 
                                 tracks = det_data.get("tracks", []) if det_data else []
