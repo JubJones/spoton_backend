@@ -114,7 +114,7 @@ class MJPEGStreamer:
             elapsed = current_time - fps_data["start_time"]
             if elapsed > 0:
                 fps = fps_data["frame_count"] / elapsed
-                logger.info(f"[FPS_DEBUG] Task={task_id[:8]} Camera={camera_id} FPS={fps:.1f} (frames={fps_data['frame_count']} elapsed={elapsed:.1f}s)")
+                # logger.info(f"[FPS_DEBUG] Task={task_id[:8]} Camera={camera_id} FPS={fps:.1f} (frames={fps_data['frame_count']} elapsed={elapsed:.1f}s)")
             fps_data["last_log_time"] = current_time
         
         # Cache latest frame for new subscribers

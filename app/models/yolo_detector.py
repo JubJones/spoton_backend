@@ -44,7 +44,7 @@ _speed_file_handler.setLevel(logging.INFO)
 _speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
 _speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
 speed_debug_logger.addHandler(_speed_file_handler)
-speed_debug_logger.propagate = True  # Also show in console
+speed_debug_logger.propagate = False  # File only, no console
 
 
 

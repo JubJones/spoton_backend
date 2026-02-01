@@ -73,7 +73,7 @@ _speed_file_handler.setLevel(logging.INFO)
 _speed_file_handler.setFormatter(logging.Formatter('%(asctime)s - %(message)s'))
 _speed_file_handler.addFilter(SpeedDebugFilter())  # Only [SPEED_DEBUG] messages
 speed_optimize_logger.addHandler(_speed_file_handler)
-speed_optimize_logger.propagate = True  # Also show in console
+speed_optimize_logger.propagate = False  # File only, no console
 
 
 class DetectionVideoService(RawVideoService):
@@ -1190,8 +1190,8 @@ class DetectionVideoService(RawVideoService):
                     fps_elapsed = time.time() - fps_start_time
                     if fps_elapsed > 0:
                         current_fps = fps_frame_count / fps_elapsed
-                        logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
-                    logger.info(f"🔍 DETECTION PROCESSING: Frame {frame_index}/{total_frames} - {detection_count} detections")
+                        # logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
+                    # logger.info(f"🔍 DETECTION PROCESSING: Frame {frame_index}/{total_frames} - {detection_count} detections")
                 
                 frame_index += 1
             

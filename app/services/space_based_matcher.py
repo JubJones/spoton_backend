@@ -289,10 +289,10 @@ class SpaceBasedMatcher:
                     
                     overlap = cameras_target.intersection(cameras_source)
                     if overlap:
-                        logger.warning(
-                            f"[SpaceMatcher] ⚠️  MERGE ABORTED: {target_id} and {source_id} coexist in cameras {overlap}. "
-                            f"Skipping merge to prevent duplicate ID assignment."
-                        )
+                        # logger.warning(
+                        #     f"[SpaceMatcher] ⚠️  MERGE ABORTED: {target_id} and {source_id} coexist in cameras {overlap}. "
+                        #     f"Skipping merge to prevent duplicate ID assignment."
+                        # )
                         continue
 
                     self.registry.merge_identities(target_global_id=target_id, source_global_id=source_id)
