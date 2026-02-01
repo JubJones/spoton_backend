@@ -510,21 +510,27 @@ class DetectionVideoService(RawVideoService):
                         x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
                         
                         if x2c > x1c and y2c > y1c:
+                            logger.warning(f"[RE-ID] 🚪 ZONE ENTRY: Track {track_id} in {camera_id} entered handoff zone")
                             patch = frame[y1c:y2c, x1c:x2c]
                             embedding = await self.feature_extraction_service.extract_async(patch)
                             
                             if embedding is not None:
+                                logger.warning(f"[RE-ID] 🔍 FEATURE EXTRACTED: Track {track_id} in {camera_id} (embedding dim={len(embedding)})")
                                 # Search for match in HandoffManager (from other cameras)
                                 match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
                                 if match_global_id:
-                                    # logger.info(f"[RE-ID] ✅ ZONE ENTRY MATCH: Track {track_id} in {camera_id} matched to Global ID {match_global_id} (Score: {score:.2f})")
+                                    logger.warning(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} → Global ID {match_global_id} (Score: {score:.3f})")
                                     self.global_registry.assign_identity(camera_id, track_id, match_global_id)
                                     track['global_id'] = match_global_id
+                                    logger.warning(f"[RE-ID] 🏷️ ID ASSIGNED: {camera_id}:Track{track_id} → GlobalID {match_global_id}")
+                                else:
+                                    logger.warning(f"[RE-ID] ❌ NO MATCH: Track {track_id} in {camera_id} (searched handbook, no candidate)")
                                 
                                 # Also register this track for handoff (in case it exits to another camera)
                                 current_gid = self.global_registry.get_global_id(camera_id, track_id)
                                 gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
                                 self.handoff_manager.register_exit(gid, embedding, camera_id)
+                                logger.warning(f"[RE-ID] 📝 REGISTERED: GlobalID {gid} from {camera_id} (for potential handoff)")
                                 
                                 # Update cooldown
                                 self._reid_cooldowns[track_key] = now
