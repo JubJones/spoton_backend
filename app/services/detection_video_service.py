@@ -501,7 +501,9 @@ class DetectionVideoService(RawVideoService):
             was_in_zone = self._tracks_in_zone.get(track_key, False)
             already_processed_entry = self._tracks_processed_entry.get(track_key, False)
             
-            # === ZONE ENTRY: Track just entered handoff zone → Extract ONCE, search for match ===
+            # === ZONE ENTRY: Track just entered handoff zone → Extract ONCE, search for MATCH only ===
+            # NOTE: Re-ID does NOT create new IDs. It only assigns IDs when matching against
+            # tracks from OTHER cameras. New ID creation is handled by SpaceBasedMatcher.
             if is_in_zone and not was_in_zone and not already_processed_entry:
                 try:
                     x1c, y1c, x2c, y2c = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
@@ -513,21 +515,15 @@ class DetectionVideoService(RawVideoService):
                         embedding = await self.feature_extraction_service.extract_async(patch)
                         
                         if embedding is not None:
-                            # Search for match in HandoffManager (from other cameras)
+                            # Search for match in HandoffManager (from other cameras ONLY)
                             match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
                             
                             if match_global_id:
-                                # Found a match from another camera!
-                                logger.warning(f"[RE-ID] ✅ MATCH: {camera_id}:Track{track_id} → {match_global_id} (score={score:.2f})")
+                                # Found a match from another camera! This is a true handoff.
+                                logger.warning(f"[RE-ID] ✅ HANDOFF MATCH: {camera_id}:Track{track_id} → {match_global_id} (score={score:.2f})")
                                 self.global_registry.assign_identity(camera_id, track_id, match_global_id)
                                 track['global_id'] = match_global_id
-                            else:
-                                # No match - assign a NEW permanent global ID
-                                new_global_id = f"G{self._global_id_counter}"
-                                self._global_id_counter += 1
-                                logger.warning(f"[RE-ID] 🆕 NEW: {camera_id}:Track{track_id} → {new_global_id}")
-                                self.global_registry.assign_identity(camera_id, track_id, new_global_id)
-                                track['global_id'] = new_global_id
+                            # else: No match - do NOT create new ID. Spatial matcher handles that.
                             
                             # Mark entry as processed (won't extract again while in zone)
                             self._tracks_processed_entry[track_key] = True
