@@ -443,10 +443,13 @@ class DetectionVideoService(RawVideoService):
 
     async def _apply_reid_logic(self, tracks: List[Dict[str, Any]], frame: np.ndarray, camera_id: str, frame_width: int, frame_height: int) -> List[Dict[str, Any]]:
         """
-        Apply Re-ID logic:
-        1. Detect Entry (New Tracks) -> Extract -> Match against HandoffManager -> Assign Global ID
-        2. Detect Exit (Handoff Zone) -> Extract -> Register to HandoffManager
-        3. Assign Global ID to tracks
+        Apply Re-ID logic with ENTRY-EXIT only extraction:
+        
+        1. ZONE ENTRY: Extract ONCE → Search for match → Assign permanent Global ID
+        2. IN ZONE: Do nothing (no extraction spam)
+        3. ZONE EXIT: Extract ONCE → Register embedding for handoff
+        
+        This eliminates continuous extraction for stationary people in handoff zones.
         """
         # Early exit if Re-ID is disabled via config
         if not getattr(settings, 'REID_ENABLED', True):
@@ -456,14 +459,12 @@ class DetectionVideoService(RawVideoService):
             return tracks
 
         # Initialize zone tracking state if not present
-        if not hasattr(self, "_reid_cooldowns"):
-             self._reid_cooldowns: Dict[str, float] = {}
         if not hasattr(self, "_tracks_in_zone"):
              self._tracks_in_zone: Dict[str, bool] = {}  # track_key -> was_in_zone
-        
-        # Cooldown configuration (hardcoded for now, could be in settings)
-        COOLDOWN_SECONDS = 0.5 
-        now = time.time()
+        if not hasattr(self, "_tracks_processed_entry"):
+             self._tracks_processed_entry: Dict[str, bool] = {}  # track_key -> already processed entry
+        if not hasattr(self, "_global_id_counter"):
+             self._global_id_counter = 1000  # Start from 1000 to distinguish from tracker IDs
 
         current_track_ids = set()
         if camera_id not in self.active_track_ids:
@@ -498,65 +499,77 @@ class DetectionVideoService(RawVideoService):
             
             # Get previous zone status (default False for new tracks)
             was_in_zone = self._tracks_in_zone.get(track_key, False)
+            already_processed_entry = self._tracks_processed_entry.get(track_key, False)
             
-            # === ZONE ENTRY: Track just entered handoff zone → Search for match ===
-            if is_in_zone and not was_in_zone:
-                # Check Cooldown
-                last_time = self._reid_cooldowns.get(track_key, 0.0)
-                if (now - last_time) >= COOLDOWN_SECONDS:
-                    try:
-                        x1c, y1c, x2c, y2c = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-                        x1c, y1c = max(0, x1c), max(0, y1c)
-                        x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
+            # === ZONE ENTRY: Track just entered handoff zone → Extract ONCE, search for match ===
+            if is_in_zone and not was_in_zone and not already_processed_entry:
+                try:
+                    x1c, y1c, x2c, y2c = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                    x1c, y1c = max(0, x1c), max(0, y1c)
+                    x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
+                    
+                    if x2c > x1c and y2c > y1c:
+                        logger.warning(f"[RE-ID] 🚪 ZONE ENTRY: Track {track_id} in {camera_id} entered handoff zone")
+                        patch = frame[y1c:y2c, x1c:x2c]
+                        embedding = await self.feature_extraction_service.extract_async(patch)
                         
-                        if x2c > x1c and y2c > y1c:
-                            logger.warning(f"[RE-ID] 🚪 ZONE ENTRY: Track {track_id} in {camera_id} entered handoff zone")
-                            patch = frame[y1c:y2c, x1c:x2c]
-                            embedding = await self.feature_extraction_service.extract_async(patch)
+                        if embedding is not None:
+                            logger.warning(f"[RE-ID] 🔍 FEATURE EXTRACTED: Track {track_id} in {camera_id} (embedding dim={len(embedding)})")
                             
-                            if embedding is not None:
-                                logger.warning(f"[RE-ID] 🔍 FEATURE EXTRACTED: Track {track_id} in {camera_id} (embedding dim={len(embedding)})")
-                                # Search for match in HandoffManager (from other cameras)
-                                match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
-                                if match_global_id:
-                                    logger.warning(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} → Global ID {match_global_id} (Score: {score:.3f})")
-                                    self.global_registry.assign_identity(camera_id, track_id, match_global_id)
-                                    track['global_id'] = match_global_id
-                                    logger.warning(f"[RE-ID] 🏷️ ID ASSIGNED: {camera_id}:Track{track_id} → GlobalID {match_global_id}")
-                                else:
-                                    logger.warning(f"[RE-ID] ❌ NO MATCH: Track {track_id} in {camera_id} (searched handbook, no candidate)")
-                                
-                                # Also register this track for handoff (in case it exits to another camera)
-                                current_gid = self.global_registry.get_global_id(camera_id, track_id)
-                                gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
-                                self.handoff_manager.register_exit(gid, embedding, camera_id)
-                                logger.warning(f"[RE-ID] 📝 REGISTERED: GlobalID {gid} from {camera_id} (for potential handoff)")
-                                
-                                # Update cooldown
-                                self._reid_cooldowns[track_key] = now
-                    except Exception as e:
-                        logger.error(f"Re-ID Zone Entry Error: {e}")
+                            # Search for match in HandoffManager (from other cameras)
+                            match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
+                            
+                            if match_global_id:
+                                # Found a match from another camera!
+                                logger.warning(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} → Global ID {match_global_id} (Score: {score:.3f})")
+                                self.global_registry.assign_identity(camera_id, track_id, match_global_id)
+                                track['global_id'] = match_global_id
+                                logger.warning(f"[RE-ID] 🏷️ ID ASSIGNED: {camera_id}:Track{track_id} → GlobalID {match_global_id}")
+                            else:
+                                # No match - assign a NEW permanent global ID (not temp_)
+                                new_global_id = f"G{self._global_id_counter}"
+                                self._global_id_counter += 1
+                                logger.warning(f"[RE-ID] 🆕 NO MATCH - NEW ID: Track {track_id} in {camera_id} → GlobalID {new_global_id}")
+                                self.global_registry.assign_identity(camera_id, track_id, new_global_id)
+                                track['global_id'] = new_global_id
+                            
+                            # Mark entry as processed (won't extract again while in zone)
+                            self._tracks_processed_entry[track_key] = True
+                except Exception as e:
+                    logger.error(f"Re-ID Zone Entry Error: {e}")
             
-            # === IN ZONE: Track staying in handoff zone → Periodic registration ===
+            # === IN ZONE: Track staying in handoff zone → DO NOTHING ===
             elif is_in_zone and was_in_zone:
-                # Check Cooldown for periodic re-registration
-                last_time = self._reid_cooldowns.get(track_key, 0.0)
-                if (now - last_time) >= COOLDOWN_SECONDS:
-                    try:
-                        x1c, y1c, x2c, y2c = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-                        x1c, y1c = max(0, x1c), max(0, y1c)
-                        x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
+                pass  # No extraction while in zone
+            
+            # === ZONE EXIT: Track just left handoff zone → Extract ONCE, register for handoff ===
+            elif not is_in_zone and was_in_zone:
+                try:
+                    x1c, y1c, x2c, y2c = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                    x1c, y1c = max(0, x1c), max(0, y1c)
+                    x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
+                    
+                    if x2c > x1c and y2c > y1c:
+                        logger.warning(f"[RE-ID] 🚶 ZONE EXIT: Track {track_id} in {camera_id} exited handoff zone")
+                        patch = frame[y1c:y2c, x1c:x2c]
+                        embedding = await self.feature_extraction_service.extract_async(patch)
                         
-                        if x2c > x1c and y2c > y1c:
-                            patch = frame[y1c:y2c, x1c:x2c]
-                            embedding = await self.feature_extraction_service.extract_async(patch)
-                            if embedding is not None:
-                                current_gid = self.global_registry.get_global_id(camera_id, track_id)
-                                gid = current_gid or track.get('global_id') or f"temp_{camera_id}_{track_id}"
+                        if embedding is not None:
+                            # Get the global ID for this track
+                            current_gid = self.global_registry.get_global_id(camera_id, track_id)
+                            gid = current_gid or track.get('global_id')
+                            
+                            if gid:
+                                # Register this embedding for handoff (other cameras can match against it)
                                 self.handoff_manager.register_exit(gid, embedding, camera_id)
-                                self._reid_cooldowns[track_key] = now
-                    except Exception as e:
-                        logger.error(f"Re-ID Zone Stay Error: {e}")
+                                logger.warning(f"[RE-ID] 📝 REGISTERED FOR HANDOFF: GlobalID {gid} from {camera_id}")
+                            else:
+                                logger.warning(f"[RE-ID] ⚠️ ZONE EXIT without GlobalID: Track {track_id} in {camera_id}")
+                        
+                        # Clear the processed flag (can be processed again if re-enters)
+                        self._tracks_processed_entry.pop(track_key, None)
+                except Exception as e:
+                    logger.error(f"Re-ID Zone Exit Error: {e}")
             
             # Update zone tracking state
             self._tracks_in_zone[track_key] = is_in_zone
@@ -564,11 +577,12 @@ class DetectionVideoService(RawVideoService):
         # Update active tracks
         self.active_track_ids[camera_id] = current_track_ids
         
-        # Cleanup stale entries
-        if len(self._reid_cooldowns) > 1000:
-             active_keys = {f"{c}_{t}" for c, t_set in self.active_track_ids.items() for t in t_set}
-             self._reid_cooldowns = {k: v for k, v in self._reid_cooldowns.items() if k in active_keys}
-             self._tracks_in_zone = {k: v for k, v in self._tracks_in_zone.items() if k in active_keys}
+        # Cleanup stale entries for tracks that disappeared
+        active_keys = {f"{c}_{t}" for c, t_set in self.active_track_ids.items() for t in t_set}
+        stale_keys = [k for k in self._tracks_in_zone.keys() if k not in active_keys]
+        for k in stale_keys:
+            self._tracks_in_zone.pop(k, None)
+            self._tracks_processed_entry.pop(k, None)
 
         # Final pass: Ensure all tracks have their assigned global_id from registry
         for track in tracks:
