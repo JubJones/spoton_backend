@@ -10,6 +10,8 @@ class GlobalPersonRegistry:
     Centralized registry for managing global person identities across multiple cameras.
     Handles ID assignment, retrieval, and merging of identities.
     """
+    _id_counter = 0  # Class-level counter for simple numbered IDs
+    
     def __init__(self):
         # Map (camera_id, local_track_id) -> global_id
         self.global_id_map: Dict[Tuple[str, str], str] = {}
@@ -25,8 +27,9 @@ class GlobalPersonRegistry:
         return self.global_id_map.get(key)
         
     def allocate_new_id(self) -> str:
-        """Generate a new unique global ID."""
-        return f"global_{uuid.uuid4().hex[:8]}"
+        """Generate a new unique global ID (simple numbered format: P1, P2, etc.)."""
+        GlobalPersonRegistry._id_counter += 1
+        return f"P{GlobalPersonRegistry._id_counter}"
 
     def assign_identity(self, camera_id: str, track_id: int, global_id: str):
         """
