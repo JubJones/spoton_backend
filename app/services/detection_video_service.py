@@ -2231,17 +2231,17 @@ class DetectionVideoService(RawVideoService):
                     async def _encode_frame(cid, frm, det_data):
                         try:
                             if frm is not None:
-                                # Annotate frame with tracks (and optionally zones)
-                                handoff_zones = None
+                                # Only annotate with handoff zones if debug flag is on
+                                # Tracks/IDs are drawn by frontend, NOT backend
                                 if draw_handoff_zones and self.handoff_service:
                                     # Lazy-load default zones if none configured
                                     if cid not in self.handoff_service.camera_zones:
                                         self.handoff_service.camera_zones[cid] = self.handoff_service._create_default_zones(cid)
                                     handoff_zones = self.handoff_service.camera_zones.get(cid)
+                                    # Annotate with zones only (no tracks)
+                                    frm = self.annotator.annotate_frame(frm, [], [], handoff_zones)
                                 
-                                tracks = det_data.get("tracks", []) if det_data else []
-                                annotated = self.annotator.annotate_frame(frm, [], tracks, handoff_zones)
-                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, annotated, jpeg_quality)
+                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm, jpeg_quality)
                             return cid, None
                         except Exception:
                             return cid, None
