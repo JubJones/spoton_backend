@@ -46,7 +46,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
         "capacity_limits": {"total": 100, "entrance": 8, "main_area": 50},
         "data_retention_days": 180,
         "analytics_enabled": True,
-        "possible_camera_overlaps": [("c09", "c12"), ("c12", "c13"), ("c13", "c16")],
+        "possible_camera_overlaps": [],  # Temporarily empty - original: [("c09", "c12"), ("c12", "c13"), ("c13", "c16")]
         "layout": {
             "layout_id": "campus_layout",
             "name": "Campus Layout",
@@ -208,7 +208,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
         "capacity_limits": {"total": 40, "production_line_1": 12, "production_line_2": 12},
         "data_retention_days": 60,
         "analytics_enabled": True,
-        "possible_camera_overlaps": [("c01", "c03"), ("c02", "c03"), ("c03", "c05")],
+        "possible_camera_overlaps": [],  # Temporarily empty - original: [("c01", "c03"), ("c02", "c03"), ("c03", "c05")]
         "layout": {
             "layout_id": "factory_layout",
             "name": "Factory Floor Layout",
