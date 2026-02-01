@@ -509,27 +509,23 @@ class DetectionVideoService(RawVideoService):
                     x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
                     
                     if x2c > x1c and y2c > y1c:
-                        logger.warning(f"[RE-ID] 🚪 ZONE ENTRY: Track {track_id} in {camera_id} entered handoff zone")
                         patch = frame[y1c:y2c, x1c:x2c]
                         embedding = await self.feature_extraction_service.extract_async(patch)
                         
                         if embedding is not None:
-                            logger.warning(f"[RE-ID] 🔍 FEATURE EXTRACTED: Track {track_id} in {camera_id} (embedding dim={len(embedding)})")
-                            
                             # Search for match in HandoffManager (from other cameras)
                             match_global_id, score = self.handoff_manager.find_match(embedding, camera_id)
                             
                             if match_global_id:
                                 # Found a match from another camera!
-                                logger.warning(f"[RE-ID] ✅ MATCH FOUND: Track {track_id} in {camera_id} → Global ID {match_global_id} (Score: {score:.3f})")
+                                logger.warning(f"[RE-ID] ✅ MATCH: {camera_id}:Track{track_id} → {match_global_id} (score={score:.2f})")
                                 self.global_registry.assign_identity(camera_id, track_id, match_global_id)
                                 track['global_id'] = match_global_id
-                                logger.warning(f"[RE-ID] 🏷️ ID ASSIGNED: {camera_id}:Track{track_id} → GlobalID {match_global_id}")
                             else:
-                                # No match - assign a NEW permanent global ID (not temp_)
+                                # No match - assign a NEW permanent global ID
                                 new_global_id = f"G{self._global_id_counter}"
                                 self._global_id_counter += 1
-                                logger.warning(f"[RE-ID] 🆕 NO MATCH - NEW ID: Track {track_id} in {camera_id} → GlobalID {new_global_id}")
+                                logger.warning(f"[RE-ID] 🆕 NEW: {camera_id}:Track{track_id} → {new_global_id}")
                                 self.global_registry.assign_identity(camera_id, track_id, new_global_id)
                                 track['global_id'] = new_global_id
                             
@@ -550,7 +546,6 @@ class DetectionVideoService(RawVideoService):
                     x2c, y2c = min(frame_width, x2c), min(frame_height, y2c)
                     
                     if x2c > x1c and y2c > y1c:
-                        logger.warning(f"[RE-ID] 🚶 ZONE EXIT: Track {track_id} in {camera_id} exited handoff zone")
                         patch = frame[y1c:y2c, x1c:x2c]
                         embedding = await self.feature_extraction_service.extract_async(patch)
                         
@@ -562,9 +557,7 @@ class DetectionVideoService(RawVideoService):
                             if gid:
                                 # Register this embedding for handoff (other cameras can match against it)
                                 self.handoff_manager.register_exit(gid, embedding, camera_id)
-                                logger.warning(f"[RE-ID] 📝 REGISTERED FOR HANDOFF: GlobalID {gid} from {camera_id}")
-                            else:
-                                logger.warning(f"[RE-ID] ⚠️ ZONE EXIT without GlobalID: Track {track_id} in {camera_id}")
+                                logger.warning(f"[RE-ID] 📤 EXIT: {camera_id}:Track{track_id} ({gid}) registered for handoff")
                         
                         # Clear the processed flag (can be processed again if re-enters)
                         self._tracks_processed_entry.pop(track_key, None)
