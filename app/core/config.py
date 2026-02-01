@@ -507,6 +507,7 @@ class Settings(BaseSettings):
     SPATIAL_MATCH_MIN_OVERLAP_FRAMES: int = Field(default=3, description="Require N consecutive frames of proximity before merging IDs")
 
     ENABLE_DEBUG_REPROJECTION: bool = Field(default=False, description="Enable reprojection debugging overlays")
+    DEBUG_DRAW_HANDOFF_ZONES: bool = Field(default=False, description="Draw handoff zones on streamed frames for debugging")
     DEBUG_OVERLAY_RADIUS_PX: int = Field(default=6, description="Radius (px) for predicted marker visualization")
     DEBUG_REPROJECTION_OUTPUT_DIR: str = Field(default="app/debug_outputs", description="Directory for saved reprojection frames")
     DEBUG_FRAME_SAMPLING_RATE: int = Field(default=1, description="Persist every Nth frame for reprojection debugging")

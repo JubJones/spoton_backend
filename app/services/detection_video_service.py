@@ -2222,21 +2222,29 @@ class DetectionVideoService(RawVideoService):
                                     track["is_matched"] = is_shared
                     _space_match_time += (_time.perf_counter() - _space_start) * 1000
 
-                    # Encode MJPEG frames concurrently
+                    # Encode MJPEG frames concurrently (with annotation)
                     _enc_start = _time.perf_counter()
                     pre_encoded_frames = {}
                     jpeg_quality = getattr(settings, 'FRAME_JPEG_QUALITY', 75)
+                    draw_handoff_zones = getattr(settings, 'DEBUG_DRAW_HANDOFF_ZONES', False)
                     
-                    async def _encode_frame(cid, frm):
+                    async def _encode_frame(cid, frm, det_data):
                         try:
                             if frm is not None:
-                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, frm, jpeg_quality)
+                                # Annotate frame with tracks (and optionally zones)
+                                handoff_zones = None
+                                if draw_handoff_zones and self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
+                                    handoff_zones = self.handoff_service.camera_zones.get(cid)
+                                
+                                tracks = det_data.get("tracks", []) if det_data else []
+                                annotated = self.annotator.annotate_frame(frm, [], tracks, handoff_zones)
+                                return cid, await asyncio.to_thread(self.annotator.frame_to_jpeg_bytes, annotated, jpeg_quality)
                             return cid, None
                         except Exception:
                             return cid, None
 
                     encoding_tasks = [
-                        _encode_frame(cid, data[0]) 
+                        _encode_frame(cid, data[0], data[1]) 
                         for cid, data in frame_camera_data.items()
                     ]
                     
