@@ -28,6 +28,7 @@ class SpaceBasedMatcher:
         self.enabled = settings.SPATIAL_MATCH_ENABLED
         self.edge_margin = settings.SPATIAL_EDGE_MARGIN
         self.velocity_gate = settings.SPATIAL_VELOCITY_GATE
+        self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE
         
         # State to track potential matches over time
         # Key: (camera_id_a, track_id_a, camera_id_b, track_id_b) -> consecutive_frames
@@ -196,6 +197,11 @@ class SpaceBasedMatcher:
                             if dist < 5000.0:
                                 pass # logger.debug(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
                                 pass
+
+                            # Hard cap: if distance exceeds no_match_distance, completely exclude
+                            # This prevents false matches between people in non-overlapping camera views
+                            if dist > self.no_match_distance:
+                                continue  # Leave as infinity - never match these
 
                             if dist <= self.threshold_meters:
                                 # Optional: Velocity gate check (future Phase)
