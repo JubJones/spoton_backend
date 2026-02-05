@@ -297,8 +297,19 @@ def validate_detections(pt_model_path: str, engine_path: str):
     return pt_count, trt_count
 
 
+import argparse
+
 def main():
     """Main entry point for TensorRT export."""
+    parser = argparse.ArgumentParser(description="Export YOLO models to TensorRT engine format")
+    parser.add_argument(
+        "--model", 
+        type=str, 
+        help="Specific .pt model filename to export (e.g. yolo26m_campus.pt). If not provided, interactively asks or searches.",
+        default=None
+    )
+    args = parser.parse_args()
+
     print("\n" + "="*60)
     print("YOLO TensorRT Export Tool")
     print("="*60 + "\n")
@@ -309,23 +320,58 @@ def main():
     
     # Model paths
     weights_dir = PROJECT_ROOT / "weights"
-    pt_model = weights_dir / "yolo26m.pt"
     
-    # Check for model file
-    if not pt_model.exists():
-        print(f"\n❌ Model not found: {pt_model}")
-        print("\nAvailable models in weights directory:")
-        for f in weights_dir.glob("*.pt"):
-            print(f"   - {f.name}")
+    target_models = []
+    
+    # If model specified via CLI
+    if args.model:
+        model_path = weights_dir / args.model
+        if not model_path.exists():
+            # Try plain path if valid
+            if Path(args.model).exists():
+                 model_path = Path(args.model)
+            else:
+                print(f"❌ Specified model not found: {model_path}")
+                sys.exit(1)
+        target_models.append(model_path)
+    else:
+        # Auto-discovery preference
+        priority_models = ["yolo26m_campus.pt", "yolo26m_factory.pt"]
+        found_priority = []
+        for name in priority_models:
+            p = weights_dir / name
+            if p.exists():
+                found_priority.append(p)
         
-        # Try to find any .pt file
-        pt_files = list(weights_dir.glob("*.pt"))
-        if pt_files:
-            pt_model = pt_files[0]
-            print(f"\n📌 Using found model: {pt_model.name}")
+        if found_priority:
+            print("Found environment-specific models:")
+            for i, m in enumerate(found_priority):
+                print(f"  {i+1}. {m.name}")
+            
+            # Simple interaction or default to all? 
+            # For simplicity in automation/scripts, if multiple found and no arg, maybe just export the first one or ask?
+            # Given user requirements, I'll export based on input or just pick the first standard one if only one exists.
+            # But simpler: Just ask user to specify if multiple.
+             
+            if len(found_priority) == 1:
+                target_models.append(found_priority[0])
+                print(f"👉 Auto-selecting: {found_priority[0].name}")
+            else:
+                print("\n⚠️  Multiple models found. Please specify one with --model:")
+                print(f"   python scripts/export_yolo_tensorrt.py --model {found_priority[0].name}")
+                sys.exit(1)
         else:
-            print("\nNo .pt model files found. Please add your model to the weights/ directory.")
-            sys.exit(1)
+            # Fallback to generic
+            generic = weights_dir / "yolo26m.pt"
+            if generic.exists():
+                target_models.append(generic)
+                print(f"👉 Auto-selecting generic model: {generic.name}")
+            else:
+                 print("\nNo standard .pt model files found (yolo26m_campus.pt, yolo26m_factory.pt, yolo26m.pt).")
+                 print("Please add your model to the weights/ directory.")
+                 sys.exit(1)
+
+    pt_model = target_models[0]
     
     # Export to TensorRT
     engine_path = export_to_tensorrt(
@@ -356,11 +402,11 @@ def main():
     print(f"{'='*60}")
     print(f"\nTensorRT engine saved to:")
     print(f"   {engine_path}")
-    print(f"\nTo use in your application, update the model path in your config:")
-    print(f"   Before: weights/yolo26m.pt")
-    print(f"   After:  {Path(engine_path).name}")
+    print(f"\nTo use in your application, ensure your environment config points to this model.")
+    print(f"   Campus Env  -> Needs: yolo26m_campus.engine")
+    print(f"   Factory Env -> Needs: yolo26m_factory.engine")
     print(f"\nExpected speedup: {pt_results['mean'] / trt_results['mean']:.1f}x faster")
-    print(f"Expected latency: ~{trt_results['mean']:.0f}ms per batch of 32 images")
+    print(f"Expected latency: ~{trt_results['mean']:.0f}ms per batch of 16 images")
     print()
 
 
