@@ -377,11 +377,13 @@ class DetectionVideoService(RawVideoService):
         # Also check /app/weights for Docker
         docker_weights_path = os.path.join("/app/weights", expected_filename)
         
+        mode_label = "TensorRT (.engine)" if (cuda_available and use_tensorrt) else "PyTorch (.pt)"
+        
         if os.path.isfile(weights_path):
-            logger.info(f"✅ Loaded model for '{env_key}': {weights_path}")
+            logger.warning(f"🔧 MODEL LOAD: Environment='{env_key}' | Mode={mode_label} | Path={weights_path}")
             return weights_path
         elif os.path.isfile(docker_weights_path):
-            logger.info(f"✅ Loaded model for '{env_key}': {docker_weights_path}")
+            logger.warning(f"🔧 MODEL LOAD: Environment='{env_key}' | Mode={mode_label} | Path={docker_weights_path}")
             return docker_weights_path
         else:
             # NO FALLBACK - throw error
