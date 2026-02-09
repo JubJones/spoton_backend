@@ -11,6 +11,23 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# File-based debug logger for spatial matching (write to local file)
+SPATIAL_DEBUG_LOG = "/app/logs/spatial_debug.log"
+try:
+    import os
+    os.makedirs(os.path.dirname(SPATIAL_DEBUG_LOG), exist_ok=True)
+except:
+    SPATIAL_DEBUG_LOG = "./spatial_debug.log"
+
+def spatial_debug(msg: str):
+    """Write debug message to spatial debug log file."""
+    try:
+        with open(SPATIAL_DEBUG_LOG, "a") as f:
+            from datetime import datetime
+            f.write(f"{datetime.now().isoformat()} - {msg}\n")
+    except:
+        pass
+
 from app.services.global_person_registry import GlobalPersonRegistry
 
 class SpaceBasedMatcher:
@@ -84,7 +101,7 @@ class SpaceBasedMatcher:
             for cam_id in ["c09", "c16"]:
                 for t in valid_tracks.get(cam_id, []):
                     mc = t.get("map_coords", {})
-                    logger.warning(f"[SPATIAL DEBUG] {cam_id}:Track{t.get('track_id')} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
+                    spatial_debug(f"{cam_id}:Track{t.get('track_id')} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 2. Find matches between pairs of cameras using robust assignment
         new_matches = []
@@ -92,7 +109,7 @@ class SpaceBasedMatcher:
             new_matches = self._find_spatial_matches(valid_tracks)
             c09_c16_matches = [m for m in new_matches if {m[0], m[2]} == {"c09", "c16"}]
             if c09_c16_matches:
-                logger.warning(f"[SPATIAL DEBUG] c09<->c16 matches: {len(c09_c16_matches)}")
+                spatial_debug(f"c09<->c16 matches: {len(c09_c16_matches)}")
         
         # 3. Update global ID assignments
         # Build map of active global IDs to check for conflicts (prevent merging distinct people in same view)
@@ -197,11 +214,11 @@ class SpaceBasedMatcher:
                 # DEBUG: Log rejection for c09/c16 tracks
                 if camera_id in ["c09", "c16"]:
                     if not is_projected:
-                        logger.warning(f"[SPATIAL DEBUG] REJECTED {camera_id}:T{track_id} - No projection (map_coords={map_coords})")
+                        spatial_debug(f"REJECTED {camera_id}:T{track_id} - No projection (map_coords={map_coords})")
                         continue
                     
                     if frame_width and frame_height and self._is_edge_detection(track, frame_width, frame_height):
-                        logger.warning(f"[SPATIAL DEBUG] REJECTED {camera_id}:T{track_id} - Edge filter")
+                        spatial_debug(f"REJECTED {camera_id}:T{track_id} - Edge filter")
                         continue
                     
                     camera_valid_tracks.append(track)
@@ -274,7 +291,7 @@ class SpaceBasedMatcher:
                         if dist is not None:
                              # AUDIT LOG: Print distance if relatively close, to debug threshold issues
                             if dist < 5000.0 and {cam_a, cam_b} == {"c09", "c16"}:
-                                logger.warning(f"[SPATIAL DEBUG] Distance: {cam_a}:T{track_a.get('track_id')} vs {cam_b}:T{track_b.get('track_id')} = {dist:.2f}px (threshold={self.threshold_meters})")
+                                spatial_debug(f"Distance: {cam_a}:T{track_a.get('track_id')} vs {cam_b}:T{track_b.get('track_id')} = {dist:.2f}px (threshold={self.threshold_meters})")
 
                             # Hard cap: if distance exceeds no_match_distance, completely exclude
                             # This prevents false matches between people in non-overlapping camera views
