@@ -75,6 +75,22 @@ class HomographyService:
 
         return path
 
+
+    def set_environment(self, environment_id: str):
+        """Configure world bounds based on the environment."""
+        if environment_id == "factory":
+            self.x_min = self._settings.WORLD_BOUNDS_X_MIN_FACTORY
+            self.x_max = self._settings.WORLD_BOUNDS_X_MAX_FACTORY
+            self.y_min = self._settings.WORLD_BOUNDS_Y_MIN_FACTORY
+            self.y_max = self._settings.WORLD_BOUNDS_Y_MAX_FACTORY
+            logger.info(f"Using FACTORY world bounds: x=[{self.x_min}, {self.x_max}], y=[{self.y_min}, {self.y_max}]")
+        else:
+            self.x_min = self._settings.WORLD_BOUNDS_X_MIN
+            self.x_max = self._settings.WORLD_BOUNDS_X_MAX
+            self.y_min = self._settings.WORLD_BOUNDS_Y_MIN
+            self.y_max = self._settings.WORLD_BOUNDS_Y_MAX
+            logger.info(f"Using DEFAULT/CAMPUS world bounds: x=[{self.x_min}, {self.x_max}], y=[{self.y_min}, {self.y_max}]")
+
     def _ingest_consolidated_payload(self, payload: Dict[str, Any]) -> int:
         """Populate local caches from the consolidated homography JSON payload."""
         cameras = payload.get("cameras")
