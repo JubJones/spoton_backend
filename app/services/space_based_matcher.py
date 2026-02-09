@@ -81,12 +81,17 @@ class SpaceBasedMatcher:
         
         # DEBUG TRACE
         total_tracks = sum(len(t) for t in valid_tracks.values())
-        # logger.info(f"SpaceMatcher: Found {total_tracks} valid tracks across {len(valid_tracks)} cameras")
+        logger.warning(f"[SPATIAL DEBUG] Valid tracks: {total_tracks} across {len(valid_tracks)} cameras")
+        for cam_id, tracks in valid_tracks.items():
+            for t in tracks:
+                mc = t.get("map_coords", {})
+                logger.warning(f"[SPATIAL DEBUG]   {cam_id}:Track{t.get('track_id')} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 2. Find matches between pairs of cameras using robust assignment
         new_matches = []
         if len(valid_tracks) >= 2:
             new_matches = self._find_spatial_matches(valid_tracks)
+            logger.warning(f"[SPATIAL DEBUG] Found {len(new_matches)} spatial matches")
         
         # 3. Update global ID assignments
         # Build map of active global IDs to check for conflicts (prevent merging distinct people in same view)
@@ -256,8 +261,7 @@ class SpaceBasedMatcher:
                         if dist is not None:
                              # AUDIT LOG: Print distance if relatively close, to debug threshold issues
                             if dist < 5000.0:
-                                pass # logger.debug(f"SpaceMatch Candidate: {cam_a}:{track_a.get('track_id')} vs {cam_b}:{track_b.get('track_id')} dist={dist:.2f}m")
-                                pass
+                                logger.warning(f"[SPATIAL DEBUG] Distance: {cam_a}:T{track_a.get('track_id')} vs {cam_b}:T{track_b.get('track_id')} = {dist:.2f}px (threshold={self.threshold_meters})")
 
                             # Hard cap: if distance exceeds no_match_distance, completely exclude
                             # This prevents false matches between people in non-overlapping camera views
