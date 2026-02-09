@@ -485,6 +485,13 @@ class Settings(BaseSettings):
     WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
     WORLD_BOUNDS_Y_MIN: float = Field(default=-2000.0, description="Minimum world Y coordinate (meters)")
     WORLD_BOUNDS_Y_MAX: float = Field(default=2000.0, description="Maximum world Y coordinate (meters)")
+
+    # Factory overrides for larger spaces/bad calibration
+    WORLD_BOUNDS_X_MIN_FACTORY: float = Field(default=-4000.0, description="Factory specific min X")
+    WORLD_BOUNDS_X_MAX_FACTORY: float = Field(default=4000.0, description="Factory specific max X")
+    WORLD_BOUNDS_Y_MIN_FACTORY: float = Field(default=-4000.0, description="Factory specific min Y")
+    WORLD_BOUNDS_Y_MAX_FACTORY: float = Field(default=4000.0, description="Factory specific max Y")
+
     ENABLE_POINT_VALIDATION: bool = Field(default=True, description="Enable image-space point validation checks")
     ENABLE_BOUNDS_VALIDATION: bool = Field(default=True, description="Enable world bounds validation after homography projection")
     ROI_BASE_RADIUS: float = Field(default=1.5, description="Base ROI radius in meters")

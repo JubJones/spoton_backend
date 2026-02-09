@@ -297,6 +297,9 @@ class DetectionVideoService(RawVideoService):
             if self.space_based_matcher:
                 self.space_based_matcher.set_environment(environment_id)
 
+            if self.homography_service:
+                self.homography_service.set_environment(environment_id)
+
             if self.homography_service is None:
                 try:
                     # Fallback to local instance (degraded mode)

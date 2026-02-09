@@ -43,6 +43,12 @@ class HomographyService:
         self.ransac_threshold = 5.0  # Maximum allowed reprojection error
         self._warned_cameras: set = set()  # Track warned cameras to avoid spam
 
+        # Default bounds (Campus)
+        self.x_min = settings.WORLD_BOUNDS_X_MIN
+        self.x_max = settings.WORLD_BOUNDS_X_MAX
+        self.y_min = settings.WORLD_BOUNDS_Y_MIN
+        self.y_max = settings.WORLD_BOUNDS_Y_MAX
+
         # Configuration
         self.homography_file_path = self._resolve_homography_file_path()
         self._loaded = False
@@ -432,17 +438,18 @@ class HomographyService:
 
     def validate_map_coordinate(self, camera_id: str, map_x: float, map_y: float) -> bool:
         """
-        Validate that map coordinate is finite and within reasonable bounds for the camera.
-        Allows (0,0) as valid if within computed bounds or when no bounds are available.
+        Validate that map coordinate is finite and within configured WORLD BOUNDS.
+        Uses instance-level bounds that may be environment-specific.
         """
-        try:
-            if not (np.isfinite(map_x) and np.isfinite(map_y)):
-                return False
-            bounds = self.get_map_bounds(camera_id)
-            if bounds is None:
-                # Fallback permissive bounds to avoid false negatives; values in meters
-                return abs(map_x) <= 10000 and abs(map_y) <= 10000
-            min_x, max_x, min_y, max_y = bounds
-            return (min_x <= map_x <= max_x) and (min_y <= map_y <= max_y)
-        except Exception:
+        if not (np.isfinite(map_x) and np.isfinite(map_y)):
             return False
+
+        if not settings.ENABLE_BOUNDS_VALIDATION:
+            return True
+
+        # Strict check against configured world bounds (default or factory)
+        if (map_x < self.x_min or map_x > self.x_max or
+            map_y < self.y_min or map_y > self.y_max):
+            return False
+
+        return True
