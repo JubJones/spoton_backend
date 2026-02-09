@@ -201,7 +201,14 @@ class SpaceBasedMatcher:
         return valid_tracks
 
     def _is_edge_detection(self, track: Dict[str, Any], width: int, height: int) -> bool:
-        """Check if bounding box center is too close to frame edge."""
+        """Check if detection is too close to frame edge."""
+        margin = self.edge_margin
+        
+        # If margin is 0.0 or less, disable edge filtering completely.
+        # This allows tracking objects even if their center point is slightly outside the frame.
+        if margin <= 0.0:
+            return False
+
         try:
             bbox = track.get("bbox", {})
             cx = bbox.get("center_x")
