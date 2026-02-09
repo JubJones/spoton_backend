@@ -789,27 +789,23 @@ class DetectionVideoService(RawVideoService):
                 if not projection_success and self.homography_service and bottom_point:
                     fallback_point = (bottom_point.x, bottom_point.y)
                     projected_coords = self.homography_service.project_to_map(camera_id, fallback_point)
+                    
+                    # LOGGING FOR FACTORY DEBUGGING
+                    if projected_coords:
+                        logger.warning(f"HOMOGRAPHY DEBUG: Camera={camera_id} Input={fallback_point} Output={projected_coords}")
+                    else:
+                        logger.warning(f"HOMOGRAPHY DEBUG: Camera={camera_id} Input={fallback_point} Output=None (Project Failed)")
+
                     if projected_coords:
                         candidate_map_x, candidate_map_y = projected_coords
                         if self.homography_service.validate_map_coordinate(camera_id, candidate_map_x, candidate_map_y):
                             map_coords = {"map_x": candidate_map_x, "map_y": candidate_map_y}
                             projection_success = True
                             transformation_quality = transformation_quality or 0.8  # Legacy validation success
-                            pass
-                            # logger.debug(
-                            #     "Fallback homography map coords accepted for %s: (%.4f, %.4f)",
-                            #     camera_id,
-                            #     candidate_map_x,
-                            #     candidate_map_y,
-                            # )
                         else:
-                            pass
-                            # logger.info(
-                            #     "Fallback projected coords out of bounds for %s: (%.4f, %.4f)",
-                            #     camera_id,
-                            #     candidate_map_x,
-                            #     candidate_map_y,
-                            # )
+                            logger.warning(f"HOMOGRAPHY DEBUG: Camera={camera_id} Coordinate VALIDATION FAILED for {projected_coords}")
+                    else:
+                        pass
 
                 if projection_success and map_coords:
                     try:
