@@ -31,6 +31,15 @@ class GlobalPersonRegistry:
         GlobalPersonRegistry._id_counter += 1
         return f"P{GlobalPersonRegistry._id_counter}"
 
+    def force_assign_identity(self, camera_id: str, track_id: int, global_id: str):
+        """
+        Force assign a specific global_id to a local track, bypassing merge logic.
+        Used for conflict resolution (splitting) where we want to change ONE track's ID
+        without affecting others that might share the old ID.
+        """
+        key = (camera_id, str(track_id))
+        self._set_mapping(key, global_id)
+
     def assign_identity(self, camera_id: str, track_id: int, global_id: str):
         """
         Assign a specific global_id to a local track.

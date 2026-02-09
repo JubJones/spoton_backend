@@ -109,9 +109,51 @@ class SpaceBasedMatcher:
         
         # 4. Inject global IDs back into the detection results
         self._inject_global_ids(camera_detections)
+
+        # 4.5 Safety Check: Resolve intra-camera conflicts (Same Global ID on multiple tracks in same camera)
+        self._resolve_intra_camera_conflicts(camera_detections)
         
         # 5. Cleanup stale entries
         self._cleanup_state(valid_tracks)
+
+    def _resolve_intra_camera_conflicts(self, camera_detections: Dict[str, Dict[str, Any]]):
+        """
+        Ensure that within a single camera frame, no two tracks share the same global ID.
+        If duplicates are found, keep the ID for the highest confidence track and reassign others.
+        """
+        for camera_id, result in camera_detections.items():
+            tracks = result.get("tracks", [])
+            if not tracks:
+                continue
+
+            # Group by global_id
+            id_map = defaultdict(list)
+            for track in tracks:
+                gid = track.get("global_id")
+                if gid:
+                    id_map[gid].append(track)
+            
+            # Check for duplicates
+            for gid, sharing_tracks in id_map.items():
+                if len(sharing_tracks) > 1:
+                    # Conflict detected!
+                    # logger.warning(f"Conflict: Global ID {gid} assigned to {len(sharing_tracks)} tracks in camera {camera_id}. Resolving...")
+                    
+                    # Sort by confidence (descending) -> Keep best
+                    sharing_tracks.sort(key=lambda x: x.get("confidence", 0.0), reverse=True)
+                    
+                    winner = sharing_tracks[0]
+                    losers = sharing_tracks[1:]
+                    
+                    for track in losers:
+                        lid = track.get("track_id")
+                        if lid is not None:
+                            new_gid = self.registry.allocate_new_id()
+                            # Use force_assign_identity to SPLIT this specific track to a new ID
+                            # without merging all other tracks that might share the old ID.
+                            self.registry.force_assign_identity(camera_id, int(lid), new_gid)
+                            track["global_id"] = new_gid
+                            # logger.info(f"Resolved conflict: Reassigned {camera_id}:{lid} from {gid} to {new_gid}")
 
     def _get_active_global_ids(self, camera_detections: Dict[str, Dict[str, Any]]) -> Dict[str, Set[str]]:
         """
