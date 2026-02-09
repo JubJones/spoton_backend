@@ -7,7 +7,7 @@
   },
   "cameras": [
     {
-      "id": "Cam 1",
+      "id": "c09",
       "source_points": [
         [
           1917.0,
@@ -472,7 +472,7 @@
       "frame_path": "/Users/yanatg/VS/spoton_backend/images/s14/c09/000000.jpg"
     },
     {
-      "id": "Cam 2",
+      "id": "c12",
       "source_points": [
         [
           15.0,
@@ -729,7 +729,7 @@
       "frame_path": "/Users/yanatg/VS/spoton_backend/images/s14/c12/000000.jpg"
     },
     {
-      "id": "Cam 3",
+      "id": "c13",
       "source_points": [
         [
           924.0,
@@ -1426,7 +1426,7 @@
       "frame_path": "/Users/yanatg/VS/spoton_backend/images/s14/c13/000000.jpg"
     },
     {
-      "id": "Cam 4",
+      "id": "c16",
       "source_points": [
         [
           12.0,
