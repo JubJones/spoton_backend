@@ -54,11 +54,13 @@ class SpaceBasedMatcher:
         if environment_id == "factory":
             self.threshold_meters = settings.SPATIAL_MATCH_THRESHOLD_FACTORY
             self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE_FACTORY
-            logger.info(f"Using FACTORY spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}")
+            self.edge_margin = settings.SPATIAL_EDGE_MARGIN_FACTORY
+            logger.info(f"Using FACTORY spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}, edge_margin={self.edge_margin}")
         else:
             self.threshold_meters = settings.SPATIAL_MATCH_THRESHOLD
             self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE
-            logger.info(f"Using DEFAULT/CAMPUS spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}")
+            self.edge_margin = settings.SPATIAL_EDGE_MARGIN
+            logger.info(f"Using DEFAULT/CAMPUS spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}, edge_margin={self.edge_margin}")
 
     def match_across_cameras(self, camera_detections: Dict[str, Dict[str, Any]]) -> None:
         """

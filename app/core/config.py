@@ -507,6 +507,7 @@ class Settings(BaseSettings):
     # Factory specific overrides (more crowded -> higher thresholds?)
     SPATIAL_MATCH_THRESHOLD_FACTORY: float = Field(default=200.0, description="Factory specific soft threshold (approx 2m)")
     SPATIAL_NO_MATCH_DISTANCE_FACTORY: float = Field(default=400.0, description="Factory specific hard cap (approx 4m)")
+    SPATIAL_EDGE_MARGIN_FACTORY: float = Field(default=0.0, description="Factory specific edge margin (0.0 to disable edge filtering)")
 
     SPATIAL_EDGE_MARGIN: float = Field(default=0.05, description="Margin (0.0-1.0) to ignore detections near frame edges")
     SPATIAL_VELOCITY_GATE: bool = Field(default=True, description="Prevent matching tracks moving in opposite directions")
