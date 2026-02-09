@@ -480,7 +480,7 @@ class Settings(BaseSettings):
     POSSIBLE_CAMERA_OVERLAPS: List[Tuple[str, str]] = Field(default_factory=list)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
     MIN_BBOX_OVERLAP_RATIO_IN_QUADRANT: float = Field(default=0.40)
-    HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data", description="Directory or JSON file containing camera-to-world homography matrices")
+    HOMOGRAPHY_FILE_PATH: str = Field(default="homography_data/campus.json", description="JSON file containing camera-to-world homography matrices")
     WORLD_BOUNDS_X_MIN: float = Field(default=-2000.0, description="Minimum world X coordinate (meters)")
     WORLD_BOUNDS_X_MAX: float = Field(default=2000.0, description="Maximum world X coordinate (meters)")
     WORLD_BOUNDS_Y_MIN: float = Field(default=-2000.0, description="Minimum world Y coordinate (meters)")
