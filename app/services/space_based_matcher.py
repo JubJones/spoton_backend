@@ -187,18 +187,30 @@ class SpaceBasedMatcher:
             frame_height = result.get("spatial_metadata", {}).get("frame_dimensions", {}).get("height")
             
             for track in tracks:
+                track_id = track.get("track_id")
                 # Basic coordinate check
                 map_coords = track.get("map_coords")
                 spatial_data = track.get("spatial_data", {})
                 
                 is_projected = spatial_data.get("projection_successful") or (map_coords and map_coords.get("map_x") is not None)
                 
-                if is_projected:
-                     # Edge Rejection Filter
-                    if frame_width and frame_height and self._is_edge_detection(track, frame_width, frame_height):
+                # DEBUG: Log rejection for c09/c16 tracks
+                if camera_id in ["c09", "c16"]:
+                    if not is_projected:
+                        logger.warning(f"[SPATIAL DEBUG] REJECTED {camera_id}:T{track_id} - No projection (map_coords={map_coords})")
                         continue
-                        
+                    
+                    if frame_width and frame_height and self._is_edge_detection(track, frame_width, frame_height):
+                        logger.warning(f"[SPATIAL DEBUG] REJECTED {camera_id}:T{track_id} - Edge filter")
+                        continue
+                    
                     camera_valid_tracks.append(track)
+                else:
+                    # Non-debug path for other cameras
+                    if is_projected:
+                        if frame_width and frame_height and self._is_edge_detection(track, frame_width, frame_height):
+                            continue
+                        camera_valid_tracks.append(track)
             
             if camera_valid_tracks:
                 valid_tracks[camera_id] = camera_valid_tracks
