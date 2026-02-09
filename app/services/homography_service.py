@@ -201,7 +201,7 @@ class HomographyService:
     # Phase 4: Spatial Intelligence Methods
     
     def load_json_homography_data(self) -> None:
-        """Load homography matrices and calibration points from the consolidated JSON file."""
+        """Load homography matrices and calibration points from JSON file(s)."""
         self.json_homography_matrices.clear()
         self.calibration_points.clear()
 
@@ -211,25 +211,39 @@ class HomographyService:
             self._loaded = False
             return
 
-        try:
-            with path.open("r", encoding="utf-8") as fh:
-                payload = json.load(fh)
-        except FileNotFoundError:
-            logger.warning("Homography JSON file not found: %s", path)
-            self._loaded = False
-            return
-        except json.JSONDecodeError as exc:
-            logger.error("Invalid homography JSON %s: %s", path, exc)
+        if not path.exists():
+            logger.warning("Homography path not found: %s", path)
             self._loaded = False
             return
 
-        loaded_count = self._ingest_consolidated_payload(payload)
-        self._loaded = loaded_count > 0
+        files_to_load = []
+        if path.is_dir():
+            # Load all .json files in the directory
+            files_to_load = sorted(list(path.glob("*.json")))
+            if not files_to_load:
+                logger.warning("No .json files found in homography directory: %s", path)
+        else:
+            files_to_load = [path]
+
+        total_loaded = 0
+        for file_path in files_to_load:
+            try:
+                with file_path.open("r", encoding="utf-8") as fh:
+                    payload = json.load(fh)
+                    count = self._ingest_consolidated_payload(payload)
+                    total_loaded += count
+                    logger.info("Loaded %d cameras from %s", count, file_path.name)
+            except json.JSONDecodeError as exc:
+                logger.error("Invalid homography JSON %s: %s", file_path, exc)
+            except Exception as e:
+                logger.error("Error loading homography file %s: %s", file_path, e)
+
+        self._loaded = total_loaded > 0
 
         if self._loaded:
-            logger.info("Loaded homography data for %d cameras from %s", loaded_count, path)
+            logger.info("Total loaded homography data for %d cameras from %s", total_loaded, path)
         else:
-            logger.warning("No homography matrices were loaded from %s", path)
+            logger.warning("No valid homography matrices were loaded from %s", path)
     
     def compute_homography(self, camera_id: str) -> Optional[np.ndarray]:
         """
