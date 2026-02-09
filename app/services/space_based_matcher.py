@@ -83,11 +83,10 @@ class SpaceBasedMatcher:
         total_tracks = sum(len(t) for t in valid_tracks.values())
         # logger.info(f"SpaceMatcher: Found {total_tracks} valid tracks across {len(valid_tracks)} cameras")
 
-        if len(valid_tracks) < 2:
-            return  # Need at least two cameras with tracks to match anything
-
         # 2. Find matches between pairs of cameras using robust assignment
-        new_matches = self._find_spatial_matches(valid_tracks)
+        new_matches = []
+        if len(valid_tracks) >= 2:
+            new_matches = self._find_spatial_matches(valid_tracks)
         
         # 3. Update global ID assignments
         # Build map of active global IDs to check for conflicts (prevent merging distinct people in same view)
