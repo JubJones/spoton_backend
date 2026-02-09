@@ -503,6 +503,11 @@ class Settings(BaseSettings):
     SPATIAL_MATCH_ENABLED: bool = Field(default=True, description="Enable space-based cross-camera matching")
     SPATIAL_MATCH_THRESHOLD: float = Field(default=100.0, description="Max world distance (pixels) to consider a potential match. With pixels_per_meter=100, 100px = 1 meter.")
     SPATIAL_NO_MATCH_DISTANCE: float = Field(default=200.0, description="Hard cap distance (pixels). Above this, never attempt spatial match. 200px = 2 meters.")
+    
+    # Factory specific overrides (more crowded -> higher thresholds?)
+    SPATIAL_MATCH_THRESHOLD_FACTORY: float = Field(default=200.0, description="Factory specific soft threshold (approx 2m)")
+    SPATIAL_NO_MATCH_DISTANCE_FACTORY: float = Field(default=400.0, description="Factory specific hard cap (approx 4m)")
+
     SPATIAL_EDGE_MARGIN: float = Field(default=0.05, description="Margin (0.0-1.0) to ignore detections near frame edges")
     SPATIAL_VELOCITY_GATE: bool = Field(default=True, description="Prevent matching tracks moving in opposite directions")
     SPATIAL_MATCH_MIN_OVERLAP_FRAMES: int = Field(default=3, description="Require N consecutive frames of proximity before merging IDs")

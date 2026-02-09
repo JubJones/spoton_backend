@@ -292,6 +292,11 @@ class DetectionVideoService(RawVideoService):
             
             # Phase 4: Initialize spatial intelligence services (via DI if available)
             logger.info("🗺️ DETECTION SERVICE INIT: Initializing spatial intelligence services...")
+            
+            # Configure SpaceBasedMatcher for the specific environment (Factory vs Campus)
+            if self.space_based_matcher:
+                self.space_based_matcher.set_environment(environment_id)
+
             if self.homography_service is None:
                 try:
                     # Fallback to local instance (degraded mode)

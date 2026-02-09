@@ -49,6 +49,17 @@ class SpaceBasedMatcher:
         #     f"min_overlap={self.min_overlap_frames}, enabled={self.enabled})"
         # )
 
+    def set_environment(self, environment_id: str):
+        """Configure spatial thresholds based on the environment."""
+        if environment_id == "factory":
+            self.threshold_meters = settings.SPATIAL_MATCH_THRESHOLD_FACTORY
+            self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE_FACTORY
+            logger.info(f"Using FACTORY spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}")
+        else:
+            self.threshold_meters = settings.SPATIAL_MATCH_THRESHOLD
+            self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE
+            logger.info(f"Using DEFAULT/CAMPUS spatial thresholds: match={self.threshold_meters}, max={self.no_match_distance}")
+
     def match_across_cameras(self, camera_detections: Dict[str, Dict[str, Any]]) -> None:
         """
         Main entry point to run matching logic for a single frame across all cameras.
