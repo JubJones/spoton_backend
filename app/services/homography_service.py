@@ -460,7 +460,7 @@ class HomographyService:
         if not (np.isfinite(map_x) and np.isfinite(map_y)):
             return False
 
-        if not settings.ENABLE_BOUNDS_VALIDATION:
+        if not self._settings.ENABLE_BOUNDS_VALIDATION:
             return True
 
         # Strict check against configured world bounds (default or factory)
