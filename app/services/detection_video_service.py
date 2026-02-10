@@ -2440,6 +2440,10 @@ class DetectionVideoService(RawVideoService):
                                 self._debug_frame_store.pop(key, None)
                     
                     await self._record_playback_progress(task_id, fidx)
+                    
+                    # Pace frame sends: yield to event loop so frontend can process
+                    # this frame before the next one arrives
+                    await asyncio.sleep(0)
                 
                 # Total batch time
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
