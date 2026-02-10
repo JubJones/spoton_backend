@@ -2308,9 +2308,19 @@ class DetectionVideoService(RawVideoService):
                     frame_camera_data = frame_results[fidx]
                     frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                     
-                    # Run Space-Based Matching (Cross-Camera)
+                    # Run Space-Based Matching (Cross-Camera) — SKIP in Pure GT Mode
                     _space_start = _time.perf_counter()
-                    if self.space_based_matcher and self.space_based_matcher.enabled:
+                    
+                    # Check if ANY camera in this batch is in GT mode
+                    _gt_mode_active = False
+                    if self.enable_gt_reid:
+                        for cid in frame_camera_data:
+                            env = self._get_environment_for_camera(cid) or "default"
+                            if self.gt_reid_services.get(env):
+                                _gt_mode_active = True
+                                break
+                    
+                    if not _gt_mode_active and self.space_based_matcher and self.space_based_matcher.enabled:
                         try:
                             camera_detections_map = {cid: ddata for cid, (_, ddata) in frame_camera_data.items()}
                             self.space_based_matcher.match_across_cameras(camera_detections_map)
@@ -2318,7 +2328,7 @@ class DetectionVideoService(RawVideoService):
                             logger.error(f"Space-based matching failed: {e}")
 
                     # Update 'is_matched' flag
-                    if self.space_based_matcher:
+                    if not _gt_mode_active and self.space_based_matcher:
                         for camera_id, (frame, detection_data) in frame_camera_data.items():
                             for track in detection_data.get("tracks", []):
                                 gid = track.get("global_id")
@@ -2673,8 +2683,21 @@ class DetectionVideoService(RawVideoService):
         _reid_time = 0.0
         
         try:
-            if settings.TRACKING_ENABLED:
-                # Lazy initialization check
+            # === PURE GT MODE check (same as process_frame_with_tracking) ===
+            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
+            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
+            
+            if gt_service:
+                # PURE GT MODE: bypass tracker and Re-ID entirely
+                tracks = await self._process_with_ground_truth(
+                    detection_data.get("detections", []),
+                    gt_service,
+                    camera_id,
+                    frame_number,
+                    frame
+                )
+            elif settings.TRACKING_ENABLED:
+                # Normal Tracking Mode
                 _init_start = _time.perf_counter()
                 if camera_id not in self.camera_trackers:
                     try:
@@ -2685,34 +2708,34 @@ class DetectionVideoService(RawVideoService):
                         logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
                 _tracker_init_time = (_time.perf_counter() - _init_start) * 1000
 
-            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
-                tracker = self.camera_trackers.get(camera_id)
-                
-                # Convert detections to BoxMOT format
-                _conv_start = _time.perf_counter()
-                np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                _convert_dets_time = (_time.perf_counter() - _conv_start) * 1000
-                
-                # Update tracker
-                _update_start = _time.perf_counter()
-                tracked_np = await tracker.update(np_dets, frame)
-                _tracker_update_time = (_time.perf_counter() - _update_start) * 1000
-                
-                # Convert to track dicts
-                _conv_tracks_start = _time.perf_counter()
-                tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                _convert_tracks_time = (_time.perf_counter() - _conv_tracks_start) * 1000
-                
-                # Enhance with spatial intelligence
-                _spatial_start = _time.perf_counter()
-                tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                _spatial_intel_time = (_time.perf_counter() - _spatial_start) * 1000
-                
-                # Apply Re-ID
-                _reid_start = _time.perf_counter()
-                frame_height, frame_width = frame.shape[:2]
-                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
-                _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                if camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    
+                    # Convert detections to BoxMOT format
+                    _conv_start = _time.perf_counter()
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    _convert_dets_time = (_time.perf_counter() - _conv_start) * 1000
+                    
+                    # Update tracker
+                    _update_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _tracker_update_time = (_time.perf_counter() - _update_start) * 1000
+                    
+                    # Convert to track dicts
+                    _conv_tracks_start = _time.perf_counter()
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    _convert_tracks_time = (_time.perf_counter() - _conv_tracks_start) * 1000
+                    
+                    # Enhance with spatial intelligence
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_intel_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
                 
         except Exception as e:
             logger.warning(f"Tracking failed for camera {camera_id} on frame {frame_number}: {e}")
