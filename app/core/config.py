@@ -554,7 +554,7 @@ class Settings(BaseSettings):
     
     # Ground Truth Re-ID (Debugging)
     ENABLE_GT_REID: bool = False
-    DATASET_ROOT: str = "/app/videos/gt/campus"
+    DATASET_ROOT: str = "/app/videos/gt"
     
     # YOLO Configuration (YOLO11-L)
     # TensorRT Optimization: Set USE_TENSORRT=true and provide .engine file path for 3-5x speedup
