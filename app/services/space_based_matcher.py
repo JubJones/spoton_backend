@@ -99,14 +99,6 @@ class SpaceBasedMatcher:
 
         # 1. Collect valid tracks with world coordinates
         valid_tracks = self._collect_tracks_with_coordinates(camera_detections)
-        
-        # DEBUG TRACE (c09/c16 only)
-        if "c09" in valid_tracks and "c16" in valid_tracks:
-            for cam_id in ["c09", "c16"]:
-                for t in valid_tracks.get(cam_id, []):
-                    mc = t.get("map_coords", {})
-                    gid = t.get("global_id") or self.registry.get_global_id(cam_id, int(t.get('track_id', 0)))
-                    spatial_debug(f"{cam_id}:T{t.get('track_id')}({gid}) -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 2. Find matches between pairs of cameras using robust assignment
         new_matches = []
@@ -122,6 +114,9 @@ class SpaceBasedMatcher:
         self._update_global_ids(new_matches, active_global_ids)
 
         # 3.5 BUFFER MATCHING: For unmatched tracks, check against recent buffer from OTHER cameras
+        # Build list of (camera_id, track, distance, global_id) candidates, then do greedy 1-to-1
+        buffer_candidates = []  # [(camera_id, track, distance, buffer_gid)]
+        
         for camera_id, tracks in valid_tracks.items():
             for track in tracks:
                 track_id = track.get("track_id")
@@ -133,16 +128,26 @@ class SpaceBasedMatcher:
                 if existing_gid:
                     continue
                 
-                # Try to match against buffered tracks from OTHER cameras
                 track_coords = track.get("map_coords", {})
                 if not track_coords.get("map_x"):
                     continue
                 
-                buffer_match_gid = self._find_buffer_match(camera_id, track_coords)
-                if buffer_match_gid:
-                    self.registry.assign_identity(camera_id, int(track_id), buffer_match_gid)
-                    if camera_id in ["c09", "c16"]:
-                        spatial_debug(f"BUFFER MATCH: {camera_id}:T{track_id} -> {buffer_match_gid}")
+                # Find best buffer match
+                best_gid, best_dist = self._find_buffer_match(camera_id, track_coords)
+                if best_gid:
+                    buffer_candidates.append((camera_id, track, best_dist, best_gid))
+        
+        # Sort by distance (closest first) and assign greedily (each global_id only once)
+        buffer_candidates.sort(key=lambda x: x[2])
+        claimed_gids = set()
+        for camera_id, track, dist, buffer_gid in buffer_candidates:
+            if buffer_gid in claimed_gids:
+                continue  # This global ID was already claimed by a closer track
+            track_id = track.get("track_id")
+            self.registry.assign_identity(camera_id, int(track_id), buffer_gid)
+            claimed_gids.add(buffer_gid)
+            if camera_id in ["c09", "c16"]:
+                spatial_debug(f"BUFFER MATCH: {camera_id}:T{track_id} -> {buffer_gid} (dist={dist:.1f}px)")
 
         # 3.6 Ensure ALL tracks have a global_id (even unmatched ones)
         for camera_id, tracks in valid_tracks.items():
@@ -159,6 +164,15 @@ class SpaceBasedMatcher:
 
         # 4.5 Safety Check: Resolve intra-camera conflicts (Same Global ID on multiple tracks in same camera)
         self._resolve_intra_camera_conflicts(camera_detections)
+
+        # DEBUG: Log final state (c09/c16 only) - AFTER global IDs are assigned
+        for cam_id in ["c09", "c16"]:
+            result = camera_detections.get(cam_id, {})
+            for t in result.get("tracks", []):
+                gid = t.get("global_id")
+                mc = t.get("map_coords")
+                if gid and mc and mc.get("map_x"):
+                    spatial_debug(f"FINAL: {cam_id}:{gid} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 5. Update buffer with current tracks (AFTER global IDs are assigned)
         self._update_recent_tracks_buffer(valid_tracks)
@@ -291,15 +305,15 @@ class SpaceBasedMatcher:
         except Exception:
             return False
 
-    def _find_buffer_match(self, current_camera_id: str, current_coords: Dict[str, float]) -> Optional[str]:
+    def _find_buffer_match(self, current_camera_id: str, current_coords: Dict[str, float]) -> Tuple[Optional[str], float]:
         """
         Search buffered tracks from OTHER cameras to find a spatial match.
-        Returns the global_id of the matched buffered track, or None.
+        Returns (global_id, distance) of the best match, or (None, inf).
         """
         current_x = current_coords.get("map_x")
         current_y = current_coords.get("map_y")
         if current_x is None or current_y is None:
-            return None
+            return None, float('inf')
         
         best_match_gid = None
         best_distance = float('inf')
@@ -331,7 +345,7 @@ class SpaceBasedMatcher:
                         best_distance = dist
                         best_match_gid = bt_gid
         
-        return best_match_gid
+        return best_match_gid, best_distance
 
     def _update_recent_tracks_buffer(self, valid_tracks: Dict[str, List[Dict[str, Any]]]):
         """
