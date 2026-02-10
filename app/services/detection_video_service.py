@@ -807,7 +807,16 @@ class DetectionVideoService(RawVideoService):
                     "global_id": global_id,
                     "confidence": confidence,
                     "bbox": bbox_dict,
-                    "class_id": 0,
+                    "bbox_xyxy": [bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2']],
+                    "class_id": 1,  # Frontend expects 1 for person
+                    "map_coords": None,
+                    "trajectory": [],
+                    "age": None,
+                    "status": "active",
+                    "reid_confidence": None,
+                    "last_seen_camera": camera_id,
+                    "is_focused": False,
+                    "is_matched": False,
                 }
                 
                 tracks.append(track)
