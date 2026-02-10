@@ -97,6 +97,11 @@ class SpaceBasedMatcher:
 
         self._current_frame_num += 1
 
+        # TEMPORARY: Heartbeat to verify logging works
+        if self._current_frame_num % 30 == 1:
+            cams = list(camera_detections.keys())
+            spatial_debug(f"HEARTBEAT frame={self._current_frame_num} cameras={cams}")
+
         # 1. Collect valid tracks with world coordinates
         valid_tracks = self._collect_tracks_with_coordinates(camera_detections)
 
