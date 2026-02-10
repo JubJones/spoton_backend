@@ -55,6 +55,7 @@ from app.services.global_person_registry import GlobalPersonRegistry
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
 from app.infrastructure.cache.redis_client import redis_client
+from app.services.ground_truth_reid_service import GroundTruthReIDService
 from app.infrastructure.database.models import TrackingEvent, PersonTrajectory
 
 logger = logging.getLogger(__name__)
@@ -169,6 +170,10 @@ class DetectionVideoService(RawVideoService):
         
         # Phase 1: Space-Based Matching
         self.space_based_matcher = SpaceBasedMatcher(registry=self.global_registry)
+
+        # Ground Truth Re-ID Service (Debugging)
+        self.gt_reid_service: Optional[GroundTruthReIDService] = None
+        self.enable_gt_reid = getattr(settings, 'ENABLE_GT_REID', False)
 
         # Phase 2: Re-ID Services
         self.feature_extraction_service: Optional[FeatureExtractionService] = None
@@ -313,6 +318,16 @@ class DetectionVideoService(RawVideoService):
             # Initialize HandoffDetectionService
             self.handoff_service = HandoffDetectionService()
 
+            # Initialize Ground Truth Re-ID Service (if enabled)
+            if self.enable_gt_reid:
+                try:
+                    data_root = getattr(settings, 'DATASET_ROOT', '/app/videos/gt/campus')
+                    self.gt_reid_service = GroundTruthReIDService(data_root=data_root)
+                    logger.info(f"✅ GT-REID: Service initialized (Root: {data_root})")
+                except Exception as e:
+                    logger.error(f"❌ GT-REID INIT FAILED: {e}")
+                    self.gt_reid_service = None
+
             # Initialize Re-ID Services (Phase 2)
             if self.feature_extraction_service is None:
                 try:
@@ -404,7 +419,7 @@ class DetectionVideoService(RawVideoService):
             logger.error(error_msg)
             raise FileNotFoundError(error_msg)
 
-    async def _apply_reid_logic(self, tracks: List[Dict[str, Any]], frame: np.ndarray, camera_id: str, frame_width: int, frame_height: int) -> List[Dict[str, Any]]:
+    async def _apply_reid_logic(self, tracks: List[Dict[str, Any]], frame: np.ndarray, camera_id: str, frame_width: int, frame_height: int, frame_number: int = 0) -> List[Dict[str, Any]]:
         """
         Apply Re-ID logic with ENTRY-EXIT only extraction:
         
@@ -429,6 +444,34 @@ class DetectionVideoService(RawVideoService):
         if not hasattr(self, "_global_id_counter"):
              self._global_id_counter = 1000  # Start from 1000 to distinguish from tracker IDs
 
+        if self.enable_gt_reid and self.gt_reid_service:
+            gt_assignments = 0
+            for track in tracks:
+                track_id = int(track['track_id'])
+                bbox_xyxy = track.get('bbox_xyxy')
+                if not bbox_xyxy or len(bbox_xyxy) < 4:
+                    continue
+                
+                # Format bbox for GT service
+                x1, y1, x2, y2 = bbox_xyxy[:4]
+                bbox_dict = {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}
+                
+                # Query GT Service
+                global_id = self.gt_reid_service.get_identity(camera_id, frame_number, bbox_dict)
+                
+                if global_id is not None:
+                    # Assign Global ID directly
+                    track['global_id'] = global_id
+                    # Also update registry so it sticks (though GT will re-assign every frame anyway)
+                    self.global_registry.assign_identity(camera_id, track_id, global_id)
+                    gt_assignments += 1
+            
+            if gt_assignments > 0 and frame_number % 30 == 0:
+                pass # logger.info(f"✅ GT-REID: Assigned {gt_assignments} IDs in frame {frame_number} for {camera_id}")
+                
+            # If enabled, we return immediately to bypass all neural logic below
+            return tracks
+            
         current_track_ids = set()
         if camera_id not in self.active_track_ids:
             self.active_track_ids[camera_id] = set()
@@ -636,7 +679,10 @@ class DetectionVideoService(RawVideoService):
                 # Apply Re-ID (Phase 2)
                 _reid_start = _time.perf_counter()
                 frame_height, frame_width = frame.shape[:2]
-                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                # Apply Re-ID (Phase 2)
+                _reid_start = _time.perf_counter()
+                frame_height, frame_width = frame.shape[:2]
+                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height, frame_number=frame_number)
                 _reid_time = (_time.perf_counter() - _reid_start) * 1000
                 
                 tracker_used = True
