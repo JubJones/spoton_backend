@@ -104,9 +104,6 @@ class SpaceBasedMatcher:
         new_matches = []
         if len(valid_tracks) >= 2:
             new_matches = self._find_spatial_matches(valid_tracks)
-            c09_c16_matches = [m for m in new_matches if {m[0], m[2]} == {"c09", "c16"}]
-            if c09_c16_matches:
-                spatial_debug(f"c09<->c16 matches: {len(c09_c16_matches)}")
         
         # 3. Update global ID assignments
         # Build map of active global IDs to check for conflicts (prevent merging distinct people in same view)
@@ -146,8 +143,6 @@ class SpaceBasedMatcher:
             track_id = track.get("track_id")
             self.registry.assign_identity(camera_id, int(track_id), buffer_gid)
             claimed_gids.add(buffer_gid)
-            if camera_id in ["c09", "c16"]:
-                spatial_debug(f"BUFFER MATCH: {camera_id}:T{track_id} -> {buffer_gid} (dist={dist:.1f}px)")
 
         # 3.6 Ensure ALL tracks have a global_id (even unmatched ones)
         for camera_id, tracks in valid_tracks.items():
@@ -165,14 +160,6 @@ class SpaceBasedMatcher:
         # 4.5 Safety Check: Resolve intra-camera conflicts (Same Global ID on multiple tracks in same camera)
         self._resolve_intra_camera_conflicts(camera_detections)
 
-        # DEBUG: Log final state (c09/c16 only) - AFTER global IDs are assigned
-        for cam_id in ["c09", "c16"]:
-            result = camera_detections.get(cam_id, {})
-            for t in result.get("tracks", []):
-                gid = t.get("global_id")
-                mc = t.get("map_coords")
-                if gid and mc and mc.get("map_x"):
-                    spatial_debug(f"FINAL: {cam_id}:{gid} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 5. Update buffer with current tracks (AFTER global IDs are assigned)
         self._update_recent_tracks_buffer(valid_tracks)
@@ -256,11 +243,13 @@ class SpaceBasedMatcher:
                 # DEBUG: Log rejection for c09/c16 tracks
                 if camera_id in ["c09", "c16"]:
                     if not is_projected:
-                        spatial_debug(f"REJECTED {camera_id}:T{track_id} - No projection (map_coords={map_coords})")
+                        gid = self.registry.get_global_id(camera_id, int(track_id)) if track_id is not None else None
+                        spatial_debug(f"REJECTED {camera_id}:{gid or 'T' + str(track_id)} - No projection (homography miss)")
                         continue
                     
                     if frame_width and frame_height and self._is_edge_detection(track, frame_width, frame_height):
-                        spatial_debug(f"REJECTED {camera_id}:T{track_id} - Edge filter")
+                        gid = self.registry.get_global_id(camera_id, int(track_id)) if track_id is not None else None
+                        spatial_debug(f"REJECTED {camera_id}:{gid or 'T' + str(track_id)} - Edge filter")
                         continue
                     
                     camera_valid_tracks.append(track)
@@ -410,11 +399,6 @@ class SpaceBasedMatcher:
                         dist = self._calculate_distance(track_a, track_b)
                         
                         if dist is not None:
-                             # AUDIT LOG: Print distance if relatively close, to debug threshold issues
-                            if dist < 5000.0 and {cam_a, cam_b} == {"c09", "c16"}:
-                                gid_a = track_a.get("global_id") or self.registry.get_global_id(cam_a, int(track_a.get('track_id', 0)))
-                                gid_b = track_b.get("global_id") or self.registry.get_global_id(cam_b, int(track_b.get('track_id', 0)))
-                                spatial_debug(f"Distance: {cam_a}:T{track_a.get('track_id')}({gid_a}) vs {cam_b}:T{track_b.get('track_id')}({gid_b}) = {dist:.2f}px")
 
                             # Hard cap: if distance exceeds no_match_distance, completely exclude
                             # This prevents false matches between people in non-overlapping camera views
