@@ -774,52 +774,43 @@ class DetectionVideoService(RawVideoService):
 
         # Enhance detections with GT IDs
         for det in detections:
-            bbox_dict = {
-                'x1': det.bbox.x1,
-                'y1': det.bbox.y1,
-                'x2': det.bbox.x2,
-                'y2': det.bbox.y2
-            }
+            # Handle both Detection objects (non-batch) and dict detections (batch pipeline)
+            if isinstance(det, dict):
+                bbox_dict = det.get("bbox", det)
+                bbox_dict = {
+                    'x1': bbox_dict.get('x1', 0),
+                    'y1': bbox_dict.get('y1', 0),
+                    'x2': bbox_dict.get('x2', 0),
+                    'y2': bbox_dict.get('y2', 0)
+                }
+                confidence = det.get("confidence", 0.0)
+            else:
+                bbox_dict = {
+                    'x1': det.bbox.x1,
+                    'y1': det.bbox.y1,
+                    'x2': det.bbox.x2,
+                    'y2': det.bbox.y2
+                }
+                confidence = det.confidence
             
             # Use GT service to find identity for this detection
             global_id = gt_service.get_identity(camera_id, frame_number, bbox_dict)
             
             if global_id:
-                # Use GT ID as both track_id and global_id
-                # GT ID is expected to be a string (from previous fix)
-                # But for track_id we might need an int if downstream expects it?
-                # DetectionPersonList.tsx uses track_id as key.
-                # BoxMOT tracks are ints. GT IDs are usually ints in the file but returned as strings now.
-                # converting to int for track_id if possible, or hash it? 
-                # Let's try to parse int, if not hash.
                 try:
                     track_id_int = int(global_id)
                 except ValueError:
-                    track_id_int =  abs(hash(global_id)) % 1000000
+                    track_id_int = abs(hash(global_id)) % 1000000
                 
                 track = {
                     "track_id": track_id_int,
                     "global_id": global_id,
-                    "confidence": det.confidence,
+                    "confidence": confidence,
                     "bbox": bbox_dict,
-                    "class_id": 0, # Person
-                    # Add map_coords if we want to visualize on map, 
-                    # but maybe we should skip spatial enhancement to match "skip everything" request?
-                    # The request said "skip everything, just detect, use bbox to map the id".
-                    # However, without map_coords, they won't show up on the 2D map.
-                    # It's safer to run spatial projection at least? 
-                    # User likely wants the ID stability, not necessarily losing the map view.
-                    # I will add spatial info just in case, reusing the helper.
+                    "class_id": 0,
                 }
                 
-                # Check for duplicate GT assignments (one detection only per GT ID)
-                # Actually usually we want one GT per detection. 
-                # If multiple detections map to same GT, pick best IoU? 
-                # get_identity does greedy best match.
-                
                 tracks.append(track)
-                
-                # Update registry to keep it in sync (though we don't read from it in this mode)
                 self.global_registry.assign_identity(camera_id, track_id_int, global_id)
 
         # Enhance with spatial intelligence (for map view)
