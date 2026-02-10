@@ -497,7 +497,8 @@ class SpaceBasedMatcher:
             if existing_global_a and existing_global_b:
                 if existing_global_a != existing_global_b:
                     # MERGE with conflict check
-                    target_id = existing_global_a if existing_global_a < existing_global_b else existing_global_b
+                    # Ensure string comparison to avoid TypeError
+                    target_id = existing_global_a if str(existing_global_a) < str(existing_global_b) else existing_global_b
                     source_id = existing_global_b if target_id == existing_global_a else existing_global_a
                     
                     # Check if merging would cause a camera conflict
