@@ -643,8 +643,7 @@ class DetectionVideoService(RawVideoService):
         detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
         _det_time = (_time.perf_counter() - _det_start) * 1000
 
-        # Step 2: Tracking integration (via tracker factory)
-        # Step 2: Tracking integration (via tracker factory)
+        # Step 2: Tracking integration
         tracks: List[Dict[str, Any]] = []
         tracker_used = False
         _track_time = 0.0
@@ -652,7 +651,26 @@ class DetectionVideoService(RawVideoService):
         _reid_time = 0.0
         
         try:
-            if settings.TRACKING_ENABLED:
+            # === PURE GT MODE check ===
+            # If a GroundTruthReIDService is available for this environment, BYPASS tracker and Spatial Matcher.
+            # Map detections directly to GT IDs.
+            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
+            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
+            
+            if gt_service:
+                # PURE GT MODE
+                tracks = await self._process_with_ground_truth(
+                    detection_data.get("detections", []), 
+                    gt_service, 
+                    camera_id, 
+                    frame_number,
+                    frame
+                )
+                # Skip tracker, skip spatial matcher, skip reid
+                
+            elif settings.TRACKING_ENABLED:
+                # Normal Tracking Mode
+                
                 # Lazy initialization check
                 if camera_id not in self.camera_trackers:
                     try:
@@ -664,35 +682,32 @@ class DetectionVideoService(RawVideoService):
                     except Exception as e:
                         logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
 
-            if settings.TRACKING_ENABLED and camera_id in self.camera_trackers:
-                tracker = self.camera_trackers.get(camera_id)
-                # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
-                np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                
-                _track_start = _time.perf_counter()
-                tracked_np = await tracker.update(np_dets, frame)
-                _track_time = (_time.perf_counter() - _track_start) * 1000
-                
-                # ... (logging skipped for brevity in replacement) ...
+                if camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    
+                    _track_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _track_time = (_time.perf_counter() - _track_start) * 1000
+                    
+                    # ... (logging skipped for brevity in replacement) ...
 
-                # Convert tracked output to track dicts
-                tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                
-                # Enhance with spatial intelligence (map coords + short trajectory)
-                _spatial_start = _time.perf_counter()
-                tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
-                
-                # Apply Re-ID (Phase 2)
-                _reid_start = _time.perf_counter()
-                frame_height, frame_width = frame.shape[:2]
-                # Apply Re-ID (Phase 2)
-                _reid_start = _time.perf_counter()
-                frame_height, frame_width = frame.shape[:2]
-                tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height, frame_number=frame_number)
-                _reid_time = (_time.perf_counter() - _reid_start) * 1000
-                
-                tracker_used = True
+                    # Convert tracked output to track dicts
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    
+                    # Enhance with spatial intelligence (map coords + short trajectory)
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID (Phase 2)
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height, frame_number=frame_number)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                    
+                    tracker_used = True
             else:
                 if frame_number % 30 == 0:
                     logger.info(
@@ -710,8 +725,6 @@ class DetectionVideoService(RawVideoService):
 
         try:
             self._associate_detections_with_tracks(camera_id, detection_data.get("detections"), tracks)
-            # if tracker_used and logger.isEnabledFor(logging.DEBUG):
-            #     pass
         except Exception as exc:
             pass
             # logger.debug(
@@ -743,6 +756,77 @@ class DetectionVideoService(RawVideoService):
             )
         
         return detection_data
+
+    async def _process_with_ground_truth(
+        self, 
+        detections: List[Any], 
+        gt_service: GroundTruthReIDService, 
+        camera_id: str, 
+        frame_number: int,
+        frame: np.ndarray
+    ) -> List[Dict[str, Any]]:
+        """
+        Pure GT Mode: Map detections to GT IDs directly.
+        Bypasses tracker and spatial matcher.
+        """
+        tracks = []
+        assigned_gt_ids = set()
+
+        # Enhance detections with GT IDs
+        for det in detections:
+            bbox_dict = {
+                'x1': det.bbox.x1,
+                'y1': det.bbox.y1,
+                'x2': det.bbox.x2,
+                'y2': det.bbox.y2
+            }
+            
+            # Use GT service to find identity for this detection
+            global_id = gt_service.get_identity(camera_id, frame_number, bbox_dict)
+            
+            if global_id:
+                # Use GT ID as both track_id and global_id
+                # GT ID is expected to be a string (from previous fix)
+                # But for track_id we might need an int if downstream expects it?
+                # DetectionPersonList.tsx uses track_id as key.
+                # BoxMOT tracks are ints. GT IDs are usually ints in the file but returned as strings now.
+                # converting to int for track_id if possible, or hash it? 
+                # Let's try to parse int, if not hash.
+                try:
+                    track_id_int = int(global_id)
+                except ValueError:
+                    track_id_int =  abs(hash(global_id)) % 1000000
+                
+                track = {
+                    "track_id": track_id_int,
+                    "global_id": global_id,
+                    "confidence": det.confidence,
+                    "bbox": bbox_dict,
+                    "class_id": 0, # Person
+                    # Add map_coords if we want to visualize on map, 
+                    # but maybe we should skip spatial enhancement to match "skip everything" request?
+                    # The request said "skip everything, just detect, use bbox to map the id".
+                    # However, without map_coords, they won't show up on the 2D map.
+                    # It's safer to run spatial projection at least? 
+                    # User likely wants the ID stability, not necessarily losing the map view.
+                    # I will add spatial info just in case, reusing the helper.
+                }
+                
+                # Check for duplicate GT assignments (one detection only per GT ID)
+                # Actually usually we want one GT per detection. 
+                # If multiple detections map to same GT, pick best IoU? 
+                # get_identity does greedy best match.
+                
+                tracks.append(track)
+                
+                # Update registry to keep it in sync (though we don't read from it in this mode)
+                self.global_registry.assign_identity(camera_id, track_id_int, global_id)
+
+        # Enhance with spatial intelligence (for map view)
+        if tracks:
+             tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+
+        return tracks
 
     def get_tracking_stats(self) -> Dict[str, Any]:
         """Return current tracking stats without affecting existing API."""
