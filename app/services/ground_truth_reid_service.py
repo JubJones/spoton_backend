@@ -86,7 +86,7 @@ class GroundTruthReIDService:
             except Exception as e:
                 logger.error(f"❌ GT-REID: Error loading {file_path}: {e}")
 
-    def get_identity(self, camera_id: str, frame_number: int, detection_bbox: Dict[str, float]) -> Optional[int]:
+    def get_identity(self, camera_id: str, frame_number: int, detection_bbox: Dict[str, float]) -> Optional[str]:
         """
         Match a detection to ground truth and return the Global ID.
         
@@ -96,7 +96,7 @@ class GroundTruthReIDService:
             detection_bbox: Dict with x1, y1, x2, y2 keys
             
         Returns:
-            Global Person ID (int) if matched, else None
+            Global Person ID (str) if matched, else None
         """
         if camera_id not in self.gt_data:
             return None
@@ -124,7 +124,7 @@ class GroundTruthReIDService:
         
         # Threshold for matching (e.g. 0.3 IoU)
         if best_iou > 0.3:
-            return best_pid
+            return str(best_pid)
             
         return None
 
