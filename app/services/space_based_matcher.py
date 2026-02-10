@@ -47,19 +47,21 @@ class SpaceBasedMatcher:
         self.velocity_gate = settings.SPATIAL_VELOCITY_GATE
         self.no_match_distance = settings.SPATIAL_NO_MATCH_DISTANCE
         
+        # Buffer TTL in frames (default 30 = ~1 second at 30fps)
+        self.buffer_ttl_frames = int(getattr(settings, 'SPATIAL_BUFFER_FRAMES', 30))
+        
         # State to track potential matches over time
         # Key: (camera_id_a, track_id_a, camera_id_b, track_id_b) -> consecutive_frames
         self.potential_matches: Dict[Tuple[str, str, str, str], int] = defaultdict(int)
         
-        # Dependency: Global Person Registry
-        self.registry = registry or GlobalPersonRegistry() # Fallback useful? Maybe better to require injection.
-        # Note: If fallback creates new instance, it won't share state. 
-        # But detection_video_service creates both, so it will pass the shared one.
+        # Recent tracks buffer: {camera_id: [{track_id, global_id, map_coords, frame_num}]}
+        self._recent_tracks: Dict[str, List[Dict[str, Any]]] = defaultdict(list)
+        self._current_frame_num = 0
         
-        # Removed internal maps in favor of self.registry
+        # Dependency: Global Person Registry
+        self.registry = registry or GlobalPersonRegistry()
 
-
-        # Track history for velocity calculation (optional for later phases, kept effectively stateless per frame group here)
+        # Track history for velocity calculation (optional for later phases)
         
         # logger.info(
         #     f"SpaceBasedMatcher initialized (threshold={self.threshold_meters}m, "
@@ -93,6 +95,8 @@ class SpaceBasedMatcher:
         if not self.enabled:
             return
 
+        self._current_frame_num += 1
+
         # 1. Collect valid tracks with world coordinates
         valid_tracks = self._collect_tracks_with_coordinates(camera_detections)
         
@@ -116,26 +120,49 @@ class SpaceBasedMatcher:
         active_global_ids = self._get_active_global_ids(camera_detections)
         self._update_global_ids(new_matches, active_global_ids)
 
-        # 3.5 Ensure ALL tracks have a global_id (even unmatched ones)
-        # Iterate over all valid tracks and assign a new global_id if they don't have one
+        # 3.5 BUFFER MATCHING: For unmatched tracks, check against recent buffer from OTHER cameras
+        for camera_id, tracks in valid_tracks.items():
+            for track in tracks:
+                track_id = track.get("track_id")
+                if track_id is None:
+                    continue
+                
+                # Skip if already has a global ID
+                existing_gid = self.registry.get_global_id(camera_id, int(track_id))
+                if existing_gid:
+                    continue
+                
+                # Try to match against buffered tracks from OTHER cameras
+                track_coords = track.get("map_coords", {})
+                if not track_coords.get("map_x"):
+                    continue
+                
+                buffer_match_gid = self._find_buffer_match(camera_id, track_coords)
+                if buffer_match_gid:
+                    self.registry.assign_identity(camera_id, int(track_id), buffer_match_gid)
+                    if camera_id in ["c09", "c16"]:
+                        spatial_debug(f"BUFFER MATCH: {camera_id}:T{track_id} -> {buffer_match_gid}")
+
+        # 3.6 Ensure ALL tracks have a global_id (even unmatched ones)
         for camera_id, tracks in valid_tracks.items():
             for track in tracks:
                 track_id = track.get("track_id")
                 if track_id is not None:
-                    key = (camera_id, str(track_id))
                     existing_gid = self.registry.get_global_id(camera_id, int(track_id))
                     if not existing_gid:
                          new_global_id = self.registry.allocate_new_id()
                          self.registry.assign_identity(camera_id, int(track_id), new_global_id)
-                         pass # logger.debug(f"Created new global ID {new_global_id} for UNMATCHED track {camera_id}:{track_id}")
         
         # 4. Inject global IDs back into the detection results
         self._inject_global_ids(camera_detections)
 
         # 4.5 Safety Check: Resolve intra-camera conflicts (Same Global ID on multiple tracks in same camera)
         self._resolve_intra_camera_conflicts(camera_detections)
+
+        # 5. Update buffer with current tracks (AFTER global IDs are assigned)
+        self._update_recent_tracks_buffer(valid_tracks)
         
-        # 5. Cleanup stale entries
+        # 6. Cleanup stale entries
         self._cleanup_state(valid_tracks)
 
     def _resolve_intra_camera_conflicts(self, camera_detections: Dict[str, Dict[str, Any]]):
@@ -262,6 +289,85 @@ class SpaceBasedMatcher:
             return False
         except Exception:
             return False
+
+    def _find_buffer_match(self, current_camera_id: str, current_coords: Dict[str, float]) -> Optional[str]:
+        """
+        Search buffered tracks from OTHER cameras to find a spatial match.
+        Returns the global_id of the matched buffered track, or None.
+        """
+        current_x = current_coords.get("map_x")
+        current_y = current_coords.get("map_y")
+        if current_x is None or current_y is None:
+            return None
+        
+        best_match_gid = None
+        best_distance = float('inf')
+        
+        for buffer_camera_id, buffered_tracks in self._recent_tracks.items():
+            # Only match against OTHER cameras
+            if buffer_camera_id == current_camera_id:
+                continue
+            
+            for bt in buffered_tracks:
+                # Check TTL
+                age = self._current_frame_num - bt.get("frame_num", 0)
+                if age > self.buffer_ttl_frames:
+                    continue
+                
+                bt_coords = bt.get("map_coords", {})
+                bt_x = bt_coords.get("map_x")
+                bt_y = bt_coords.get("map_y")
+                if bt_x is None or bt_y is None:
+                    continue
+                
+                # Calculate distance
+                dist = math.sqrt((current_x - bt_x) ** 2 + (current_y - bt_y) ** 2)
+                
+                # Must be within threshold
+                if dist <= self.threshold_meters and dist < best_distance:
+                    bt_gid = bt.get("global_id")
+                    if bt_gid:
+                        best_distance = dist
+                        best_match_gid = bt_gid
+        
+        return best_match_gid
+
+    def _update_recent_tracks_buffer(self, valid_tracks: Dict[str, List[Dict[str, Any]]]):
+        """
+        Store current valid tracks (with their assigned global IDs) into the buffer.
+        Also prune expired entries.
+        """
+        # Prune expired entries first
+        cutoff_frame = self._current_frame_num - self.buffer_ttl_frames
+        for cam_id in list(self._recent_tracks.keys()):
+            self._recent_tracks[cam_id] = [
+                bt for bt in self._recent_tracks[cam_id]
+                if bt.get("frame_num", 0) > cutoff_frame
+            ]
+        
+        # Add current tracks to buffer
+        for camera_id, tracks in valid_tracks.items():
+            for track in tracks:
+                track_id = track.get("track_id")
+                if track_id is None:
+                    continue
+                
+                # Get the global ID that was just assigned
+                gid = self.registry.get_global_id(camera_id, int(track_id))
+                if not gid:
+                    continue
+                
+                map_coords = track.get("map_coords", {})
+                if not map_coords.get("map_x"):
+                    continue
+                
+                # Buffer this track
+                self._recent_tracks[camera_id].append({
+                    "track_id": track_id,
+                    "global_id": gid,
+                    "map_coords": map_coords,
+                    "frame_num": self._current_frame_num
+                })
 
     def _find_spatial_matches(self, valid_tracks: Dict[str, List[Dict[str, Any]]]) -> List[Tuple[str, str, str, str]]:
         """
