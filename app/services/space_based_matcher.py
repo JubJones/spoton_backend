@@ -105,7 +105,8 @@ class SpaceBasedMatcher:
             for cam_id in ["c09", "c16"]:
                 for t in valid_tracks.get(cam_id, []):
                     mc = t.get("map_coords", {})
-                    spatial_debug(f"{cam_id}:Track{t.get('track_id')} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
+                    gid = t.get("global_id") or self.registry.get_global_id(cam_id, int(t.get('track_id', 0)))
+                    spatial_debug(f"{cam_id}:{gid} -> ({mc.get('map_x'):.1f}, {mc.get('map_y'):.1f})")
 
         # 2. Find matches between pairs of cameras using robust assignment
         new_matches = []
@@ -397,7 +398,9 @@ class SpaceBasedMatcher:
                         if dist is not None:
                              # AUDIT LOG: Print distance if relatively close, to debug threshold issues
                             if dist < 5000.0 and {cam_a, cam_b} == {"c09", "c16"}:
-                                spatial_debug(f"Distance: {cam_a}:T{track_a.get('track_id')} vs {cam_b}:T{track_b.get('track_id')} = {dist:.2f}px (threshold={self.threshold_meters})")
+                                gid_a = track_a.get("global_id") or self.registry.get_global_id(cam_a, int(track_a.get('track_id', 0)))
+                                gid_b = track_b.get("global_id") or self.registry.get_global_id(cam_b, int(track_b.get('track_id', 0)))
+                                spatial_debug(f"Distance: {cam_a}:{gid_a} vs {cam_b}:{gid_b} = {dist:.2f}px (threshold={self.threshold_meters})")
 
                             # Hard cap: if distance exceeds no_match_distance, completely exclude
                             # This prevents false matches between people in non-overlapping camera views
