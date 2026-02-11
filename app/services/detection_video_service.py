@@ -1456,7 +1456,7 @@ class DetectionVideoService(RawVideoService):
             if self.handoff_service and hasattr(self.handoff_service, 'camera_zones'):
                  handoff_zones = self.handoff_service.camera_zones.get(camera_id)
 
-            # Step 2: MJPEG Streaming - encode and push frame
+            # Step 2: MJPEG frame encoding (push deferred until after WebSocket send)
             _mjpeg_start = _time.perf_counter()
             jpeg_bytes = None
             
@@ -1465,10 +1465,7 @@ class DetectionVideoService(RawVideoService):
                 jpeg_bytes = pre_encoded_jpeg_bytes
             elif frame is not None:
                 jpeg_bytes = self.annotator.frame_to_jpeg_bytes(frame)
-                
-            if jpeg_bytes:
-                await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
-            _mjpeg_time = (_time.perf_counter() - _mjpeg_start) * 1000
+            _mjpeg_encode_time = (_time.perf_counter() - _mjpeg_start) * 1000
 
             # Step 3: Prepare homography and mapping data
             _mapping_start = _time.perf_counter()
@@ -1575,12 +1572,20 @@ class DetectionVideoService(RawVideoService):
             except Exception as e:
                 pass
 
-            # Step 5: Send via WebSocket
+            # Step 5: Send bbox data via WebSocket FIRST (before MJPEG frame)
+            # This ensures the frontend has bbox positions ready before the video
+            # frame arrives, eliminating the visual lag where bboxes trail behind.
             _ws_start = _time.perf_counter()
             success = await binary_websocket_manager.send_json_message(
                 str(task_id), detection_message, MessageType.TRACKING_UPDATE
             )
             _ws_time = (_time.perf_counter() - _ws_start) * 1000
+
+            # Step 6: NOW push MJPEG frame (after WebSocket bbox data is sent)
+            _mjpeg_push_start = _time.perf_counter()
+            if jpeg_bytes:
+                await mjpeg_streamer.push_frame(str(task_id), camera_id, jpeg_bytes)
+            _mjpeg_time = _mjpeg_encode_time + (_time.perf_counter() - _mjpeg_push_start) * 1000
             
             _func_total = (_time.perf_counter() - _func_start) * 1000
             
