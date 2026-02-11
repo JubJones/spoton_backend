@@ -329,11 +329,14 @@ class RawVideoService:
             self._clear_client_watch(task_id)
             await self._cleanup_playback_task(task_id)
     
-    async def _download_video_data(self, environment_id: str) -> Dict[str, Any]:
-        """Download video data for the environment."""
+    async def _download_video_data(self, environment_id: str, sub_video_index: int = 0) -> Dict[str, Any]:
+        """Download video data for the environment.
+        
+        Args:
+            environment_id: Environment identifier (e.g., 'campus', 'factory')
+            sub_video_index: 0-based index of the sub-video batch to load
+        """
         try:
-            # logger.info(f"⬇️ RAW DOWNLOAD: Downloading video data for environment {environment_id}")
-            
             # Get video configuration for environment
             video_configs = [vc for vc in settings.VIDEO_SETS if vc.env_id == environment_id]
             if not video_configs:
@@ -341,7 +344,7 @@ class RawVideoService:
             
             # Download all cameras for this environment using the batch method
             video_paths = await self.video_data_manager.download_sub_videos_for_environment_batch(
-                task_id=uuid.uuid4(), environment_id=environment_id, sub_video_index=0
+                task_id=uuid.uuid4(), environment_id=environment_id, sub_video_index=sub_video_index
             )
             
             # Process the downloaded video paths
@@ -355,9 +358,8 @@ class RawVideoService:
                         "video_path": video_path,
                         "config": video_config
                     }
-                    pass # logger.info(f"✅ RAW DOWNLOAD: Downloaded video for camera {camera_id}")
                 else:
-                    logger.warning(f"⚠️ RAW DOWNLOAD: Failed to download video for camera {camera_id}")
+                    logger.warning(f"⚠️ RAW DOWNLOAD: Failed to download video for camera {camera_id} (sub_video_index={sub_video_index})")
             
             return video_data
             
