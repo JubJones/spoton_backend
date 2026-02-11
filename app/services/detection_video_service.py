@@ -322,8 +322,14 @@ class DetectionVideoService(RawVideoService):
             if self.enable_gt_reid and environment_id not in self.gt_reid_services:
                 try:
                     import os
-                    data_root_base = getattr(settings, 'DATASET_ROOT', '/app/videos/gt')
-                    data_root = os.path.join(data_root_base, environment_id)
+                    dataset_root = getattr(settings, 'DATASET_ROOT', '')
+                    if dataset_root:
+                        # Explicit DATASET_ROOT: use old behavior
+                        data_root = os.path.join(dataset_root, environment_id)
+                    else:
+                        # Derive from LOCAL_VIDEOS_BASE_DIR: <base>/<env>/gt
+                        local_base = getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', './videos')
+                        data_root = os.path.join(local_base, environment_id, 'gt')
                     gt_service = GroundTruthReIDService(data_root=data_root)
                     self.gt_reid_services[environment_id] = gt_service
                     logger.info(f"✅ GT-REID: Service initialized for '{environment_id}' (Root: {data_root})")
@@ -1056,11 +1062,8 @@ class DetectionVideoService(RawVideoService):
         """
         Main detection pipeline that extends raw video streaming with YOLO detection.
         
-        Phase 1 Process:
-        1. Initialize detection services (including YOLO)
-        2. Download video data (inherited from parent)
-        3. Extract and process frames with detection
-        4. Stream detection results via WebSocket
+        Iterates over all sub-video batches for the environment so that campus
+        environments (with 4 sub-videos per camera) are fully processed.
         """
         pipeline_start = time.time()
         
@@ -1071,34 +1074,69 @@ class DetectionVideoService(RawVideoService):
             await self._update_task_status(task_id, "INITIALIZING", 0.05, "Initializing detection services")
             
             # Step 1: Initialize detection services
-            logger.info(f"🧠 DETECTION PIPELINE: Step 1/4 - Initializing detection services for task {task_id}")
+            logger.info(f"🧠 DETECTION PIPELINE: Step 1 - Initializing detection services for task {task_id}")
             services_initialized = await self.initialize_detection_services(environment_id, task_id)
             if not services_initialized:
                 raise RuntimeError("Failed to initialize detection services")
             
-            await self._update_task_status(task_id, "DOWNLOADING", 0.25, "Downloading video data")
+            # Determine how many sub-video batches to process
+            max_sub_videos = self.video_data_manager.get_max_sub_videos_for_environment(environment_id)
+            if max_sub_videos == 0:
+                raise RuntimeError(f"No sub-videos configured for environment {environment_id}")
             
-            # Step 2: Download video data (inherited method)
-            logger.info(f"⬇️ DETECTION PIPELINE: Step 2/4 - Downloading video data for task {task_id}")
-            video_data = await self._download_video_data(environment_id)
-            if not video_data:
-                raise RuntimeError("Failed to download video data")
+            logger.info(f"📦 DETECTION PIPELINE: Will process {max_sub_videos} sub-video batch(es) for environment {environment_id}")
             
-            await self._update_task_status(task_id, "PROCESSING", 0.50, "Processing frames with YOLO detection")
+            cumulative_frame_offset = 0  # Continuous frame numbering across batches
             
-            # Step 3: Process frames with detection
-            logger.info(f"🔍 DETECTION PIPELINE: Step 3/4 - Processing frames with detection for task {task_id}")
-            detection_success = await self._process_frames_with_detection(task_id, video_data)
-            if self._task_marked_stopped(task_id):
-                logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
-                return
-            if not detection_success:
-                raise RuntimeError("Failed to process frames with detection")
+            for sub_idx in range(max_sub_videos):
+                if self._task_marked_stopped(task_id) or task_id not in self.active_tasks:
+                    logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped before sub-video batch {sub_idx}")
+                    return
+                
+                batch_progress_base = sub_idx / max_sub_videos
+                batch_progress_span = 1.0 / max_sub_videos
+                
+                # Step 2: Download video data for this batch
+                await self._update_task_status(
+                    task_id, "DOWNLOADING",
+                    batch_progress_base + batch_progress_span * 0.1,
+                    f"Downloading sub-video batch {sub_idx + 1}/{max_sub_videos}"
+                )
+                logger.info(f"⬇️ DETECTION PIPELINE: Downloading sub-video batch {sub_idx + 1}/{max_sub_videos} for task {task_id}")
+                video_data = await self._download_video_data(environment_id, sub_video_index=sub_idx)
+                if not video_data:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: No video data for sub-video batch {sub_idx}, skipping")
+                    continue
+                
+                # Extract frames (opens captures, gets frame counts)
+                frames_extracted = await self._extract_raw_frames(task_id, video_data)
+                if not frames_extracted:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: Frame extraction failed for sub-video batch {sub_idx}, skipping")
+                    continue
+                
+                # Step 3: Process frames with detection
+                await self._update_task_status(
+                    task_id, "PROCESSING",
+                    batch_progress_base + batch_progress_span * 0.3,
+                    f"Processing sub-video batch {sub_idx + 1}/{max_sub_videos} with YOLO detection"
+                )
+                logger.info(f"🔍 DETECTION PIPELINE: Processing sub-video batch {sub_idx + 1}/{max_sub_videos} for task {task_id}")
+                detection_success, frames_processed = await self._process_frames_with_detection(
+                    task_id, video_data, frame_offset=cumulative_frame_offset
+                )
+                
+                if self._task_marked_stopped(task_id):
+                    logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped during sub-video batch {sub_idx + 1}")
+                    return
+                if not detection_success:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: Detection failed for sub-video batch {sub_idx + 1}")
+                
+                cumulative_frame_offset += frames_processed
+                logger.info(f"✅ DETECTION PIPELINE: Completed sub-video batch {sub_idx + 1}/{max_sub_videos} ({frames_processed} frames, cumulative offset: {cumulative_frame_offset})")
 
-            await self._update_task_status(task_id, "STREAMING", 0.75, "Streaming detection results")
-
-            # Step 4: Stream detection results (integrated with frame processing)
-            logger.info(f"📡 DETECTION PIPELINE: Step 4/4 - Streaming detection results for task {task_id}")
+            # Step 4: Stream final detection summary
+            await self._update_task_status(task_id, "STREAMING", 0.95, "Streaming detection results summary")
+            logger.info(f"📡 DETECTION PIPELINE: Streaming detection results for task {task_id}")
             streaming_success = await self._stream_detection_results(task_id, video_data)
             if self._task_marked_stopped(task_id):
                 logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped before summary streaming (no clients)")
@@ -1111,7 +1149,7 @@ class DetectionVideoService(RawVideoService):
             
             # Update final statistics
             pipeline_time = time.time() - pipeline_start
-            logger.info(f"✅ DETECTION PIPELINE: Pipeline completed successfully for task {task_id} in {pipeline_time:.2f}s")
+            logger.info(f"✅ DETECTION PIPELINE: Pipeline completed successfully for task {task_id} in {pipeline_time:.2f}s ({cumulative_frame_offset} total frames across {max_sub_videos} batch(es))")
             
         except Exception as e:
             logger.error(f"❌ DETECTION PIPELINE: Error in detection pipeline for task {task_id}: {e}")
@@ -1125,10 +1163,20 @@ class DetectionVideoService(RawVideoService):
                 del self.environment_tasks[environment_id]
             self._clear_client_watch(task_id)
     
-    async def _process_frames_with_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
-        """Process video frames with YOLO detection."""
+    async def _process_frames_with_detection(self, task_id: uuid.UUID, video_data: Dict[str, Any], frame_offset: int = 0) -> tuple:
+        """
+        Process video frames with YOLO detection.
+        
+        Args:
+            task_id: Task identifier
+            video_data: Video data dict (camera_id -> {video_path, config, video_capture, ...})
+            frame_offset: Starting frame number offset for continuous numbering across sub-video batches
+            
+        Returns:
+            Tuple of (success: bool, frames_processed: int)
+        """
         try:
-            logger.info(f"🔍 DETECTION PROCESSING: Processing frames with detection for task {task_id}")
+            logger.info(f"🔍 DETECTION PROCESSING: Processing frames with detection for task {task_id} (frame_offset={frame_offset})")
             
             # Get frame count for progress tracking
             total_frames = min(
@@ -1138,7 +1186,7 @@ class DetectionVideoService(RawVideoService):
             
             if total_frames == 0:
                 logger.warning("No frames available for detection processing")
-                return False
+                return False, 0
             
             frame_index = 0
             aborted_due_to_no_clients = False
@@ -1170,8 +1218,9 @@ class DetectionVideoService(RawVideoService):
                             camera_frames[camera_id] = frame
                             
                             # Process frame with enhanced flow stub (detection -> tracking pipeline)
+                            effective_frame_index = frame_offset + frame_index
                             detection_data = await self.process_frame_with_tracking(
-                                frame, camera_id, frame_index
+                                frame, camera_id, effective_frame_index
                             )
 
                             camera_detections[camera_id] = detection_data
@@ -1243,7 +1292,8 @@ class DetectionVideoService(RawVideoService):
                     frame = camera_frames.get(camera_id)
                     if frame is not None:
                         # Phase 2: Send real-time detection update via WebSocket
-                        await self.send_detection_update(task_id, camera_id, frame, detection_data, frame_index)
+                        effective_frame_index = frame_offset + frame_index
+                        await self.send_detection_update(task_id, camera_id, frame, detection_data, effective_frame_index)
                         # Emit auxiliary events tied to this task
                         if getattr(settings, 'ENABLE_ENHANCED_VISUALIZATION', True):
                             await self._emit_frontend_events(task_id, camera_id, frame_index, detection_data.get("tracks", []))
@@ -1323,14 +1373,14 @@ class DetectionVideoService(RawVideoService):
                 reason = "Detection stopped - no active WebSocket clients"
                 self._mark_task_stopped_due_to_idle_clients(task_id, reason)
                 logger.info(f"🛑 DETECTION PROCESSING: {reason} (task {task_id})")
-                return True
+                return True, frame_index
 
-            logger.info(f"✅ DETECTION PROCESSING: Frame processing completed for task {task_id}")
-            return True
+            logger.info(f"✅ DETECTION PROCESSING: Frame processing completed for task {task_id} ({frame_index} frames processed)")
+            return True, frame_index
             
         except Exception as e:
             logger.error(f"❌ DETECTION PROCESSING: Error processing frames: {e}")
-            return False
+            return False, 0
     
     async def _stream_detection_results(self, task_id: uuid.UUID, video_data: Dict[str, Any]) -> bool:
         """Stream detection results via WebSocket (Phase 1 - basic implementation)."""
@@ -2073,8 +2123,8 @@ class DetectionVideoService(RawVideoService):
         """
         Simplified detection processing pipeline (detection-only).
         
-        Focuses only on person detection with YOLO, sends results via WebSocket
-        with static null values for future pipeline features (homography-only details).
+        Iterates over all sub-video batches for the environment so that campus
+        environments (with 4 sub-videos per camera) are fully processed.
         """
         pipeline_start = time.time()
         
@@ -2087,32 +2137,69 @@ class DetectionVideoService(RawVideoService):
             if not services_initialized:
                 raise RuntimeError("Failed to initialize detection services")
             
-            # Download video data
-            await self._update_task_status(task_id, "DOWNLOADING", 0.30, "Downloading video data")
-            video_data = await self._download_video_data(environment_id)
-            if not video_data:
-                raise RuntimeError("Failed to download video data")
+            # Determine how many sub-video batches to process
+            max_sub_videos = self.video_data_manager.get_max_sub_videos_for_environment(environment_id)
+            if max_sub_videos == 0:
+                raise RuntimeError(f"No sub-videos configured for environment {environment_id}")
             
-            # Extract frames for processing
-            await self._update_task_status(task_id, "EXTRACTING", 0.45, "Extracting frames from video data")
-            frames_extracted = await self._extract_raw_frames(task_id, video_data)
-            if not frames_extracted:
-                raise RuntimeError("Failed to extract frames")
+            logger.info(f"📦 SIMPLE DETECTION PIPELINE: Will process {max_sub_videos} sub-video batch(es) for environment {environment_id}")
             
-            # Process frames with detection only
-            await self._update_task_status(task_id, "PROCESSING", 0.60, "Processing frames with YOLO detection")
-            success = await self._process_frames_simple_detection(task_id, environment_id, video_data)
-            if self._task_marked_stopped(task_id):
-                logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped early (no active WebSocket clients)")
-                return
-            if not success:
-                raise RuntimeError("Failed to process frames with detection")
+            cumulative_frame_offset = 0
+            
+            for sub_idx in range(max_sub_videos):
+                if self._task_marked_stopped(task_id) or task_id not in self.active_tasks:
+                    logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped before sub-video batch {sub_idx}")
+                    return
+                
+                batch_progress_base = sub_idx / max_sub_videos
+                batch_progress_span = 1.0 / max_sub_videos
+                
+                # Download video data for this batch
+                await self._update_task_status(
+                    task_id, "DOWNLOADING",
+                    batch_progress_base + batch_progress_span * 0.1,
+                    f"Downloading sub-video batch {sub_idx + 1}/{max_sub_videos}"
+                )
+                video_data = await self._download_video_data(environment_id, sub_video_index=sub_idx)
+                if not video_data:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: No video data for sub-video batch {sub_idx}, skipping")
+                    continue
+                
+                # Extract frames
+                await self._update_task_status(
+                    task_id, "EXTRACTING",
+                    batch_progress_base + batch_progress_span * 0.2,
+                    f"Extracting frames from sub-video batch {sub_idx + 1}/{max_sub_videos}"
+                )
+                frames_extracted = await self._extract_raw_frames(task_id, video_data)
+                if not frames_extracted:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: Frame extraction failed for sub-video batch {sub_idx}, skipping")
+                    continue
+                
+                # Process frames with detection only
+                await self._update_task_status(
+                    task_id, "PROCESSING",
+                    batch_progress_base + batch_progress_span * 0.3,
+                    f"Processing sub-video batch {sub_idx + 1}/{max_sub_videos} with YOLO detection"
+                )
+                success, frames_processed = await self._process_frames_simple_detection(
+                    task_id, environment_id, video_data, frame_offset=cumulative_frame_offset
+                )
+                
+                if self._task_marked_stopped(task_id):
+                    logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped during sub-video batch {sub_idx + 1}")
+                    return
+                if not success:
+                    logger.warning(f"⚠️ DETECTION PIPELINE: Detection failed for sub-video batch {sub_idx + 1}")
+                
+                cumulative_frame_offset += frames_processed
+                logger.info(f"✅ DETECTION PIPELINE: Completed sub-video batch {sub_idx + 1}/{max_sub_videos} ({frames_processed} frames)")
             
             # Complete
             await self._update_task_status(task_id, "COMPLETED", 1.0, "Detection pipeline completed successfully")
             
             pipeline_time = time.time() - pipeline_start
-            logger.info(f"✅ DETECTION PIPELINE: Pipeline completed in {pipeline_time:.2f}s")
+            logger.info(f"✅ DETECTION PIPELINE: Pipeline completed in {pipeline_time:.2f}s ({cumulative_frame_offset} total frames across {max_sub_videos} batch(es))")
             
         except Exception as e:
             logger.error(f"❌ DETECTION PIPELINE: Error in detection pipeline: {e}")
@@ -2133,15 +2220,21 @@ class DetectionVideoService(RawVideoService):
             self._clear_client_watch(task_id)
             await self._cleanup_playback_task(task_id)
     
-    async def _process_frames_simple_detection(self, task_id: uuid.UUID, environment_id: str, video_data: Dict[str, Any]) -> bool:
+    async def _process_frames_simple_detection(self, task_id: uuid.UUID, environment_id: str, video_data: Dict[str, Any], frame_offset: int = 0) -> tuple:
         """
         Process frames with simple YOLO detection only.
         
-        Simplified version that focuses only on detection and annotation,
-        sending WebSocket updates with static null values for future features.
+        Args:
+            task_id: Task identifier
+            environment_id: Environment identifier
+            video_data: Video data dict
+            frame_offset: Starting frame offset for continuous numbering across sub-video batches
+            
+        Returns:
+            Tuple of (success: bool, frames_processed: int)
         """
         try:
-            logger.info(f"🔍 SIMPLE DETECTION: Starting frame processing with YOLO for task {task_id}")
+            logger.info(f"🔍 SIMPLE DETECTION: Starting frame processing with YOLO for task {task_id} (frame_offset={frame_offset})")
             
             # Get total frame count
             frame_counts = [data.get("frame_count", 0) for data in video_data.values() if data.get("frame_count", 0) > 0]
@@ -2149,7 +2242,7 @@ class DetectionVideoService(RawVideoService):
             
             if total_frames == 0:
                 logger.warning("No frames available for detection processing")
-                return False
+                return False, 0
             
             frame_index = 0
             frames_processed = 0
@@ -2203,9 +2296,10 @@ class DetectionVideoService(RawVideoService):
                 
                 # Collect batch_accumulation_size frames from each camera
                 for acc_idx in range(batch_accumulation_size):
-                    current_frame_idx = frame_index + acc_idx
-                    if current_frame_idx >= total_frames:
+                    local_frame_idx = frame_index + acc_idx
+                    if local_frame_idx >= total_frames:
                         break
+                    current_frame_idx = frame_offset + local_frame_idx  # Global frame index for GT matching
                     
                     for camera_id, data in video_data.items():
                         cap = data.get("video_capture")
@@ -2489,13 +2583,13 @@ class DetectionVideoService(RawVideoService):
                 reason = "Detection stopped - no active WebSocket clients"
                 self._mark_task_stopped_due_to_idle_clients(task_id, reason)
                 logger.info(f"🛑 SIMPLE DETECTION: {reason} (task {task_id})")
-                return True
+                return True, frame_index
 
-            return True
+            return True, frame_index
 
         except Exception as e:
             logger.error(f"❌ SIMPLE DETECTION: Error in frame processing: {e}")
-            return False
+            return False, 0
     
     def _process_detections_to_format(
         self, 

@@ -105,7 +105,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
         "cameras": {
             "c01": {
                 "display_name": "Campus Gate Camera",
-                "remote_base_key": "video_s37/c01",
+                "remote_base_key": "campus/c01",
                 "num_sub_videos": 4,
                 "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
                 "position": (10.0, 5.0),
@@ -124,7 +124,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c02": {
                 "display_name": "Campus Plaza Camera",
-                "remote_base_key": "video_s37/c02",
+                "remote_base_key": "campus/c02",
                 "num_sub_videos": 4,
                 "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
                 "position": (30.0, 6.0),
@@ -143,7 +143,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c03": {
                 "display_name": "Campus Walkway Camera",
-                "remote_base_key": "video_s37/c03",
+                "remote_base_key": "campus/c03",
                 "num_sub_videos": 4,
                 "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
                 "position": (50.0, 7.0),
@@ -168,7 +168,7 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c05": {
                 "display_name": "Campus Commons Camera",
-                "remote_base_key": "video_s37/c05",
+                "remote_base_key": "campus/c05",
                 "num_sub_videos": 4,
                 "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
                 "position": (68.0, 4.0),
@@ -267,9 +267,9 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
         "cameras": {
             "c09": {
                 "display_name": "Factory Entry Camera",
-                "remote_base_key": "video_s14/c09",
-                "num_sub_videos": 4,
-                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "remote_base_key": "factory/c09",
+                "num_sub_videos": 1,
+                "sub_video_filename_pattern": "c09.mp4",
                 "position": (5.0, 2.0),
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
@@ -292,9 +292,9 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c12": {
                 "display_name": "Factory Main Area Camera",
-                "remote_base_key": "video_s14/c12",
-                "num_sub_videos": 4,
-                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "remote_base_key": "factory/c12",
+                "num_sub_videos": 1,
+                "sub_video_filename_pattern": "c12.mp4",
                 "position": (25.0, 15.0),
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
@@ -317,9 +317,9 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c13": {
                 "display_name": "Factory Corridor Camera",
-                "remote_base_key": "video_s14/c13",
-                "num_sub_videos": 4,
-                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "remote_base_key": "factory/c13",
+                "num_sub_videos": 1,
+                "sub_video_filename_pattern": "c13.mp4",
                 "position": (45.0, 10.0),
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
@@ -354,9 +354,9 @@ BASE_ENVIRONMENT_CONFIGURATION: Dict[str, Dict[str, Any]] = {
             },
             "c16": {
                 "display_name": "Factory Exit Camera",
-                "remote_base_key": "video_s14/c16",
-                "num_sub_videos": 4,
-                "sub_video_filename_pattern": "sub_video_{idx:02d}.mp4",
+                "remote_base_key": "factory/c16",
+                "num_sub_videos": 1,
+                "sub_video_filename_pattern": "c16.mp4",
                 "position": (65.0, 2.0),
                 "resolution": (1920, 1080),
                 "field_of_view": 70.0,
@@ -554,7 +554,7 @@ class Settings(BaseSettings):
     
     # Ground Truth Re-ID (Debugging)
     ENABLE_GT_REID: bool = False
-    DATASET_ROOT: str = "/app/videos/gt"
+    DATASET_ROOT: str = Field(default="", description="Base directory for GT files. If empty, derived as <LOCAL_VIDEOS_BASE_DIR>/<env_id>/gt")
     
     # YOLO Configuration (YOLO11-L)
     # TensorRT Optimization: Set USE_TENSORRT=true and provide .engine file path for 3-5x speedup
