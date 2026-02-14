@@ -34,15 +34,15 @@ COPY requirements/requirements.txt /tmp/requirements.txt
 
 # Install uv for much faster package installation (10-100x faster than pip)
 # Then install all dependencies in one go
-RUN pip install uv && \
-    uv pip install --system -r /tmp/requirements.txt && \
-    uv pip install --system "faiss-cpu>=1.7.4,<1.8.0" && \
-    uv pip install --system --no-deps boxmot==15.0.2 && \
-    uv pip install --system \
+# Install dependencies using standard pip (slower but more compatible with certain network setups)
+RUN pip install --no-cache-dir -r /tmp/requirements.txt && \
+    pip install --no-cache-dir "faiss-cpu>=1.7.4,<1.8.0" && \
+    pip install --no-cache-dir --no-deps boxmot==15.0.2 && \
+    pip install --no-cache-dir \
     "onnx>=1.12.0,<2.0.0" \
     "onnxslim>=0.1.71" \
     "onnxruntime-gpu" && \
-    uv pip install --system --extra-index-url https://pypi.nvidia.com tensorrt
+    pip install --no-cache-dir --extra-index-url https://pypi.nvidia.com tensorrt
 
 # Install Torchreid from source (requires git, numpy, cython, and build deps)
 # We install build dependencies first, then torchreid
