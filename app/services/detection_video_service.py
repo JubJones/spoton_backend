@@ -319,22 +319,24 @@ class DetectionVideoService(RawVideoService):
             self.handoff_service = HandoffDetectionService()
 
             # Initialize Ground Truth Re-ID Service for this environment (if enabled)
-            if self.enable_gt_reid and environment_id not in self.gt_reid_services:
-                try:
-                    import os
-                    dataset_root = getattr(settings, 'DATASET_ROOT', '')
-                    if dataset_root:
-                        # Explicit DATASET_ROOT: use old behavior
-                        data_root = os.path.join(dataset_root, environment_id)
-                    else:
-                        # Derive from LOCAL_VIDEOS_BASE_DIR: <base>/<env>/gt
-                        local_base = getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', './videos')
-                        data_root = os.path.join(local_base, environment_id, 'gt')
-                    gt_service = GroundTruthReIDService(data_root=data_root)
-                    self.gt_reid_services[environment_id] = gt_service
-                    logger.info(f"✅ GT-REID: Service initialized for '{environment_id}' (Root: {data_root})")
-                except Exception as e:
-                    logger.error(f"❌ GT-REID INIT FAILED for '{environment_id}': {e}")
+            if self.enable_gt_reid:
+                logger.warning(f"🚨 STARTUP MODE: PURE GROUND TRUTH RE-ID ENABLED for '{environment_id}' (Normal tracking/Re-ID DISABLED)")
+                if environment_id not in self.gt_reid_services:
+                    try:
+                        import os
+                        dataset_root = getattr(settings, 'DATASET_ROOT', '')
+                        if dataset_root:
+                            # Explicit DATASET_ROOT: use old behavior
+                            data_root = os.path.join(dataset_root, environment_id)
+                        else:
+                            # Derive from LOCAL_VIDEOS_BASE_DIR: <base>/<env>/gt
+                            local_base = getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', './videos')
+                            data_root = os.path.join(local_base, environment_id, 'gt')
+                        gt_service = GroundTruthReIDService(data_root=data_root)
+                        self.gt_reid_services[environment_id] = gt_service
+                        logger.info(f"✅ GT-REID: Service initialized for '{environment_id}' (Root: {data_root})")
+                    except Exception as e:
+                        logger.error(f"❌ GT-REID INIT FAILED for '{environment_id}': {e}")
 
             # Initialize Re-ID Services (Phase 2)
             if self.feature_extraction_service is None:
