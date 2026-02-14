@@ -11,7 +11,11 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK on
 ENV PIP_DEFAULT_TIMEOUT 100
 
 # Configure apt to force IPv4 (fixes Docker on Windows networking hangs)
-RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99custom
+# Configure apt to force IPv4 and RETRY failed downloads (fixes Docker on Windows networking hangs)
+RUN echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99custom && \
+    echo 'Acquire::Retries "5";' >> /etc/apt/apt.conf.d/99custom && \
+    echo 'Acquire::http::Timeout "30";' >> /etc/apt/apt.conf.d/99custom && \
+    echo 'Acquire::https::Timeout "30";' >> /etc/apt/apt.conf.d/99custom
 
 # Install runtime dependencies and build tools
 # We keep build-essential during install then remove it to save space if needed, 
