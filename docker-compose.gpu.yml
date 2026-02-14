@@ -11,6 +11,7 @@ services:
       dockerfile: Dockerfile.gpu
       args:
         PYTORCH_VARIANT: gpu
+      network: host
     image: spoton_backend_image:gpu
     container_name: spoton_backend_service
     ports:
