@@ -1,139 +1,125 @@
+
 import os
 import asyncio
+import logging
 import torch
 import numpy as np
 from typing import List, Optional
-from app.services.fast_reid_interface import FastReIDInterface
+from torchreid.utils import FeatureExtractor
 from app.core.config import settings
 
-class FeatureExtractionService:
-    def __init__(self, 
-                 config_path: str = './reid/configs/AIC24/sbs_R50-ibn.yml', 
-                 model_path: str = './weights/market_aic_sbs_R50-ibn.pth',
-                 device: str = 'auto'):
-        """
-        Wrapper for FastReIDInterface.
-        """
-        self.config_path = config_path
-        self.model_path = model_path
-        
-        if device == 'auto':
-            if torch.backends.mps.is_available():
-                self.device = 'mps'
-            elif torch.cuda.is_available():
-                self.device = 'cuda'
-            else:
-                self.device = 'cpu'
-        else:
-            self.device = device
-            
-        print(f"Initializing Re-ID model on default device: {self.device}")
-        
-        # Verify paths
-        if not os.path.exists(self.config_path):
-            raise FileNotFoundError(f"Re-ID config not found at {self.config_path}")
-        if not os.path.exists(self.model_path):
-            # Fallback check for partial path if running from wrong cwd
-            if os.path.exists(os.path.join(os.getcwd(), model_path)):
-                 self.model_path = os.path.join(os.getcwd(), model_path)
-            else:
-                raise FileNotFoundError(f"Re-ID weights not found at {self.model_path}")
+logger = logging.getLogger(__name__)
 
-        self.encoder = FastReIDInterface(
-            config_file=self.config_path,
-            weights_path=self.model_path,
-            device=self.device
-        )
+class FeatureExtractionService:
+    def __init__(self):
+        """
+        Wrapper for OSNet-AIN feature extraction using Torchreid.
+        """
+        self.model_path = getattr(settings, 'REID_MODEL_PATH', 'weights/osnet_ain_ms_d_c.pth.tar')
+        self.model_name = getattr(settings, 'REID_MODEL_NAME', 'osnet_ain_x1_0')
+        self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        
+        logger.info(f"🧠 RE-ID INIT: Loading {self.model_name} from {self.model_path} on {self.device}...")
+        
+        if not os.path.exists(self.model_path):
+             # Fallback check for current directory
+             cwd_path = os.path.join(os.getcwd(), self.model_path)
+             if os.path.exists(cwd_path):
+                 self.model_path = cwd_path
+             else:
+                 raise FileNotFoundError(f"Re-ID weights not found at {self.model_path}")
+
+        try:
+            # Initialize Torchreid Feature Extractor
+            self.extractor = FeatureExtractor(
+                model_name=self.model_name,
+                model_path=self.model_path,
+                device=self.device
+            )
+            logger.info("✅ RE-ID INIT: OSNet-AIN model loaded successfully.")
+        except Exception as e:
+            logger.error(f"❌ RE-ID INIT FAILED: {e}")
+            raise e
 
     def extract(self, image_patch: np.ndarray) -> Optional[np.ndarray]:
         """
         Extract features from a single image patch (numpy array BGR).
-        Returns a normalized 2048-dim embedding.
-        
-        Note: This is synchronous. Prefer extract_async() in async contexts.
+        Returns a normalized 512-dim embedding.
         """
         if image_patch is None or image_patch.size == 0:
             return None
             
-        h, w = image_patch.shape[:2]
-        # Fake detection covering the whole patch
-        detections = np.array([[0, 0, w, h, 1.0]])
-        
-        features = self.encoder.inference(image_patch, detections)
-        
-        if features is None or len(features) == 0:
-            return None
+        try:
+            # Check for minimum size (OSNet can be sensitive to tiny patches)
+            h, w = image_patch.shape[:2]
+            if h < 10 or w < 10:
+                pass # return None
             
-        return features[0]
+            # Torchreid expects a list of numpy images (H, W, C) in RGB (or BGR?)
+            # FeatureExtractor internally uses PIL or cv2. 
+            # Looking at source, it accepts a list of numpy arrays.
+            # It handles standard transforms (Resize, ToTensor, Normalize).
+            # It does expect RGB if using standard transforms. OpenCV gives BGR.
+            
+            # Convert BGR to RGB
+            # image_rgb = image_patch[:, :, ::-1] # FeatureExtractor might handle this? 
+            # torchreid's FeatureExtractor usually expects images as list of numpy arrays (H,W,C).
+            
+            features = self.extractor([image_patch]) # Returns torch.Tensor
+            features = features.cpu().numpy().astype(np.float32)
+            
+            if features is None or len(features) == 0:
+                return None
+                
+            return features[0] # Return the first (and only) embedding
+            
+        except Exception as e:
+            logger.error(f"Re-ID Extraction Error: {e}")
+            return None
 
     async def extract_async(self, image_patch: np.ndarray) -> Optional[np.ndarray]:
         """
         Async version of extract() - doesn't block the event loop.
-        Use this in async contexts for better performance.
         """
         if image_patch is None or image_patch.size == 0:
             return None
         
-        # Run the synchronous extraction in a thread pool
         return await asyncio.to_thread(self.extract, image_patch)
 
     def extract_batch(self, image_patches: List[np.ndarray]) -> List[Optional[np.ndarray]]:
         """
-        Extract features from multiple image patches in a single GPU call.
-        
-        This is more efficient than calling extract() multiple times as it
-        leverages the FastReIDInterface's internal batching.
-        
-        Args:
-            image_patches: List of BGR image patches (numpy arrays)
-            
-        Returns:
-            List of feature embeddings (or None for invalid patches)
+        Extract features from multiple image patches.
         """
         if not image_patches:
             return []
         
-        # Filter out invalid patches and track their indices
         valid_patches = []
         valid_indices = []
         results: List[Optional[np.ndarray]] = [None] * len(image_patches)
         
         for i, patch in enumerate(image_patches):
             if patch is not None and patch.size > 0:
-                valid_patches.append(patch)
-                valid_indices.append(i)
+                # Basic size check
+                if patch.shape[0] >= 10 and patch.shape[1] >= 10:
+                    valid_patches.append(patch)
+                    valid_indices.append(i)
         
         if not valid_patches:
             return results
-        
-        # Build combined image and detections for batch inference
-        # Stack patches vertically to create a single "image" that FastReID can process
-        # Actually, FastReIDInterface expects (image, detections) where detections are bboxes
-        # For batch, we need to process each patch individually but in one GPU call
-        
-        # Build fake detections for each patch (covering full patch)
-        all_features = []
-        for patch in valid_patches:
-            h, w = patch.shape[:2]
-            detections = np.array([[0, 0, w, h, 1.0]])
-            features = self.encoder.inference(patch, detections)
-            if features is not None and len(features) > 0:
-                all_features.append(features[0])
-            else:
-                all_features.append(None)
-        
-        # Map back to original indices
-        for idx, feat in zip(valid_indices, all_features):
-            results[idx] = feat
+            
+        try:
+            # Batch inference
+            features = self.extractor(valid_patches)
+            features = features.cpu().numpy().astype(np.float32)
+            
+            # Map back
+            for i, idx in enumerate(valid_indices):
+                results[idx] = features[i]
+                
+        except Exception as e:
+            logger.error(f"Batch Re-ID Extraction Error: {e}")
         
         return results
 
     async def extract_batch_async(self, image_patches: List[np.ndarray]) -> List[Optional[np.ndarray]]:
-        """
-        Async version of extract_batch() - doesn't block the event loop.
-        """
-        if not image_patches:
-            return []
-        
         return await asyncio.to_thread(self.extract_batch, image_patches)
-

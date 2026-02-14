@@ -590,7 +590,13 @@ class Settings(BaseSettings):
     TRACK_CONFIDENCE_THRESHOLD: float = 0.5
     
     # (Re-ID batch/gallery settings removed)
-    REID_ENABLED: bool = Field(default=True, description="Enable Re-ID feature extraction (disable for performance)")
+    # Re-ID Configuration (OSNet-AIN)
+    REID_ENABLED: bool = Field(default=True, description="Enable Re-ID feature extraction")
+    REID_MODEL_PATH: str = Field(default="weights/osnet_ain_ms_d_c.pth.tar", description="Path to OSNet-AIN weights")
+    REID_MODEL_NAME: str = Field(default="osnet_ain_x1_0", description="OSNet model architecture name")
+    REID_FEATURE_DIM: int = Field(default=512, description="Feature dimension for OSNet")
+    REID_SIMILARITY_THRESHOLD: float = Field(default=0.70, description="Cosine similarity threshold for matching")
+    
     HANDOFF_ZONE_THRESHOLD: float = 0.2
     TRACKER_CONFIG_PATH: Optional[str] = None
     
@@ -598,8 +604,6 @@ class Settings(BaseSettings):
     FRAME_SKIP: int = Field(default=2, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
     BATCH_ACCUMULATION_SIZE: int = Field(default=4, description="Number of frames to accumulate per camera before batch inference (e.g., 4 cams × 4 frames = 16 batch)")
     SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
-
-    # (Re-ID similarity settings removed)
 
     TARGET_FPS: int = 23 
     FRAME_JPEG_QUALITY: int = 85  # Good balance
