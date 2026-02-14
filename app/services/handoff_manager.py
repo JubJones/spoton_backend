@@ -1,81 +1,148 @@
+
 import time
 import numpy as np
+import logging
+import faiss
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class HandoffEntry:
     global_id: str
-    embedding: np.ndarray
     camera_id: str
     timestamp: datetime
     location: Optional[Tuple[float, float]] = None
 
 class HandoffManager:
-    def __init__(self, 
-                 match_threshold: float = 0.70,
-                 time_window_sec: int = 60,
-                 max_queue_size: int = 100):
-        self.match_threshold = match_threshold
-        self.time_window_sec = time_window_sec
-        self.max_queue_size = max_queue_size
-        self.queue: List[HandoffEntry] = []
+    def __init__(self):
+        """
+        Manages cross-camera handoffs using FAISS for efficient similarity search.
+        Uses Inner Product (IP) index with L2 normalization to simulate Cosine Similarity.
+        """
+        self.similarity_threshold = getattr(settings, 'REID_SIMILARITY_THRESHOLD', 0.70)
+        self.feature_dim = getattr(settings, 'REID_FEATURE_DIM', 512)
+        self.time_window_sec = 60 # Keep entries for 60 seconds
+        
+        # FAISS Index for Cosine Similarity
+        # IndexFlatIP = Inner Product. When vectors are L2 normalized, IP == Cosine Similarity.
+        self.index = faiss.IndexFlatIP(self.feature_dim)
+        
+        # Mappings
+        # faiss_id (int) -> HandoffEntry
+        self.metadata: Dict[int, HandoffEntry] = {} 
+        # global_id (str) -> faiss_id (int) [Look up most recent vector for a person]
+        self.gid_to_faiss_id: Dict[str, int] = {}
+        
+        logger.info(f"🤝 HANDOFF MANAGER INIT: FAISS Index (Dim={self.feature_dim}, Thresh={self.similarity_threshold})")
 
     def register_exit(self, global_id: str, embedding: np.ndarray, camera_id: str, location: Optional[Tuple[float, float]] = None):
         """
-        Register a track that has exited or is about to exit.
+        Register a track that has exited or is in a handoff zone.
+        Adds the embedding to FAISS and updates metadata.
         """
-        # Remove existing entry for same global_id to update it
-        self.queue = [e for e in self.queue if e.global_id != global_id]
+        if embedding is None or embedding.size == 0:
+            return
+
+        # Ensure correct dimension
+        if embedding.shape[0] != self.feature_dim:
+            logger.warning(f"Feature dim mismatch: got {embedding.shape[0]}, expected {self.feature_dim}")
+            return
+            
+        # 1. L2 Normalize (Critical for Cosine Similarity with IndexFlatIP)
+        # Reshape to (1, dim) for FAISS
+        vector = embedding.reshape(1, -1).astype(np.float32)
+        faiss.normalize_L2(vector)
         
+        # 2. Add to FAISS
+        new_id = self.index.ntotal
+        self.index.add(vector)
+        
+        # 3. Store Metadata
         entry = HandoffEntry(
             global_id=global_id,
-            embedding=embedding,
             camera_id=camera_id,
             timestamp=datetime.now(),
             location=location
         )
-        self.queue.append(entry)
+        self.metadata[new_id] = entry
+        self.gid_to_faiss_id[global_id] = new_id
         
-        # Enforce max size (FIFO-ish, or based on time? for now simple size limit)
-        if len(self.queue) > self.max_queue_size:
-            self.queue.pop(0)
+        # logger.debug(f"Registered interaction for {global_id} (FAISS ID: {new_id})")
+        
+        # Periodic cleanup of metadata (though FAISS index grows, it's fast enough 
+        # that we might not need to remove from index immediately for this use case. 
+        # Re-building index for cleanup is expensive. For now, just clean metadata map to saving memory?)
+        # Actually, if we don't remove from FAISS, we might match old vectors. 
+        # But 'validity' check in find_match handles timestamps.
+        
+        if new_id % 100 == 0:
+            self._cleanup_metadata()
 
     def find_match(self, embedding: np.ndarray, camera_id: str) -> Tuple[Optional[str], float]:
         """
-        Find a matching global_id for the given embedding.
-        Returns (global_id, score). If no match found, returns (None, 0.0).
+        Find the best matching global_id from ANOTHER camera.
         """
-        self._cleanup_expired()
-        
-        if not self.queue:
+        if self.index.ntotal == 0:
             return None, 0.0
             
-        best_match_id = None
-        best_score = -1.0
+        # 1. L2 Normalize
+        vector = embedding.reshape(1, -1).astype(np.float32)
+        faiss.normalize_L2(vector)
         
-        query_norm = embedding / np.linalg.norm(embedding)
+        # 2. Search FAISS
+        # k=5 to verify candidates (check time window, different camera)
+        k = 5
+        search_k = min(k, self.index.ntotal)
+        scores, ids = self.index.search(vector, search_k)
         
-        for entry in self.queue:
-            # Skip if same camera (unless we want to handle re-entry to same cam after occlusion, 
-            # but usually handoff is cross-camera. For now allow any camera matching)
+        # 3. Filter Results
+        best_id = None
+        best_score = 0.0
+        
+        # Iterate through candidates
+        for i in range(search_k):
+            score = scores[0][i]
+            faiss_id = ids[0][i]
             
-            # Cosine similarity
-            entry_norm = entry.embedding / np.linalg.norm(entry.embedding)
-            score = np.dot(query_norm, entry_norm)
+            if faiss_id == -1: break
+            if score < self.similarity_threshold: break # Sorted matches, so we can stop
             
-            if score > best_score:
-                best_score = score
-                best_match_id = entry.global_id
+            entry = self.metadata.get(faiss_id)
+            if not entry: continue
+            
+            # Rule: Don't match with yourself from the SAME camera (unless enough time passed? No, usually distinct cams)
+            if entry.camera_id == camera_id:
+                continue
                 
-        if best_score >= self.match_threshold:
-            return best_match_id, float(best_score)
+            # Rule: Time window check
+            if datetime.now() - entry.timestamp > timedelta(seconds=self.time_window_sec):
+                continue
+                
+            # Valid match found
+            best_id = entry.global_id
+            best_score = float(score)
+            break # Return the first valid high-score match
             
-        return None, 0.0
-        
-    def _cleanup_expired(self):
-        """Remove entries older than time_window_sec"""
+        return best_id, best_score
+
+    def _cleanup_metadata(self):
+        """
+        Lazy cleanup of metadata dictionary to prevent unbounded growth.
+        Does NOT remove from FAISS index (indices are append-only), but marks them effectively
+        unreachable by removing metadata.
+        """
         now = datetime.now()
-        threshold = now - timedelta(seconds=self.time_window_sec)
-        self.queue = [e for e in self.queue if e.timestamp > threshold]
+        threshold = now - timedelta(seconds=self.time_window_sec * 2) # Keep a bit longer safely
+        
+        expired_ids = [fid for fid, entry in self.metadata.items() if entry.timestamp < threshold]
+        
+        for fid in expired_ids:
+            del self.metadata[fid]
+            
+        # Note: self.index still holds vectors. In a long-running production system, 
+        # one would use IndexIVF or rebuild IndexFlatIP periodically. 
+        # For this scale, IndexFlatIP growing to ~100k vectors is negligible memory/time.

@@ -49,3 +49,5 @@ tqdm>=4.65.0
 tensorboard>=2.15.0
 prettytable
 easydict
+faiss-cpu==1.10.0
+# torchreid must be installed from source: pip install git+https://github.com/KaiyangZhou/deep-person-reid.git
