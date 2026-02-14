@@ -1,0 +1,91 @@
+# Ground Truth (GT) Re-ID: Implementation & Training Guide
+
+This guide details the Ground Truth Re-ID system’s architecture, focusing on the management of globally consistent identities across multiple camera streams.
+
+---
+
+## 1. Architecture Overview
+The system achieves "perfect" Re-ID by bypassing visual feature extraction and spatial matching. It relies on a direct lookup between raw YOLO detections and pre-labeled Ground Truth (GT) data.
+
+### Core Components
+- **`GroundTruthReIDService`**: Manages the loading and querying of GT files.
+- **`DetectionVideoService`**: Integrates detections with GT identities.
+- **`GlobalPersonRegistry`**: Maintains the mapping between camera-specific track IDs and Global IDs.
+
+---
+
+## 2. Data Preparation & Management
+
+### Directory Structure
+Ground Truth files must be co-located with their respective video assets:
+```text
+videos/
+└── {environment_id}/           # e.g., 'campus' or 'factory'
+    └── gt/
+        ├── gt_c01.txt          # GT for Camera 01
+        ├── gt_c02.txt          # GT for Camera 02
+        └── ...
+```
+
+### File Format (MOT-Standard)
+Each line represents one object in one frame:
+`frame, id, x, y, w, h, conf, class, visibility`
+
+| Field | Description | Training Importance |
+| :--- | :--- | :--- |
+| **frame** | Frame number (starts at 0) | Temporal synchronization across cameras. |
+| **id** | **Global Identity** | The unique ID that links the same person across all cameras. |
+| **x, y, w, h**| Bounding Box (top-left, width, height) | Used to crop visual patches for training. |
+
+> [!IMPORTANT]
+> For Re-ID training, the `id` must be identical for the same person in `gt_c01.txt` and `gt_c02.txt`.
+
+---
+
+## 3. Global ID Assignment Logic
+
+The assignment happens in real-time during the `process_frame_with_tracking` pipeline when `ENABLE_GT_REID` is active.
+
+### The Lookup Flow
+1. **Detection**: YOLO generates a set of candidate bounding boxes for Camera A, Frame N.
+2. **IoU Matching**: The system iterates through all detections. For each detection, it calculates the **Intersection over Union (IoU)** against all GT entries for that specific frame/camera.
+3. **Association**:
+   - If `Max(IoU) > 0.3`, the detection is "matched" to the GT entry.
+   - The `person_id` from the GT entry is retrieved.
+4. **ID Injection**: 
+   - The visual detection inherits the `person_id`.
+   - `track['global_id'] = str(person_id)`
+   - The `GlobalPersonRegistry` is updated: `assign_identity(camera_id, track_id, global_id)`.
+
+### Cross-Camera Consistency
+Because the GT files were created with a global numbering scheme (e.g., Person 55 is always ID 55 in every file), assigning the GT ID directly solves the Re-ID problem. 
+
+---
+
+## 4. Training Re-ID Models with GT Data
+
+To train a visual Re-ID model (e.g., FastReID) using this Ground Truth setup, follow this sampling strategy:
+
+### Positive Sampling (Intra & Inter-Camera)
+- **Anchor**: Crop of Person 55 from Camera `c01` at Frame 1000.
+- **Positive 1 (Intra)**: Crop of Person 55 from Camera `c01` at Frame 1005 (Temporal variety).
+- **Positive 2 (Inter)**: Crop of Person 55 from Camera `c02` at Frame 1010 (Viewpoint variety).
+
+### Negative Sampling
+- **Negative**: Crop of any other ID (e.g., Person 60) from any camera.
+
+### Implementation Checklist for Training Scripts
+- [ ] **Synchronization**: Ensure frames across `c01` and `c02` are temporally aligned (Frame 100 in video A matches Frame 100 in video B).
+- [ ] **Normalization**: Convert the `x, y, w, h` from GT files to the actual pixel dimensions of your training crops.
+- [ ] **Filtering**: Only use GT entries with `visibility > 0.5` (if available in your dataset) to avoid training on occluded samples.
+
+---
+
+## 5. Summary Table
+
+| Step | Method | Result |
+| :--- | :--- | :--- |
+| **Ingestion** | `_load_ground_truth()` | Loads all `gt_*.txt` into a nested dict lookup. |
+| **Matching** | `_calculate_iou()` | Associates YOLO detections with GT metadata. |
+| **Global Sync** | Registry Update | Links local `track_id` to the universal `person_id`. |
+| **Verification** | `Pure GT Mode` | Bypasses all neural logic to ensure 100% ID accuracy for debugging. |
