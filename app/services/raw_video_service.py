@@ -338,12 +338,27 @@ class RawVideoService:
             
         finally:
             # Cleanup
+            if 'video_data' in locals():
+                self._release_resources(video_data)
+
             if task_id in self.active_tasks:
                 self.active_tasks.remove(task_id)
             if environment_id in self.environment_tasks:
                 del self.environment_tasks[environment_id]
             self._clear_client_watch(task_id)
             await self._cleanup_playback_task(task_id)
+    
+    def _release_resources(self, video_data: Dict[str, Any]):
+        """Explicitly release OpenCV video capture resources."""
+        if not video_data:
+            return
+            
+        for camera_id, data in video_data.items():
+            cap = data.get("video_capture")
+            if cap:
+                if cap.isOpened():
+                    cap.release()
+                data["video_capture"] = None
     
     async def _download_video_data(self, environment_id: str, sub_video_index: int = 0) -> Dict[str, Any]:
         """Download video data for the environment.

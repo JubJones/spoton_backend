@@ -2210,9 +2210,13 @@ class DetectionVideoService(RawVideoService):
                 
                 if self._task_marked_stopped(task_id):
                     logger.info(f"🛑 DETECTION PIPELINE: Task {task_id} stopped during sub-video batch {sub_idx + 1}")
+                    self._release_resources(video_data)  # Explicit cleanup
                     return
                 if not success:
                     logger.warning(f"⚠️ DETECTION PIPELINE: Detection failed for sub-video batch {sub_idx + 1}")
+                
+                # Explicitly release resources for this batch before the next one
+                self._release_resources(video_data)
                 
                 cumulative_frame_offset += frames_processed
                 logger.info(f"✅ DETECTION PIPELINE: Completed sub-video batch {sub_idx + 1}/{max_sub_videos} ({frames_processed} frames)")
@@ -2229,6 +2233,9 @@ class DetectionVideoService(RawVideoService):
             
         finally:
             # Cleanup
+            if 'video_data' in locals():
+                self._release_resources(video_data)
+            
             if task_id in self.active_tasks:
                 self.active_tasks.remove(task_id)
             if environment_id in self.environment_tasks:
@@ -2241,6 +2248,19 @@ class DetectionVideoService(RawVideoService):
                 pass
             self._clear_client_watch(task_id)
             await self._cleanup_playback_task(task_id)
+
+    def _release_resources(self, video_data: Dict[str, Any]):
+        """Explicitly release OpenCV video capture resources."""
+        if not video_data:
+            return
+            
+        for camera_id, data in video_data.items():
+            cap = data.get("video_capture")
+            if cap:
+                if cap.isOpened():
+                    cap.release()
+                data["video_capture"] = None
+        # logger.info("🧹 DETECTION PIPELINE: Released video resources")
     
     async def _process_frames_simple_detection(self, task_id: uuid.UUID, environment_id: str, video_data: Dict[str, Any], frame_offset: int = 0) -> tuple:
         """
