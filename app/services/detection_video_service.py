@@ -1189,6 +1189,10 @@ class DetectionVideoService(RawVideoService):
             if total_frames == 0:
                 logger.warning("No frames available for detection processing")
                 return False, 0
+
+            # Broadcast total_frames so frontend can show progress bar
+            if self.playback_status_store is not None:
+                await self.playback_status_store.set_total_frames(str(task_id), total_frames)
             
             frame_index = 0
             aborted_due_to_no_clients = False
@@ -1203,6 +1207,17 @@ class DetectionVideoService(RawVideoService):
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 DETECTION PROCESSING: Task {task_id} was stopped")
                     break
+
+                await self._wait_for_playback(task_id)
+
+                # Handle pending seek — jump all cameras to target frame
+                seek_target = self._apply_seek_if_pending(task_id, video_data)
+                if seek_target is not None:
+                    frame_index = seek_target
+                    if frame_index >= total_frames:
+                        break
+                    continue
+
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True
                     break
@@ -2250,6 +2265,10 @@ class DetectionVideoService(RawVideoService):
             if total_frames == 0:
                 logger.warning("No frames available for detection processing")
                 return False, 0
+
+            # Broadcast total_frames so frontend can show progress bar
+            if self.playback_status_store is not None:
+                await self.playback_status_store.set_total_frames(str(task_id), total_frames)
             
             frame_index = 0
             frames_processed = 0
@@ -2266,6 +2285,14 @@ class DetectionVideoService(RawVideoService):
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 SIMPLE DETECTION: Task {task_id} stopped during pause wait")
                     break
+
+                # Handle pending seek — jump all cameras to target frame
+                seek_target = self._apply_seek_if_pending(task_id, video_data)
+                if seek_target is not None:
+                    frame_index = seek_target
+                    if frame_index >= total_frames:
+                        break
+                    continue
 
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True
@@ -3132,6 +3159,10 @@ class DetectionVideoService(RawVideoService):
             if total_frames == 0:
                 logger.warning("No frames available for Phase 2 processing")
                 return False
+
+            # Broadcast total_frames so frontend can show progress bar
+            if self.playback_status_store is not None:
+                await self.playback_status_store.set_total_frames(str(task_id), total_frames)
             
             frame_index = 0
             frames_streamed = 0
@@ -3148,6 +3179,14 @@ class DetectionVideoService(RawVideoService):
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 PHASE 2 PROCESSING: Task {task_id} stopped during pause wait")
                     break
+
+                # Handle pending seek — jump all cameras to target frame
+                seek_target = self._apply_seek_if_pending(task_id, video_data)
+                if seek_target is not None:
+                    frame_index = seek_target
+                    if frame_index >= total_frames:
+                        break
+                    continue
 
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True

@@ -26,6 +26,7 @@ class PlaybackStatus:
     last_transition_at: datetime
     last_frame_index: Optional[int] = None
     last_error: Optional[str] = None
+    total_frames: Optional[int] = None
 
     def with_updates(
         self,
@@ -34,6 +35,7 @@ class PlaybackStatus:
         last_frame_index: Optional[int] = None,
         last_error: Optional[str] = None,
         transition_time: Optional[datetime] = None,
+        total_frames: Optional[int] = None,
     ) -> "PlaybackStatus":
         """Return a copy with updated fields while preserving immutability."""
 
@@ -47,6 +49,11 @@ class PlaybackStatus:
                 else self.last_frame_index
             ),
             last_error=last_error,
+            total_frames=(
+                total_frames
+                if total_frames is not None
+                else self.total_frames
+            ),
         )
 
 
@@ -145,6 +152,23 @@ class PlaybackStatusStore:
             current = self._ensure_default_status(task_id)
             updated = current.with_updates(
                 last_frame_index=frame_index,
+                transition_time=current.last_transition_at,
+            )
+            self._state[task_id] = updated
+            return updated
+
+    async def set_total_frames(
+        self,
+        task_id: str,
+        total_frames: int,
+    ) -> PlaybackStatus:
+        """Store the total frame count so clients can display progress."""
+
+        lock = self._locks[task_id]
+        async with lock:
+            current = self._ensure_default_status(task_id)
+            updated = current.with_updates(
+                total_frames=total_frames,
                 transition_time=current.last_transition_at,
             )
             self._state[task_id] = updated

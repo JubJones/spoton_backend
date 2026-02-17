@@ -106,6 +106,22 @@ class RawVideoService:
         if self.playback_status_store is not None:
             await self.playback_status_store.update_last_frame_index(str(task_id), frame_index)
 
+    def _apply_seek_if_pending(self, task_id: UUID, video_data: Dict[str, Any]) -> Optional[int]:
+        """Check for a pending seek and jump all VideoCaptures. Returns new frame_index or None."""
+        if self.playback_runtime_registry is None:
+            return None
+        runtime = self.playback_runtime_registry.get_runtime(str(task_id))
+        if runtime is None or runtime.seek_frame_index is None:
+            return None
+        target = runtime.seek_frame_index
+        runtime.seek_frame_index = None  # consume the seek request
+        import cv2
+        for camera_id, data in video_data.items():
+            cap = data.get("video_capture")
+            if cap and cap.isOpened():
+                cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        return target
+
     def _get_client_timeout_config(self, *, detection_mode: bool = False) -> Tuple[float, float]:
         """Resolve grace and idle timeouts for the current streaming mode."""
         if detection_mode:
@@ -415,6 +431,10 @@ class RawVideoService:
             if total_frames == 0:
                 logger.warning("No frames available for streaming")
                 return False
+
+            # Broadcast total_frames so frontend can show progress bar
+            if self.playback_status_store is not None:
+                await self.playback_status_store.set_total_frames(str(task_id), total_frames)
             
             frame_index = 0
             last_frame_time = time.time()
@@ -432,6 +452,14 @@ class RawVideoService:
                 if task_id not in self.active_tasks:
                     logger.info(f"📡 RAW STREAM: Task {task_id} stopped during pause wait")
                     break
+
+                # Handle pending seek — jump all cameras to target frame
+                seek_target = self._apply_seek_if_pending(task_id, video_data)
+                if seek_target is not None:
+                    frame_index = seek_target
+                    if frame_index >= total_frames:
+                        break
+                    continue  # re-enter loop with new frame_index
 
                 if not self._should_continue_stream(task_id, detection_mode=False):
                     aborted_due_to_no_clients = True

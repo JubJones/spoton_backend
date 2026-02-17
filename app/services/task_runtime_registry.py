@@ -17,6 +17,7 @@ class TaskRuntime:
     pause_event: asyncio.Event = field(default_factory=asyncio.Event)
     state: PlaybackState = PlaybackState.PLAYING
     last_frame_index: Optional[int] = None
+    seek_frame_index: Optional[int] = None
 
     def __post_init__(self) -> None:
         # Tasks start in playing state by default.
@@ -71,6 +72,19 @@ class TaskRuntimeRegistry:
         runtime = self._runtimes.get(task_id)
         if runtime is None:
             raise KeyError(task_id)
+        if runtime.state != PlaybackState.PLAYING:
+            runtime.state = PlaybackState.PLAYING
+            runtime.pause_event.set()
+        return runtime
+
+    async def seek_task(self, task_id: str, frame_index: int) -> TaskRuntime:
+        """Set a seek target and auto-resume if paused."""
+
+        runtime = self._runtimes.get(task_id)
+        if runtime is None:
+            raise KeyError(task_id)
+        runtime.seek_frame_index = frame_index
+        # Auto-resume so the streaming loop can process the seek
         if runtime.state != PlaybackState.PLAYING:
             runtime.state = PlaybackState.PLAYING
             runtime.pause_event.set()
