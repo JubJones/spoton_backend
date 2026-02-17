@@ -82,6 +82,35 @@ class PlaybackControlService:
         await self._status_store.remove(task_id)
         await self._runtime_registry.remove(task_id)
 
+    async def seek(self, task_id: str, frame_index: int) -> PlaybackStatus:
+        """Seek the task to the given frame index and resume playback."""
+
+        runtime = self._ensure_runtime(task_id)
+
+        # Validate against known total_frames if available
+        current_status = await self._status_store.get_status(task_id)
+        if current_status.total_frames is not None and frame_index >= current_status.total_frames:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"frame_index {frame_index} exceeds total_frames {current_status.total_frames}.",
+            )
+
+        await self._runtime_registry.seek_task(task_id, frame_index)
+        previous, updated = await self._status_store.transition(
+            task_id,
+            PlaybackState.PLAYING,
+            last_frame_index=frame_index,
+        )
+        logger.info(
+            "Playback seek requested",
+            extra={
+                "event": "playback_seek",
+                "task_id": task_id,
+                "target_frame": frame_index,
+            },
+        )
+        return updated
+
     def _ensure_runtime(self, task_id: str) -> TaskRuntime:
         runtime = self._runtime_registry.get_runtime(task_id)
         if runtime is None:

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends
 
-from app.api.v1.schemas import PlaybackStatusResponse
+from app.api.v1.schemas import PlaybackStatusResponse, SeekRequest
 from app.dependencies import get_playback_control_service
 from app.services.playback_control_service import PlaybackControlService
 from app.services.playback_status_store import PlaybackStatus
@@ -18,6 +18,7 @@ def _map_status(status: PlaybackStatus) -> PlaybackStatusResponse:
         last_transition_at=status.last_transition_at,
         last_frame_index=status.last_frame_index,
         last_error=status.last_error,
+        total_frames=status.total_frames,
     )
 
 
@@ -45,4 +46,14 @@ async def get_task_status(
     service: PlaybackControlService = Depends(get_playback_control_service),
 ) -> PlaybackStatusResponse:
     status = await service.get_status(task_id)
+    return _map_status(status)
+
+
+@router.post("/{task_id}/seek", response_model=PlaybackStatusResponse)
+async def seek_task(
+    task_id: str,
+    body: SeekRequest,
+    service: PlaybackControlService = Depends(get_playback_control_service),
+) -> PlaybackStatusResponse:
+    status = await service.seek(task_id, body.frame_index)
     return _map_status(status)

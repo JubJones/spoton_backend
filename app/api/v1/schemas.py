@@ -98,6 +98,12 @@ class PlaybackState(str, Enum):
     STOPPED = "stopped"
 
 
+class SeekRequest(BaseModel):
+    """Request body for a seek command."""
+
+    frame_index: int = Field(..., ge=0, description="Target frame index to seek to.")
+
+
 class PlaybackStatusResponse(BaseModel):
     """Represents the playback control status returned to clients."""
 
@@ -106,3 +112,4 @@ class PlaybackStatusResponse(BaseModel):
     last_transition_at: datetime
     last_frame_index: Optional[int] = None
     last_error: Optional[str] = None
+    total_frames: Optional[int] = None
