@@ -365,7 +365,7 @@ async def websocket_focus_tracking_endpoint(websocket: WebSocket, task_id: str):
 
     try:
         # Connect to binary WebSocket manager
-        connected = await binary_websocket_manager.connect(websocket, task_id)
+        connected = await binary_websocket_manager.connect(websocket, task_id, channels=["focus"])
 
         if not connected:
             logger.error(f"Failed to connect focus WebSocket for task_id: {task_id}")
@@ -445,7 +445,7 @@ async def websocket_analytics_endpoint(websocket: WebSocket, task_id: str):
 
     try:
         # Connect to binary WebSocket manager
-        connected = await binary_websocket_manager.connect(websocket, task_id)
+        connected = await binary_websocket_manager.connect(websocket, task_id, channels=["analytics"])
 
         if not connected:
             logger.error(f"Failed to connect analytics WebSocket for task_id: {task_id}")
