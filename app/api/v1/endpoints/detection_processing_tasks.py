@@ -17,6 +17,7 @@ from fastapi import APIRouter, HTTPException, Depends, BackgroundTasks, status
 from typing import Dict, Any
 import uuid
 import logging
+import asyncio
 from datetime import datetime
 
 from app.api.v1 import schemas
@@ -167,10 +168,20 @@ async def start_detection_processing_task_endpoint(
             # without lookup, we'll count all.
         ]
         if len(detection_service.active_tasks) >= settings.MAX_CONCURRENT_DETECTION_TASKS:
-             raise HTTPException(
-                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                 detail=f"Maximum concurrent detection tasks ({settings.MAX_CONCURRENT_DETECTION_TASKS}) reached. Please stop an existing task first."
-             )
+             logger.info(f"⚠️ Auto-stopping existing detection tasks to start new one (max {settings.MAX_CONCURRENT_DETECTION_TASKS}).")
+             # Stop existing tasks
+             active_ids = list(detection_service.active_tasks)
+             for active_task_id in active_ids:
+                 await detection_service.stop_raw_task(active_task_id)
+             
+             # Wait for cleanup (up to 2 seconds)
+             for _ in range(20):
+                 if not detection_service.active_tasks:
+                     break
+                 await asyncio.sleep(0.1)
+             
+             if detection_service.active_tasks:
+                 logger.warning("Old tasks did not clean up in time, proceeding with new task regardless.")
 
         # Prepare task options instead of mutating global settings
         task_options = {}
