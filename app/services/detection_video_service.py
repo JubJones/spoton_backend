@@ -157,23 +157,7 @@ class DetectionVideoService(RawVideoService):
                 logger.warning("Failed to initialize detection reprojection debugger: %s", exc)
                 self.enable_debug_reprojection = False
 
-        # Feature Flag: Tracking (defaults to True or global setting, override by task options)
-        tracking_enabled = True
-        if task_id:
-             task_state = self.tasks.get(task_id)
-             if task_state and "options" in task_state and "enable_tracking" in task_state["options"]:
-                 tracking_enabled = task_state["options"]["enable_tracking"]
-             else:
-                 tracking_enabled = getattr(settings, 'TRACKING_ENABLED', True)
 
-        if not tracking_enabled:
-             # Just return detections as tracks if tracking disabled
-             return {
-                 "detections": enhanced_detections,
-                 "tracks": [], 
-                 "detection_count": len(enhanced_detections),
-                 # ... other fields
-             }
 
         # Initialize trackers if needed
         # ... rest of tracking logic ...
