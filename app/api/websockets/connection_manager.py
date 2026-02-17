@@ -130,33 +130,32 @@ class BinaryWebSocketManager:
             # Wait for WebSocket to be fully ready - prevents race condition
             await asyncio.sleep(0.1)  # Increased delay to ensure connection is stable
             
-            # Verify WebSocket state after accept with retry
-            from fastapi.websockets import WebSocketState
-            for attempt in range(3):
-                if websocket.client_state == WebSocketState.CONNECTED:
-                    break
-                logger.warning(f"WebSocket not ready, attempt {attempt + 1}/3, state: {websocket.client_state}")
-                await asyncio.sleep(0.05)
-            
-            if websocket.client_state != WebSocketState.CONNECTED:
-                logger.error(f"WebSocket not in CONNECTED state after accept: {websocket.client_state}")
-                return False
-            
-            # Enforce 1-to-1 connection per task
+            # Enforce 1-to-1 connection per channel per task
+            # If a new connection requests channels that are already taken by an existing connection,
+            # disconnect the existing connection to allow the new one to take over.
             if task_id in self.active_connections and self.active_connections[task_id]:
-                # Force disconnect existing connections for this task to ensure 1-to-1 mapping
-                logger.info(f"New connection for task_id {task_id}, disconnecting {len(self.active_connections[task_id])} existing connection(s)")
+                new_channels = set(channels) if channels else {"tracking", "frames", "system"}
+                connections_to_disconnect = []
                 
-                # Iterate over a copy of the list since disconnect modifies it
-                for existing_ws in list(self.active_connections[task_id]):
-                    # Close the physical connection first with a specific code
-                    try:
-                        await existing_ws.close(code=1000, reason="New connection took over")
-                    except Exception as e:
-                        logger.warning(f"Error closing existing websocket during takeover: {e}")
+                for existing_ws in self.active_connections[task_id]:
+                    # Check if this existing connection has overlapping channels
+                    existing_channels = self.connection_channels.get(task_id, {}).get(existing_ws, set())
                     
-                    # Clean up internal state
-                    await self.disconnect(existing_ws, task_id)
+                    if not existing_channels.isdisjoint(new_channels):
+                        # Overlap detected - mark for disconnection
+                        logger.info(f"Channel conflict for task_id {task_id}: New {new_channels} conflicts with existing {existing_channels}")
+                        connections_to_disconnect.append(existing_ws)
+                
+                # Disconnect conflicting connections
+                if connections_to_disconnect:
+                    logger.info(f"Disconnecting {len(connections_to_disconnect)} conflicting connection(s) for task_id {task_id}")
+                    for ws in connections_to_disconnect:
+                        try:
+                            await ws.close(code=1000, reason="New connection took over channel")
+                        except Exception as e:
+                            logger.warning(f"Error closing existing websocket during channel takeover: {e}")
+                        
+                        await self.disconnect(ws, task_id)
             
             # Initialize connection tracking
             if task_id not in self.active_connections:
