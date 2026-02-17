@@ -226,15 +226,36 @@ class RawVideoService:
             logger.error(f"❌ RAW SERVICE INIT: Failed to initialize raw video services: {e}")
             return False
     
-    async def initialize_raw_task(self, environment_id: str) -> UUID:
+    async def initialize_raw_task(self, environment_id: str, options: Optional[Dict[str, Any]] = None) -> UUID:
         """Initialize a new raw video streaming task."""
         try:
             # Check if environment already has an active task
             if environment_id in self.environment_tasks:
                 existing_task_id = self.environment_tasks[environment_id]
+                
+                # Check if the existing task is actually active
                 if existing_task_id in self.active_tasks:
-                    logger.warning(f"Environment {environment_id} already has active raw task: {existing_task_id}")
-                    raise ValueError(f"Environment {environment_id} already has an active raw streaming task")
+                    existing_task_state = self.tasks.get(existing_task_id)
+                    is_stale = False
+                    
+                    if existing_task_state:
+                         status = existing_task_state.get("status")
+                         if status in ["STOPPED", "FAILED", "COMPLETED"]:
+                             is_stale = True
+                             logger.warning(f"Found stale task {existing_task_id} for environment {environment_id} with status {status}. Auto-cleaning.")
+                    
+                    if is_stale:
+                        # Auto-cleanup stale task association
+                        self.active_tasks.remove(existing_task_id)
+                        # We don't delete from self.tasks to keep history, but we clear the env lock
+                        del self.environment_tasks[environment_id]
+                    else:
+                        logger.warning(f"Environment {environment_id} already has active raw task: {existing_task_id}")
+                        raise ValueError(f"Environment {environment_id} already has an active raw streaming task")
+                else:
+                    # Task ID in env map but not active -> stale mapping
+                    logger.info(f"Clearing stale environment mapping for {environment_id} (task {existing_task_id} not active)")
+                    del self.environment_tasks[environment_id]
             
             # Generate new task ID
             task_id = uuid.uuid4()
