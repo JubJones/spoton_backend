@@ -642,6 +642,9 @@ class Settings(BaseSettings):
     PRELOAD_REID_MODEL: bool = Field(default=True, description="Preload Re-ID model at startup")
     PRELOAD_ENVIRONMENTS: List[str] = Field(default_factory=lambda: ["campus", "factory"], description="Environments to preload models for")
 
+    # Task Concurrency Control
+    MAX_CONCURRENT_DETECTION_TASKS: int = Field(default=1, description="Maximum number of concurrent detection tasks allowed")
+
     # Trail management settings
     START_TRAIL_CLEANUP: bool = Field(default=True, description="Start global trail cleanup background task")
     TRAIL_CLEANUP_INTERVAL_SECONDS: int = Field(default=10, description="Interval between trail cleanup runs")

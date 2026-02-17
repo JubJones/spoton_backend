@@ -157,16 +157,28 @@ async def start_detection_processing_task_endpoint(
     try:
         logger.info(f"🎬 DETECTION API REQUEST: Start detection processing task endpoint called for environment: {params.environment_id}")
         
-        # Apply per-request feature flags (backward compatible: only override if provided)
-        original_tracking = getattr(settings, 'TRACKING_ENABLED', True)
-        try:
-            if params.enable_tracking is not None:
-                settings.TRACKING_ENABLED = bool(params.enable_tracking)
-        except Exception:
-            pass
+        # Concurrency check
+        active_detection_tasks = [
+            t for t in detection_service.active_tasks 
+            # We can check mode primarily, though active_tasks is a set of UUIDs.
+            # Ideally we check the task state but for raw speed we can check count of active_tasks
+            # Since detection service inherits from raw, let's just count all active tasks for now 
+            # or filter if possible. Because we don't have easy access to task types in active_tasks set 
+            # without lookup, we'll count all.
+        ]
+        if len(detection_service.active_tasks) >= settings.MAX_CONCURRENT_DETECTION_TASKS:
+             raise HTTPException(
+                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                 detail=f"Maximum concurrent detection tasks ({settings.MAX_CONCURRENT_DETECTION_TASKS}) reached. Please stop an existing task first."
+             )
+
+        # Prepare task options instead of mutating global settings
+        task_options = {}
+        if params.enable_tracking is not None:
+             task_options["enable_tracking"] = bool(params.enable_tracking)
 
         # Initialize task state in the detection service
-        task_id = await detection_service.initialize_raw_task(params.environment_id)
+        task_id = await detection_service.initialize_raw_task(params.environment_id, options=task_options)
         logger.info(f"🆔 DETECTION API REQUEST: Task ID {task_id} created for environment {params.environment_id}")
 
         # Add the simplified detection pipeline to background tasks
@@ -188,11 +200,7 @@ async def start_detection_processing_task_endpoint(
             status_url=status_url,
             websocket_url=websocket_url
         )
-        # Restore global settings to avoid affecting other requests
-        try:
-            settings.TRACKING_ENABLED = original_tracking
-        except Exception:
-            pass
+
         return response
     except ValueError as ve:
         logger.warning(f"Value error starting detection task for environment {params.environment_id}: {ve}")

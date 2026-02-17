@@ -227,13 +227,12 @@ class BinaryWebSocketManager:
             if connection_key in self.connection_metrics:
                 del self.connection_metrics[connection_key]
             # Clean up channel and rate state
-            try:
-                if task_id in self.connection_channels and websocket in self.connection_channels[task_id]:
-                    del self.connection_channels[task_id][websocket]
-                del self._max_fps_by_conn[id(websocket)]
-                del self._last_frame_sent_at[id(websocket)]
-            except Exception:
-                pass
+            # Clean up channel and rate state
+            if task_id in self.connection_channels:
+                self.connection_channels[task_id].pop(websocket, None)
+                
+            self._max_fps_by_conn.pop(id(websocket), None)
+            self._last_frame_sent_at.pop(id(websocket), None)
             
             # Update performance stats
             self.performance_stats["active_connections"] -= 1
