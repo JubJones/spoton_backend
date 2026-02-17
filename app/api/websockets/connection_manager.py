@@ -142,6 +142,22 @@ class BinaryWebSocketManager:
                 logger.error(f"WebSocket not in CONNECTED state after accept: {websocket.client_state}")
                 return False
             
+            # Enforce 1-to-1 connection per task
+            if task_id in self.active_connections and self.active_connections[task_id]:
+                # Force disconnect existing connections for this task to ensure 1-to-1 mapping
+                logger.info(f"New connection for task_id {task_id}, disconnecting {len(self.active_connections[task_id])} existing connection(s)")
+                
+                # Iterate over a copy of the list since disconnect modifies it
+                for existing_ws in list(self.active_connections[task_id]):
+                    # Close the physical connection first with a specific code
+                    try:
+                        await existing_ws.close(code=1000, reason="New connection took over")
+                    except Exception as e:
+                        logger.warning(f"Error closing existing websocket during takeover: {e}")
+                    
+                    # Clean up internal state
+                    await self.disconnect(existing_ws, task_id)
+            
             # Initialize connection tracking
             if task_id not in self.active_connections:
                 self.active_connections[task_id] = []
