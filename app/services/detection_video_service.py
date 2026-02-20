@@ -1595,7 +1595,7 @@ class DetectionVideoService(RawVideoService):
                             "detection_id": detection["detection_id"],
                             "map_x": mx,
                             "map_y": my,
-                            "projection_successful": True,
+                            "projection_successful": detection.get("spatial_data", {}).get("projection_successful", True),
                             "foot_point": foot_point,
                             "coordinate_system": detection.get("spatial_data", {}).get("coordinate_system", "bev_map_meters"),
                             "trail": trail_data
