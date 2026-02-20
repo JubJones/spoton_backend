@@ -102,12 +102,33 @@ class WorldPlaneTransformer:
         return None
 
     def _load_homography_data(self) -> Dict[CameraID, np.ndarray]:
-        """Load homography matrices from JSON file."""
-        try:
-            with self.homography_file_path.open("r", encoding="utf-8") as fh:
-                data = json.load(fh)
-        except json.JSONDecodeError as exc:
-            raise ValueError(f"Invalid JSON in homography file {self.homography_file_path}: {exc}") from exc
+        """Load homography matrices from JSON file(s)."""
+        data = {"cameras": []}
+        files_to_load = []
+
+        if self.homography_file_path.is_dir():
+            files_to_load = sorted(list(self.homography_file_path.glob("*.json")))
+            if not files_to_load:
+                self.logger.warning("No .json files found in %s", self.homography_file_path)
+        else:
+            files_to_load = [self.homography_file_path]
+
+        for file_path in files_to_load:
+            try:
+                with file_path.open("r", encoding="utf-8") as fh:
+                    file_data = json.load(fh)
+                    
+                    if isinstance(file_data, dict) and isinstance(file_data.get("cameras"), list):
+                        data["cameras"].extend(file_data["cameras"])
+                    elif isinstance(file_data, dict):
+                        # Handle legacy top-level H_c01_to_world format by mixing it in
+                        for k, v in file_data.items():
+                            if k not in data and not k == "cameras":
+                                data[k] = v
+            except json.JSONDecodeError as exc:
+                self.logger.error("Invalid JSON in homography file %s: %s", file_path, exc)
+            except Exception as e:
+                self.logger.error("Error loading homography file %s: %s", file_path, e)
 
         matrices: Dict[CameraID, np.ndarray] = {}
         if isinstance(data, dict) and isinstance(data.get("cameras"), list):
