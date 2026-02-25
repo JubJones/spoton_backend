@@ -61,24 +61,16 @@ async def get_analytics_dashboard(
     uptime_days: int = Query(7, ge=1, le=30, description="Days of uptime history"),
 ):
     """Return consolidated analytics snapshot for dashboard rendering."""
-    from app.utils.mock_analytics_data import get_mock_dashboard_data, merge_with_real_data
-    
     # Get real data from database
     real_snapshot = await database_integration_service.get_dashboard_snapshot(
         environment_id=environment_id,
         window_hours=window_hours,
         uptime_history_days=uptime_days,
     )
-    
-    # Get mock data as base (with proper time distribution)
-    mock_snapshot = get_mock_dashboard_data(environment_id, window_hours, uptime_days)
-    
-    # Merge: real data takes priority over mock
-    merged_snapshot = merge_with_real_data(mock_snapshot, real_snapshot)
 
     return {
         "status": "success",
-        "data": merged_snapshot,
+        "data": real_snapshot,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
@@ -515,8 +507,6 @@ async def get_available_report_types():
 @router.get("/system/statistics")
 async def get_system_statistics():
     """Get comprehensive system analytics statistics."""
-    from app.utils.mock_analytics_data import get_mock_system_statistics, merge_with_real_data
-    
     try:
         # Get analytics engine statistics
         analytics_stats = await analytics_engine.get_analytics_statistics()
@@ -531,15 +521,9 @@ async def get_system_statistics():
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
         
-        # Get mock data as base
-        mock_data = get_mock_system_statistics()
-        
-        # Merge: real data takes priority over mock
-        merged_data = merge_with_real_data(mock_data, real_data)
-        
         return {
             "status": "success",
-            "data": merged_data,
+            "data": real_data,
             "timestamp": datetime.now(timezone.utc).isoformat()
         }
         
