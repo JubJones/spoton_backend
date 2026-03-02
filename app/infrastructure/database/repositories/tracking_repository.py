@@ -617,6 +617,120 @@ class TrackingRepository:
             logger.error(f"Error getting person statistics: {e}")
             raise
     
+    async def get_camera_dwell_times(
+        self,
+        environment_id: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """Get raw dwell times (min/max timestamp) per person per camera."""
+        try:
+            # Query group by camera and person to get dwell interval
+            query = self.db.query(
+                TrackingEvent.camera_id,
+                TrackingEvent.global_person_id,
+                func.min(TrackingEvent.timestamp).label('first_seen'),
+                func.max(TrackingEvent.timestamp).label('last_seen'),
+                func.count(TrackingEvent.id).label('detection_count')
+            ).filter(
+                TrackingEvent.environment_id == environment_id,
+                TrackingEvent.timestamp >= start_time,
+                TrackingEvent.timestamp <= end_time
+            ).group_by(TrackingEvent.camera_id, TrackingEvent.global_person_id)
+
+            results = query.all()
+            return [
+                {
+                    'camera_id': r.camera_id,
+                    'global_person_id': r.global_person_id,
+                    'first_seen': r.first_seen,
+                    'last_seen': r.last_seen,
+                    'detection_count': r.detection_count,
+                    'dwell_time': max(0.0, (r.last_seen - r.first_seen).total_seconds())
+                }
+                for r in results
+            ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting camera dwell times: {e}")
+            return []
+            
+    async def get_camera_traffic_flow(
+        self,
+        environment_id: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """Get traffic flow patterns (velocity, directional flow)."""
+        try:
+            query = self.db.query(
+                PersonTrajectory.camera_id,
+                PersonTrajectory.global_person_id,
+                func.avg(PersonTrajectory.velocity_x).label('avg_vx'),
+                func.avg(PersonTrajectory.velocity_y).label('avg_vy'),
+                func.count(PersonTrajectory.id).label('trajectory_count'),
+                func.max(PersonTrajectory.timestamp).label('last_timestamp')
+            ).filter(
+                PersonTrajectory.environment_id == environment_id,
+                PersonTrajectory.timestamp >= start_time,
+                PersonTrajectory.timestamp <= end_time
+            ).group_by(PersonTrajectory.camera_id, PersonTrajectory.global_person_id)
+
+            results = query.all()
+            return [
+                {
+                    'camera_id': r.camera_id,
+                    'global_person_id': r.global_person_id,
+                    'avg_vx': float(r.avg_vx) if r.avg_vx is not None else 0.0,
+                    'avg_vy': float(r.avg_vy) if r.avg_vy is not None else 0.0,
+                    'trajectory_count': r.trajectory_count,
+                    'last_timestamp': r.last_timestamp
+                }
+                for r in results
+            ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting camera traffic flow: {e}")
+            return []
+
+    async def get_heatmap_data(
+        self,
+        environment_id: str,
+        start_time: datetime,
+        end_time: datetime
+    ) -> List[Dict[str, Any]]:
+        """Get coordinates for heatmap generation. Samples data to prevent massive lists."""
+        try:
+            # We use a subquery or limit to avoid millions of points.
+            # However, for simplicity, we just filter by time and drop null pos.
+            query = self.db.query(
+                TrackingEvent.camera_id,
+                TrackingEvent.position_x,
+                TrackingEvent.position_y,
+                TrackingEvent.timestamp
+            ).filter(
+                TrackingEvent.environment_id == environment_id,
+                TrackingEvent.timestamp >= start_time,
+                TrackingEvent.timestamp <= end_time,
+                TrackingEvent.position_x.isnot(None),
+                TrackingEvent.position_y.isnot(None)
+            )
+            # Sample by picking maybe every 10th row using random or sequence logic, 
+            # or just take the raw list if not gigantic.
+            # Using limit to prevent memory blowout if huge data.
+            results = query.order_by(desc(TrackingEvent.timestamp)).limit(50000).all()
+            return [
+                {
+                    'camera_id': r.camera_id,
+                    'x': float(r.position_x),
+                    'y': float(r.position_y),
+                    'timestamp': r.timestamp
+                }
+                for r in results
+            ]
+        except SQLAlchemyError as e:
+            logger.error(f"Error getting heatmap data: {e}")
+            return []
+    
+    
     async def cleanup_old_data(self, days_to_keep: int = 30):
         """Clean up old tracking data."""
         try:

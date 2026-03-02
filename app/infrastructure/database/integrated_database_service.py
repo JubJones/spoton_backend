@@ -15,6 +15,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from contextlib import asynccontextmanager
 
+from app.core.config import settings
 from app.infrastructure.cache.tracking_cache import tracking_cache, CachedPersonState
 from app.infrastructure.database.repositories.tracking_repository import TrackingRepository
 from app.infrastructure.database.repositories.analytics_totals_repository import (
@@ -563,8 +564,12 @@ class IntegratedDatabaseService:
                     if len(uptime_series) > 1:
                         previous = uptime_series[-2].uptime_percent
                         snapshot["summary"]["uptime_delta_percent"] = round(latest_uptime - previous, 2)
+                        
+                # Keep track of which cameras we found in DB
+                db_camera_ids = set()
 
                 for totals_per_camera in camera_totals:
+                    db_camera_ids.add(totals_per_camera.camera_id)
                     camera_snapshot = {
                         "camera_id": totals_per_camera.camera_id,
                         "detections": totals_per_camera.detections,
@@ -609,6 +614,23 @@ class IntegratedDatabaseService:
 
         except Exception as exc:
             logger.error(f"Failed to build dashboard snapshot: {exc}")
+
+        # Pad missing cameras from the config templates even if DB fails
+        env_config = settings.ENVIRONMENT_TEMPLATES.get(environment_id, {})
+        template_cameras = env_config.get("cameras", {})
+        
+        # Collect currently assigned camera IDs
+        existing_cam_ids = {c["camera_id"] for c in snapshot.get("cameras", [])}
+
+        for cam_id, cam_config in template_cameras.items():
+            if cam_id not in existing_cam_ids:
+                snapshot["cameras"].append({
+                    "camera_id": cam_id,
+                    "detections": 0,
+                    "unique_entities": 0,
+                    "average_confidence_percent": 0.0,
+                    "uptime_percent": 0.0,
+                })
 
         return snapshot
     
