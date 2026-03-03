@@ -39,7 +39,8 @@ class HeaderLoggingMiddleware:
         if scope["type"] in ("http", "websocket"):
             headers = dict(scope.get("headers", []))
             headers_decoded = {k.decode('utf-8'): v.decode('utf-8') for k, v in headers.items()}
-            client_host, client_port = scope.get("client", (None, None))
+            client_info = scope.get("client")
+            client_host, client_port = client_info if client_info else (None, None)
             log_message = (
                 f"Incoming Request Scope:\n"
                 f"  Type: {scope['type']}\n"
