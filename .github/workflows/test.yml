@@ -2,9 +2,9 @@ name: spoton-backend-tests
 
 on:
   push:
-    branches: [ "main", "feat/*" ]
+    branches: [ "**" ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ "**" ]
 
 jobs:
   test:
