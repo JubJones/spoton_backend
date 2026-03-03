@@ -10,7 +10,8 @@ import numpy as np
 from app.core.config import settings
 from app.services.detection_video_service import DetectionVideoService
 
-async def test_gt_mode():
+
+async def _run_gt_mode_test():
     print("--- Testing Ground Truth Mode ---")
     
     # 1. Enable GT Mode in Settings Mock TEMPORARY
@@ -52,5 +53,10 @@ async def test_gt_mode():
 
     print("--- Test Complete ---")
 
+
+def test_gt_mode():
+    asyncio.run(_run_gt_mode_test())
+
+
 if __name__ == "__main__":
-    asyncio.run(test_gt_mode())
+    asyncio.run(_run_gt_mode_test())
