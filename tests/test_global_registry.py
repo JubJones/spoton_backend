@@ -73,3 +73,62 @@ def test_is_global_id_shared():
     
     registry.assign_identity("c2", 1, gid)
     assert registry.is_global_id_shared(gid)
+
+
+def test_allocate_new_id_monotonic(monkeypatch):
+    monkeypatch.setattr(GlobalPersonRegistry, "_id_counter", 0)
+    registry = GlobalPersonRegistry()
+
+    assert registry.allocate_new_id() == "P1"
+    assert registry.allocate_new_id() == "P2"
+
+
+def test_force_assign_identity_only_moves_target_track():
+    registry = GlobalPersonRegistry()
+    gid_original = "gid_orig"
+    gid_new = "gid_new"
+
+    registry.assign_identity("cam_A", 1, gid_original)
+    registry.assign_identity("cam_A", 2, gid_original)
+
+    registry.force_assign_identity("cam_A", 1, gid_new)
+
+    assert registry.get_global_id("cam_A", 1) == gid_new
+    assert registry.get_global_id("cam_A", 2) == gid_original
+    assert ("cam_A", "1") in registry.global_id_assignments[gid_new]
+    assert ("cam_A", "1") not in registry.global_id_assignments[gid_original]
+
+
+def test_assign_identity_same_value_is_noop():
+    registry = GlobalPersonRegistry()
+    gid = "person_42"
+
+    registry.assign_identity("cam_A", 7, gid)
+    registry.assign_identity("cam_A", 7, gid)
+
+    assignments = registry.global_id_assignments[gid]
+    assert assignments == {("cam_A", "7")}
+
+
+def test_merge_identity_removes_source_record():
+    registry = GlobalPersonRegistry()
+    gid_target = "target"
+    gid_source = "source"
+
+    registry.assign_identity("cam_A", 1, gid_target)
+    registry.assign_identity("cam_B", 2, gid_source)
+
+    registry.merge_identities(gid_target, gid_source)
+
+    assert registry.get_global_id("cam_B", 2) == gid_target
+    assert gid_source not in registry.global_id_assignments
+
+
+def test_is_global_id_shared_same_camera_only(monkeypatch):
+    registry = GlobalPersonRegistry()
+    gid = "solo"
+
+    registry.assign_identity("cam_A", 1, gid)
+    registry.assign_identity("cam_A", 2, gid)
+
+    assert not registry.is_global_id_shared(gid)
