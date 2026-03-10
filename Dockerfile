@@ -29,6 +29,8 @@ FROM base AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends \
   build-essential \
   python3-dev \
+  libgl1-mesa-glx libglib2.0-0 \
+  git \
   && rm -rf /var/lib/apt/lists/*
 
 RUN uv venv /opt/venv --python $(which python)
@@ -46,7 +48,8 @@ RUN /opt/venv/bin/python -m pip install \
 # Install application requirements
 COPY requirements/requirements.txt /tmp/requirements.txt
 RUN /opt/venv/bin/python -m pip install -r /tmp/requirements.txt && \
-  /opt/venv/bin/python -m pip install boxmot==15.0.2 --no-deps
+  /opt/venv/bin/python -m pip install boxmot==15.0.2 --no-deps && \
+  /opt/venv/bin/python -m pip install --no-cache-dir --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
 
 # ---- Runtime Stage ----
 FROM base AS runtime

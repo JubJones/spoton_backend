@@ -38,4 +38,4 @@ jobs:
       # Run all 163 offline backend tests (ignoring real DB / GPU availability)
       - name: Run Backend Tests
         run: |
-          .venv/bin/pytest tests/test_comprehensive_api.py tests/test_global_registry.py tests/test_ground_truth_mode.py tests/test_performance_metrics.py tests/test_trivial_100.py -v -p no:cov
+          uv run --no-sync pytest tests/test_comprehensive_api.py tests/test_global_registry.py tests/test_ground_truth_mode.py tests/test_performance_metrics.py tests/test_trivial_100.py -v -p no:cov
