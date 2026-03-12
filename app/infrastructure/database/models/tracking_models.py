@@ -140,6 +140,41 @@ class DetectionEvent(Base):
     )
 
 
+class ReidentificationFeedbackEvent(Base):
+    """Stores explicit user feedback about cross-camera re-identification quality."""
+
+    __tablename__ = 'reid_feedback_events'
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    updated_at = Column(
+        DateTime(timezone=True), nullable=False, default=func.now(), onupdate=func.now()
+    )
+
+    event_timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
+    global_person_id = Column(String(100), nullable=False, index=True)
+    candidate_person_id = Column(String(100), nullable=True, index=True)
+    match_id = Column(String(100), nullable=True, index=True)
+
+    camera_id = Column(String(50), nullable=False, index=True)
+    environment_id = Column(String(50), nullable=False, index=True)
+    frame_number = Column(Integer, nullable=True)
+    session_id = Column(String(100), nullable=True, index=True)
+
+    decision = Column(String(20), nullable=False)
+    confidence = Column(Float, nullable=True)
+    feedback_source = Column(String(50), nullable=True, default="frontend")
+    notes = Column(Text, nullable=True)
+    feedback_metadata = Column(JSONB, nullable=True)
+
+    __table_args__ = (
+        Index('idx_reid_feedback_person_time', 'global_person_id', 'event_timestamp'),
+        Index('idx_reid_feedback_camera_time', 'camera_id', 'event_timestamp'),
+        Index('idx_reid_feedback_decision', 'decision'),
+        Index('idx_reid_feedback_match', 'match_id'),
+    )
+
+
 class PersonTrajectory(Base):
     """
     Time-series table for person trajectory data.
