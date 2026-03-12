@@ -73,7 +73,8 @@ async def create_tables():
         from app.infrastructure.database.models.tracking_models import (
             TrackingEvent, DetectionEvent, PersonTrajectory, 
             PersonIdentity, AnalyticsAggregation, SessionRecord,
-            AnalyticsTotals, AnalyticsUptimeDaily, GeometricMetricsEvent
+            AnalyticsTotals, AnalyticsUptimeDaily, GeometricMetricsEvent,
+            ReidentificationFeedbackEvent,
         )
         
         # Create tables
