@@ -31,14 +31,11 @@ def evaluate_all(cameras, env, use_reid=False):
             
         gt_path = f"videos/gt/{env}/gt_{cam}.txt"
         
-        # Determine the correct model based on environment
+        # Determine the correct model based on environment (Strictly TensorRT Engine)
         if env == 'factory':
-            model_path = "weights/yolo26m_factory.pt"
-            # Fallback for TensorRT if testing locally on GPU
-            if not os.path.exists(model_path) and os.path.exists("weights/yolo26m_factory.engine"):
-                model_path = "weights/yolo26m_factory.engine"
+            model_path = "weights/yolo26m_factory.engine"
         else:
-            model_path = f"weights/yolo26m_{env}.pt"
+            model_path = "weights/yolo26m_campus.engine"
             
         out_file = f"pred_eval_{cam}.txt"
         
