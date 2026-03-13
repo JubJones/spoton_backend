@@ -115,7 +115,7 @@ async def measure_latency(video_path, model_path, max_frames=200):
     res = f"""
 | Pipeline Stage | Average Latency (ms) |
 | --- | --- |
-| Object Detection (YOLOv11) | {det_avg:.1f}ms |
+| Object Detection (YOLO26m) | {det_avg:.1f}ms |
 | Data Association (ByteTrack) | {trk_avg:.1f}ms |
 | Feature Extraction (OSNet) | {reid_avg:.1f}ms |
 | **Total End-to-End Processing** | **{total_avg:.1f}ms** |
@@ -214,7 +214,7 @@ To capture real qualitative visual results for Figures 4 and 6, follow these exa
         f.write(guide)
 
 if __name__ == "__main__":
-    asyncio.run(measure_latency('videos/c09.mp4', 'weights/yolo26m_factory.pt', max_frames=200))
+    asyncio.run(measure_latency('videos/c09.mp4', 'weights/yolo26m_factory.engine', max_frames=200))
     generate_ablation_chart()
     print_qualitative_guide()
     
