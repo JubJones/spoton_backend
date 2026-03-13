@@ -24,7 +24,11 @@ def evaluate_all(cameras, env, use_reid=False):
     # Process each camera
     for cam in cameras:
         print(f"\n--- Processing Camera: {cam} ---")
-        video_path = f"videos/{cam}.mp4"
+        if env == 'factory':
+            video_path = f"videos/{cam}.mp4"
+        else:
+            video_path = f"videos/campus/{cam}/sub_video_01.mp4"
+            
         gt_path = f"videos/gt/{env}/gt_{cam}.txt"
         
         # Determine the correct model based on environment
