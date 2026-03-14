@@ -11,6 +11,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts.evaluate_mot import process_video, evaluate_mot, load_custom_gt
 import motmetrics as mm
 
+# Import newly created script logic
+from scripts.compute_map import get_map
+
 def evaluate_all(cameras, env, use_reid=False):
     print(f"\n{'='*50}")
     print(f"Starting Consolidated Evaluation for: {cameras}")
@@ -70,10 +73,20 @@ def evaluate_all(cameras, env, use_reid=False):
                 ts.reset_index(inplace=True)
                 ts['FrameId'] = ts['FrameId'] + gt_start_frame - 1
                 ts.set_index(['FrameId', 'Id'], inplace=True)
+                
+            # --- FIX: Filter GT to only include frames present in TS (Prediction) ---
+            # This prevents penalizing for missing frames in short video snippets
+            ts_frames = ts.index.get_level_values('FrameId').unique()
+            gt = gt[gt.index.get_level_values('FrameId').isin(ts_frames)]
+            # -----------------------------------------------------------------------
             
             acc = mm.utils.compare_to_groundtruth(gt, ts, 'iou', distth=0.5)
+            
+            # Custom mAP calculation
+            ap = get_map(gt_path, out_file, iou_thresh=0.5)
+            
             # Give it a name corresponding to the camera
-            all_accs.append((cam, acc))
+            all_accs.append((cam, acc, ap))
         except Exception as e:
             print(f"Error evaluating {cam}: {e}")
 
@@ -87,14 +100,14 @@ def evaluate_all(cameras, env, use_reid=False):
         return
 
     summary = mh.compute_many(
-        [acc for name, acc in all_accs], 
+        [acc for name, acc, ap in all_accs], 
         metrics=['mota', 'idf1', 'num_switches', 'recall', 'precision'],
-        names=[name for name, acc in all_accs],
+        names=[name for name, acc, ap in all_accs],
         generate_overall=False
     )
     
     # We don't need pandas to break on us. We'll do it by hand.
-    headers = ["Camera", "MOTA", "IDF1", "ID Switches", "Recall", "Precision"]
+    headers = ["Camera", "MOTA", "IDF1", "ID Switches", "Recall", "Precision", "mAP@50"]
     
     rows = []
     for i, cam_name in enumerate(summary.index):
@@ -105,6 +118,7 @@ def evaluate_all(cameras, env, use_reid=False):
         sw = row_series.get('num_switches', 0)
         rec = row_series.get('recall', 0)
         prec = row_series.get('precision', 0)
+        ap = all_accs[i][2] # Get exactly matching ap
         
         def sfmt(v, pct):
             if pd.isna(v): return "NaN"
@@ -116,7 +130,8 @@ def evaluate_all(cameras, env, use_reid=False):
             sfmt(idf1, True),
             sfmt(sw, False),
             sfmt(rec, True),
-            sfmt(prec, True)
+            sfmt(prec, True),
+            sfmt(ap, True)
         ])
     
     final_df = pd.DataFrame(rows, columns=headers)
