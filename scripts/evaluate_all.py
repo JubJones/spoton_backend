@@ -74,11 +74,7 @@ def evaluate_all(cameras, env, use_reid=False):
                 ts['FrameId'] = ts['FrameId'] + gt_start_frame - 1
                 ts.set_index(['FrameId', 'Id'], inplace=True)
                 
-            # --- FIX: Filter GT to only include frames present in TS (Prediction) ---
-            # This prevents penalizing for missing frames in short video snippets
-            ts_frames = ts.index.get_level_values('FrameId').unique()
-            gt = gt[gt.index.get_level_values('FrameId').isin(ts_frames)]
-            # -----------------------------------------------------------------------
+            # Removed artificial GT filtering to correctly penalize False Negatives
             
             acc = mm.utils.compare_to_groundtruth(gt, ts, 'iou', distth=0.5)
             

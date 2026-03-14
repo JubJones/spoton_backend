@@ -51,17 +51,12 @@ def get_map(gt_path, pred_path, iou_thresh=0.5):
     pred['X2'] = pred['X'] + pred['W']
     pred['Y2'] = pred['Y'] + pred['H']
     
-    # Get offset if needed (align frames)
+    # Align the 1-indexed prediction frames to the global ground truth frames
     gt_start = gt['FrameId'].min()
-    pred_start = pred['FrameId'].min()
-    
-    if gt_start > pred_start and gt_start > 1000:
-        pred['FrameId'] = pred['FrameId'] + gt_start - pred_start
+    if gt_start > 1000:
+        pred['FrameId'] = pred['FrameId'] + gt_start - 1
         
-    # --- FIX: Filter GT to only include frames present in Pred ---
-    pred_frames = pred['FrameId'].unique()
-    gt = gt[gt['FrameId'].isin(pred_frames)]
-    # -----------------------------------------------------------
+    # Removed artificial GT filtering to correctly penalize False Negatives
         
     # Prepare GT
     gt_boxes_by_frame = {}
