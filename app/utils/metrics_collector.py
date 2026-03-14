@@ -178,7 +178,7 @@ class ProductionMetricsCollector:
         
         # Metrics storage
         self.metrics_data: Dict[str, deque] = defaultdict(lambda: deque(maxlen=self.max_data_points))
-        self.pipeline_metrics = PipelineMetrics()
+        self.pipeline_metrics_by_env: Dict[str, PipelineMetrics] = defaultdict(PipelineMetrics)
         self.resource_metrics = ResourceMetrics()
         self.quality_metrics = QualityMetrics()
         self.playback_transition_counts: Dict[str, int] = defaultdict(int)
@@ -314,7 +314,7 @@ class ProductionMetricsCollector:
             logger.error(f"Error collecting system metrics: {e}")
             self.collection_stats['collection_errors'] += 1
     
-    def record_pipeline_metrics(self, detection_time: float, tracking_time: float = 0.0,
+    def record_pipeline_metrics(self, environment_id: str, detection_time: float, tracking_time: float = 0.0,
                               reid_time: float = 0.0, homography_time: float = 0.0,
                               detection_count: int = 0, reid_success: bool = False,
                               homography_success: bool = False):
@@ -334,18 +334,21 @@ class ProductionMetricsCollector:
             current_time = time.time()
             
             # Add to pipeline metrics
-            self.pipeline_metrics.add_frame_metrics(
+            env_key = environment_id or 'default'
+            pipeline_metrics = self.pipeline_metrics_by_env[env_key]
+            
+            pipeline_metrics.add_frame_metrics(
                 detection_time, tracking_time, reid_time, homography_time,
                 detection_count, reid_success, homography_success
             )
             
             # Record individual component metrics
-            self._add_metric_point('detection_time_ms', detection_time * 1000, current_time)
-            self._add_metric_point('tracking_time_ms', tracking_time * 1000, current_time)
-            self._add_metric_point('reid_time_ms', reid_time * 1000, current_time)
-            self._add_metric_point('homography_time_ms', homography_time * 1000, current_time)
-            self._add_metric_point('detection_count', detection_count, current_time)
-            self._add_metric_point('pipeline_fps', self.pipeline_metrics.pipeline_throughput, current_time)
+            self._add_metric_point(f'detection_time_ms_{env_key}', detection_time * 1000, current_time)
+            self._add_metric_point(f'tracking_time_ms_{env_key}', tracking_time * 1000, current_time)
+            self._add_metric_point(f'reid_time_ms_{env_key}', reid_time * 1000, current_time)
+            self._add_metric_point(f'homography_time_ms_{env_key}', homography_time * 1000, current_time)
+            self._add_metric_point(f'detection_count_{env_key}', detection_count, current_time)
+            self._add_metric_point(f'pipeline_fps_{env_key}', pipeline_metrics.pipeline_throughput, current_time)
             
             # Update quality metrics
             self._update_quality_metrics()
@@ -421,11 +424,17 @@ class ProductionMetricsCollector:
     def _update_quality_metrics(self):
         """Update quality and SLA metrics based on recent performance."""
         try:
-            if not self.pipeline_metrics.total_frame_times:
+            all_times = []
+            total_fps = 0.0
+            for pm in self.pipeline_metrics_by_env.values():
+                all_times.extend(list(pm.total_frame_times)[-100:])
+                total_fps += pm.pipeline_throughput
+                
+            if not all_times:
                 return
             
             # Calculate response time percentiles
-            recent_times = list(self.pipeline_metrics.total_frame_times)[-100:]  # Last 100 frames
+            recent_times = all_times[-100:]  # Last 100 frames across all envs
             if recent_times:
                 self.quality_metrics.avg_response_time = statistics.mean(recent_times) * 1000  # ms
                 sorted_times = sorted(recent_times)
@@ -434,7 +443,7 @@ class ProductionMetricsCollector:
                 self.quality_metrics.p99_response_time = sorted_times[int(n * 0.99)] * 1000  # ms
             
             # Calculate throughput
-            self.quality_metrics.frames_per_second = self.pipeline_metrics.pipeline_throughput
+            self.quality_metrics.frames_per_second = total_fps
             
             # Calculate uptime
             uptime_seconds = time.time() - self.start_time
@@ -583,12 +592,16 @@ class ProductionMetricsCollector:
                     'disk_usage_percent': self.resource_metrics.disk_usage
                 },
                 'pipeline_metrics': {
-                    'frames_processed': self.pipeline_metrics.frames_processed,
-                    'current_fps': self.pipeline_metrics.pipeline_throughput,
-                    'avg_detection_time_ms': statistics.mean(self.pipeline_metrics.detection_times[-100:]) * 1000 if self.pipeline_metrics.detection_times else 0,
-                    'avg_total_time_ms': statistics.mean(self.pipeline_metrics.total_frame_times[-100:]) * 1000 if self.pipeline_metrics.total_frame_times else 0,
-                    'total_detections': sum(self.pipeline_metrics.detection_counts),
-                    'global_id_assignments': self.pipeline_metrics.global_id_assignments
+                    env: {
+                        'frames_processed': metrics.frames_processed,
+                        'current_fps': metrics.pipeline_throughput,
+                        'avg_detection_time_ms': statistics.mean(metrics.detection_times[-100:]) * 1000 if metrics.detection_times else 0,
+                        'avg_total_time_ms': statistics.mean(metrics.total_frame_times[-100:]) * 1000 if metrics.total_frame_times else 0,
+                        'avg_homography_time_ms': statistics.mean(metrics.homography_times[-100:]) * 1000 if metrics.homography_times else 0,
+                        'total_detections': sum(metrics.detection_counts),
+                        'global_id_assignments': metrics.global_id_assignments
+                    }
+                    for env, metrics in self.pipeline_metrics_by_env.items()
                 },
                 'quality_metrics': {
                     'avg_response_time_ms': self.quality_metrics.avg_response_time,
@@ -667,13 +680,14 @@ class ProductionMetricsCollector:
             lines.append(f"# TYPE spoton_memory_usage_percent gauge")
             lines.append(f"spoton_memory_usage_percent {self.resource_metrics.memory_usage}")
             
-            lines.append(f"# HELP spoton_pipeline_fps Pipeline processing rate in frames per second")
-            lines.append(f"# TYPE spoton_pipeline_fps gauge")
-            lines.append(f"spoton_pipeline_fps {self.pipeline_metrics.pipeline_throughput}")
-            
-            lines.append(f"# HELP spoton_frames_processed_total Total frames processed")
-            lines.append(f"# TYPE spoton_frames_processed_total counter")
-            lines.append(f"spoton_frames_processed_total {self.pipeline_metrics.frames_processed}")
+            for env, metrics in self.pipeline_metrics_by_env.items():
+                lines.append(f"# HELP spoton_pipeline_fps_{env} Pipeline processing rate in frames per second for {env}")
+                lines.append(f"# TYPE spoton_pipeline_fps_{env} gauge")
+                lines.append(f"spoton_pipeline_fps_{env} {metrics.pipeline_throughput}")
+                
+                lines.append(f"# HELP spoton_frames_processed_total_{env} Total frames processed for {env}")
+                lines.append(f"# TYPE spoton_frames_processed_total_{env} counter")
+                lines.append(f"spoton_frames_processed_total_{env} {metrics.frames_processed}")
             
             lines.append(f"# HELP spoton_active_alerts Number of active alerts")
             lines.append(f"# TYPE spoton_active_alerts gauge")
