@@ -1,0 +1,41 @@
+name: spoton-backend-tests
+
+on:
+  push:
+    branches: [ "**" ]
+  pull_request:
+    branches: [ "**" ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Install the modern uv package manager
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+
+      # Install Python 3.12 via uv
+      - name: Setup Python
+        run: uv python install 3.12
+
+      # Linux-specific dependencies needed to install cv2, psycopg2, and torchreid
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgl1 python3-dev libpq-dev
+
+      # Force CPU versions of ML libraries to keep CI fast and cheap
+      # Install project using the dev and cpu extras
+      - name: Install dependencies 
+        run: |
+          uv venv
+          uv pip install numpy cython tensorboard
+          uv pip install -e ".[dev,cpu]" --extra-index-url https://download.pytorch.org/whl/cpu
+          uv pip install --no-build-isolation git+https://github.com/KaiyangZhou/deep-person-reid.git
+      
+      # Run all 163 offline backend tests (ignoring real DB / GPU availability)
+      - name: Run Backend Tests
+        run: |
+          uv run --no-sync pytest tests/test_comprehensive_api.py tests/test_global_registry.py tests/test_ground_truth_mode.py tests/test_performance_metrics.py tests/test_trivial_100.py -v -p no:cov

@@ -2674,12 +2674,29 @@ class DetectionVideoService(RawVideoService):
                     effective_fps = 0.0
                 
                 # Log batch timing
+                # Log batch timing
                 speed_optimize_logger.info(
-                    "[SPEED_DEBUG] MEGA-BATCH Frames=%d-%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d BatchSize=%d FPS=%.1f (Eff: %.1f)",
-                    frame_index, frame_index + frames_read_per_camera - 1, _batch_time,
+                    "[SPEED_DEBUG] MEGA-BATCH Env=%s Frames=%d-%d | Total=%.1fms | Read=%.1fms BatchDet=%.1fms Track=%.1fms SpaceMatch=%.1fms Enc=%.1fms WsSend=%.1fms | Cams=%d BatchSize=%d FPS=%.1f (Eff: %.1f)",
+                    environment_id, frame_index, frame_index + frames_read_per_camera - 1, _batch_time,
                     _read_time, _batch_det_time, _track_time, _space_match_time, _enc_time, _ws_time,
                     num_cameras, len(accumulated_frames), raw_fps, effective_fps
                 )
+                
+                # Record metrics to central collector
+                try:
+                    from app.utils.metrics_collector import production_metrics_collector
+                    num_frames = max(1, len(accumulated_frames))
+                    production_metrics_collector.record_pipeline_metrics(
+                        environment_id=environment_id,
+                        detection_time=_batch_det_time / num_frames / 1000.0,
+                        tracking_time=_track_time / num_frames / 1000.0,
+                        reid_time=0.0,
+                        homography_time=_space_match_time / num_frames / 1000.0,
+                        detection_count=frames_processed,
+                        homography_success=(_space_match_time > 0.0)
+                    )
+                except Exception as e:
+                    logger.debug(f"Failed to record pipeline metrics: {e}")
                 
                 # Update progress every 30 frames
                 if frame_index % 30 == 0:

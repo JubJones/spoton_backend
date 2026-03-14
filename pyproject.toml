@@ -71,7 +71,7 @@ gpu = [
     "torchaudio==2.2.1+cu121", # TorchAudio with CUDA 12.1 support
 ]
 cpu = [
-    "faiss-cpu>=1.7.4,<1.8.0", # CPU version of FAISS
+    "faiss-cpu>=1.7.4", # CPU version of FAISS
     "torch>=2.2.0", # PyTorch CPU version
     "torchvision>=0.17.0", # TorchVision CPU version
     "torchaudio>=2.2.0", # TorchAudio CPU version
