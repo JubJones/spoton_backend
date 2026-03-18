@@ -18,7 +18,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from app.infrastructure.database.models.tracking_models import (
     TrackingEvent, DetectionEvent, PersonTrajectory, PersonIdentity,
-    AnalyticsAggregation, SessionRecord
+    AnalyticsAggregation, SessionRecord, ReidentificationFeedbackEvent
 )
 from app.infrastructure.database.base import get_db
 from app.shared.types import CameraID
@@ -534,7 +534,117 @@ class TrackingRepository:
             logger.error(f"Error updating session record: {e}")
             self.db.rollback()
             raise
-    
+
+    # Feedback Events
+    async def record_reidentification_feedback(
+        self,
+        *,
+        global_person_id: str,
+        camera_id: str,
+        environment_id: str,
+        decision: str,
+        candidate_person_id: Optional[str] = None,
+        match_id: Optional[str] = None,
+        frame_number: Optional[int] = None,
+        event_timestamp: Optional[datetime] = None,
+        session_id: Optional[str] = None,
+        source: Optional[str] = None,
+        confidence: Optional[float] = None,
+        notes: Optional[str] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> ReidentificationFeedbackEvent:
+        """Persist a user feedback event for Re-ID quality."""
+        try:
+            feedback_event = ReidentificationFeedbackEvent(
+                global_person_id=global_person_id,
+                candidate_person_id=candidate_person_id,
+                match_id=match_id,
+                camera_id=camera_id,
+                environment_id=environment_id,
+                frame_number=frame_number,
+                session_id=session_id,
+                decision=decision,
+                confidence=confidence,
+                feedback_source=source or "frontend",
+                notes=notes,
+                feedback_metadata=metadata,
+                event_timestamp=event_timestamp or datetime.now(timezone.utc),
+            )
+
+            self.db.add(feedback_event)
+            self.db.commit()
+            self.db.refresh(feedback_event)
+
+            return feedback_event
+
+        except SQLAlchemyError as e:
+            logger.error(f"Error recording Re-ID feedback: {e}")
+            self.db.rollback()
+            raise
+
+    async def list_reidentification_feedback(
+        self,
+        *,
+        global_person_id: Optional[str] = None,
+        candidate_person_id: Optional[str] = None,
+        match_id: Optional[str] = None,
+        camera_id: Optional[str] = None,
+        environment_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        decision: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[ReidentificationFeedbackEvent], int]:
+        """Return paginated Re-ID feedback entries for UI consumption."""
+        try:
+            query = self.db.query(ReidentificationFeedbackEvent)
+
+            if global_person_id:
+                query = query.filter(
+                    ReidentificationFeedbackEvent.global_person_id == global_person_id
+                )
+            if candidate_person_id:
+                query = query.filter(
+                    ReidentificationFeedbackEvent.candidate_person_id == candidate_person_id
+                )
+            if match_id:
+                query = query.filter(ReidentificationFeedbackEvent.match_id == match_id)
+            if camera_id:
+                query = query.filter(ReidentificationFeedbackEvent.camera_id == camera_id)
+            if environment_id:
+                query = query.filter(
+                    ReidentificationFeedbackEvent.environment_id == environment_id
+                )
+            if session_id:
+                query = query.filter(ReidentificationFeedbackEvent.session_id == session_id)
+            if decision:
+                query = query.filter(ReidentificationFeedbackEvent.decision == decision)
+            if start_time:
+                query = query.filter(
+                    ReidentificationFeedbackEvent.event_timestamp >= start_time
+                )
+            if end_time:
+                query = query.filter(
+                    ReidentificationFeedbackEvent.event_timestamp <= end_time
+                )
+
+            total = query.count()
+
+            items = (
+                query.order_by(desc(ReidentificationFeedbackEvent.event_timestamp))
+                .offset(offset)
+                .limit(limit)
+                .all()
+            )
+
+            return items, total
+
+        except SQLAlchemyError as e:
+            logger.error(f"Error listing Re-ID feedback: {e}")
+            raise
+
     # Analytics and Aggregations
     async def get_detection_statistics(
         self,
