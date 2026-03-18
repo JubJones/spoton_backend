@@ -8,5 +8,6 @@ from .tracking_models import (
     SessionRecord,
     AnalyticsTotals,
     AnalyticsUptimeDaily,
-    GeometricMetricsEvent
+    GeometricMetricsEvent,
+    ReidentificationFeedbackEvent,
 )
