@@ -33,12 +33,15 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - PYTORCH_VARIANT_BUILD=cpu
+      # App Configuration
+      - PYTHONPATH=/app
       # CPU-optimized settings
       - OMP_NUM_THREADS=4
       - PYTORCH_NUM_THREADS=4
       - TARGET_FPS=3                    # Reduced FPS for CPU processing
       - FRAME_JPEG_QUALITY=70           # Lower quality for faster processing
       - DETECTION_CONFIDENCE_THRESHOLD=0.7  # Higher threshold to reduce processing
+      - ENABLE_GT_REID=true                 # Run pure ground-truth pipeline for CPU
       # Docker networking
       - REDIS_HOST=redis
       - POSTGRES_SERVER=timescaledb
