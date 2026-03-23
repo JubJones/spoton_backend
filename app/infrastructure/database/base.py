@@ -100,26 +100,25 @@ async def create_hypertables():
         if engine is None:
             logger.info("Hypertables creation skipped (DB disabled)")
             return
-        with engine.connect() as conn:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
             # Create hypertables for time-series tables
             hypertable_queries = [
-                "SELECT create_hypertable('tracking_events', 'timestamp', if_not_exists => TRUE);",
-                "SELECT create_hypertable('detection_events', 'timestamp', if_not_exists => TRUE);",
-                "SELECT create_hypertable('person_trajectories', 'timestamp', if_not_exists => TRUE);",
-                "SELECT create_hypertable('analytics_aggregations', 'time_bucket', if_not_exists => TRUE);",
-                "SELECT create_hypertable('analytics_totals', 'bucket_start', if_not_exists => TRUE);"
+                "SELECT create_hypertable('tracking_events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);",
+                "SELECT create_hypertable('detection_events', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);",
+                "SELECT create_hypertable('person_trajectories', 'timestamp', if_not_exists => TRUE, migrate_data => TRUE);",
+                "SELECT create_hypertable('analytics_aggregations', 'time_bucket', if_not_exists => TRUE, migrate_data => TRUE);",
+                "SELECT create_hypertable('analytics_totals', 'bucket_start', if_not_exists => TRUE, migrate_data => TRUE);"
             ]
             
             for query in hypertable_queries:
                 try:
                     conn.execute(text(query))
-                    pass # logger.debug(f"Executed hypertable query: {query}")
                 except SQLAlchemyError as e:
-                    # Hypertable might already exist
-                    if "already exists" not in str(e):
+                    error_str = str(e).lower()
+                    # Hypertable might already exist or table is not empty
+                    if "already exists" not in error_str and "not empty" not in error_str:
                         logger.warning(f"Error creating hypertable: {e}")
             
-            conn.commit()
             logger.info("TimescaleDB hypertables created successfully")
             
     except SQLAlchemyError as e:
@@ -138,18 +137,18 @@ async def create_indexes():
             # Additional indexes for performance
             index_queries = [
                 # Composite indexes for common queries
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracking_events_person_camera_time ON tracking_events(global_person_id, camera_id, timestamp);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_detection_events_camera_confidence ON detection_events(camera_id, confidence, timestamp);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_person_trajectories_person_seq ON person_trajectories(global_person_id, sequence_number, timestamp);",
+                "CREATE INDEX IF NOT EXISTS idx_tracking_events_person_camera_time ON tracking_events(global_person_id, camera_id, timestamp);",
+                "CREATE INDEX IF NOT EXISTS idx_detection_events_camera_time_conf ON detection_events(camera_id, timestamp, confidence);",
+                "CREATE INDEX IF NOT EXISTS idx_person_trajectories_person_seq ON person_trajectories(global_person_id, sequence_number, timestamp);",
                 
                 # GIN indexes for JSON columns
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_tracking_events_metadata_gin ON tracking_events USING GIN(event_metadata);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_detection_events_metadata_gin ON detection_events USING GIN(detection_metadata);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_person_identities_embedding_gin ON person_identities USING GIN(primary_embedding);",
+                "CREATE INDEX IF NOT EXISTS idx_tracking_events_metadata_gin ON tracking_events USING GIN(event_metadata);",
+                "CREATE INDEX IF NOT EXISTS idx_detection_events_metadata_gin ON detection_events USING GIN(detection_metadata);",
+                "CREATE INDEX IF NOT EXISTS idx_person_identities_embedding_gin ON person_identities USING GIN(primary_embedding);",
                 
                 # Performance indexes
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_person_identities_last_seen_active ON person_identities(last_seen_at, is_active);",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_session_records_environment_status ON session_records(environment_id, status, start_time);"
+                "CREATE INDEX IF NOT EXISTS idx_person_identities_last_seen_active ON person_identities(last_seen_at, is_active);",
+                "CREATE INDEX IF NOT EXISTS idx_session_records_environment_status ON session_records(environment_id, status, start_time);"
             ]
             
             for query in index_queries:

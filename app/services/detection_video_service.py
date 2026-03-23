@@ -345,7 +345,7 @@ class DetectionVideoService(RawVideoService):
 
             # Initialize Ground Truth Re-ID Service for this environment (if enabled)
             if self.enable_gt_reid:
-                logger.warning(f"🚨 STARTUP MODE: PURE GROUND TRUTH RE-ID ENABLED for '{environment_id}' (Normal tracking/Re-ID DISABLED)")
+                logger.warning(f"🚨 STARTUP MODE: OFFLINE PRE-COMPUTED TRACKING DATA ENABLED for '{environment_id}' (Normal tracking/Re-ID DISABLED)")
                 if environment_id not in self.gt_reid_services:
                     try:
                         import os
@@ -613,7 +613,7 @@ class DetectionVideoService(RawVideoService):
         self.active_track_ids[camera_id] = current_track_ids
         
         # Cleanup stale entries for tracks that disappeared
-        active_keys = {f"{c}_{t}" for c, t_set in self.active_track_ids.items() for t in t_set}
+        active_keys = [f"{c}_{t}" for c, t_set in self.active_track_ids.items() for t in t_set]
         stale_keys = [k for k in self._tracks_in_zone.keys() if k not in active_keys]
         for k in stale_keys:
             self._tracks_in_zone.pop(k, None)
@@ -894,7 +894,6 @@ class DetectionVideoService(RawVideoService):
         if tracks:
              tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
 
-        logger.warning(f"[GT DEBUG] _process_with_ground_truth: Returning {len(tracks)} tracks for Cam {camera_id} Frame {frame_number}")
         return tracks
 
     def get_tracking_stats(self) -> Dict[str, Any]:
@@ -941,7 +940,6 @@ class DetectionVideoService(RawVideoService):
 
                 gt_dets = gt_service.get_detections(camera_id, frame_number)
                 detections = [PseudoDetection(d['bbox'], d['confidence']) for d in gt_dets]
-                logger.warning(f"[GT DEBUG] process_frame_with_detection got {len(gt_dets)} raw GT dets, made {len(detections)} PseudoDetections for {camera_id} frame {frame_number}")
                 _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
             else:
                 detector = self.detectors_by_env.get(env_for_camera) or self.detector
@@ -1089,7 +1087,6 @@ class DetectionVideoService(RawVideoService):
                 
                 enhanced_detections.append(enhanced_detection)
             
-            logger.warning(f"[GT DEBUG] Created {len(enhanced_detections)} enhanced detections for {camera_id} frame {frame_number}")
             _spatial_loop_time = (_time.perf_counter() - _spatial_start) * 1000
             
             detection_data = {
@@ -1290,6 +1287,11 @@ class DetectionVideoService(RawVideoService):
             fps_start_time = time.time()
             fps_frame_count = 0
             
+            import time as _time
+            target_fps = getattr(settings, 'TARGET_FPS', 20)
+            expected_frame_time = (1.0 / target_fps) if target_fps > 0 else 0.0
+            next_frame_time = _time.perf_counter()
+            
             # Process frames from all cameras
             while frame_index < total_frames:
                 # Check if task is still active
@@ -1444,6 +1446,20 @@ class DetectionVideoService(RawVideoService):
                     # 5. Cleanup
                     for cid in camera_frames.keys():
                         self._debug_frame_store.pop((cid, frame_index), None)
+
+                # --- Pacing Logic ---
+                if expected_frame_time > 0:
+                    now = _time.perf_counter()
+                    sleep_time = next_frame_time - now
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+                        next_frame_time += expected_frame_time
+                    else:
+                        # Behind schedule: don't sleep, reset clock to avoid burst
+                        await asyncio.sleep(0)
+                        next_frame_time = now + expected_frame_time
+                else:
+                    await asyncio.sleep(0)
 
                 # Log progress periodically
                 if frame_index % 30 == 0:  # Every 30 frames
@@ -2395,6 +2411,11 @@ class DetectionVideoService(RawVideoService):
             aborted_due_to_no_clients = False
             
             # Main processing loop
+            import time as _time
+            target_fps = getattr(settings, 'TARGET_FPS', 20)
+            expected_frame_time = (1.0 / target_fps) if target_fps > 0 else 0.0
+            next_frame_time = _time.perf_counter()
+
             while frame_index < total_frames:
                 if task_id not in self.active_tasks:
                     logger.info(f"🔍 SIMPLE DETECTION: Task {task_id} was stopped")
@@ -2429,7 +2450,6 @@ class DetectionVideoService(RawVideoService):
                 frame_debug_payload: Dict[str, Dict[str, Any]] = {}
                 any_frame_processed = False
                 
-                import time as _time
                 _batch_start = _time.perf_counter()
                 _read_time = 0.0
                 _batch_det_time = 0.0
@@ -2707,9 +2727,19 @@ class DetectionVideoService(RawVideoService):
                     
                     await self._record_playback_progress(task_id, fidx)
                     
-                    # Pace frame sends: yield to event loop so frontend can process
-                    # this frame before the next one arrives
-                    await asyncio.sleep(0)
+                    # Pace frame sends: absolute time pacing for smooth front-end playback
+                    if expected_frame_time > 0:
+                        now = _time.perf_counter()
+                        sleep_time = next_frame_time - now
+                        if sleep_time > 0:
+                            await asyncio.sleep(sleep_time)
+                            next_frame_time += expected_frame_time
+                        else:
+                            # Behind schedule: yield but reset clock to prevent immediate burst
+                            await asyncio.sleep(0)
+                            next_frame_time = now + expected_frame_time
+                    else:
+                        await asyncio.sleep(0)
                 
                 # Total batch time
                 _batch_time = (_time.perf_counter() - _batch_start) * 1000
@@ -2757,9 +2787,10 @@ class DetectionVideoService(RawVideoService):
                     )
 
                 # Advance by the number of frames we actually processed
-                frame_index += frames_read_per_camera if frames_read_per_camera > 0 else 1
+                advance_frames = frames_read_per_camera if frames_read_per_camera > 0 else 1
+                frame_index += advance_frames
                 
-                # Yield to event loop
+                # Yield control to event loop without artificial sleeping (handled in sending loop)
                 await asyncio.sleep(0)
             
             # Cleanup video captures
@@ -3436,6 +3467,11 @@ class DetectionVideoService(RawVideoService):
             frames_streamed = 0
             aborted_due_to_no_clients = False
             
+            import time as _time
+            target_fps = getattr(settings, 'TARGET_FPS', 20)
+            expected_frame_time = (1.0 / target_fps) if target_fps > 0 else 0.0
+            next_frame_time = _time.perf_counter()
+            
             # Main processing loop
             while frame_index < total_frames:
                 if task_id not in self.active_tasks:
@@ -3505,8 +3541,19 @@ class DetectionVideoService(RawVideoService):
 
                 frame_index += 1
                 
-                # Small delay to prevent overwhelming WebSocket clients
-                await asyncio.sleep(0.01)  # 10ms delay
+                # --- Pacing Logic ---
+                if expected_frame_time > 0:
+                    now = _time.perf_counter()
+                    sleep_time = next_frame_time - now
+                    if sleep_time > 0:
+                        await asyncio.sleep(sleep_time)
+                        next_frame_time += expected_frame_time
+                    else:
+                        # Behind schedule: don't sleep, reset clock to avoid burst
+                        await asyncio.sleep(0)
+                        next_frame_time = now + expected_frame_time
+                else:
+                    await asyncio.sleep(0)
             
             # Cleanup video captures
             for data in video_data.values():

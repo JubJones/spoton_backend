@@ -601,11 +601,11 @@ class Settings(BaseSettings):
     TRACKER_CONFIG_PATH: Optional[str] = None
     
     # Performance Optimization Settings
-    FRAME_SKIP: int = Field(default=2, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
+    FRAME_SKIP: int = Field(default=3, description="Process every Nth frame (1=all, 2=every other, 3=every 3rd)")
     BATCH_ACCUMULATION_SIZE: int = Field(default=4, description="Number of frames to accumulate per camera before batch inference (e.g., 4 cams × 4 frames = 16 batch)")
     SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
 
-    TARGET_FPS: int = 23 
+    TARGET_FPS: int = 7
     FRAME_JPEG_QUALITY: int = 85  # Good balance
 
     # WebSocket client connection guards

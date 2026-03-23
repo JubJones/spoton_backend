@@ -527,12 +527,12 @@ async def handle_client_message(websocket: WebSocket, task_id: str, message: Dic
         elif message_type == "subscribe_tracking":
             # Subscribe to tracking updates
             binary_websocket_manager.subscribe(task_id, websocket, "tracking")
-            logger.info(f"Client subscribed to tracking updates for task_id: {task_id}")
+            logger.info(f"👤 USER ACTION: Client subscribed to tracking updates for task_id: {task_id}")
 
         elif message_type == "unsubscribe_tracking":
             # Unsubscribe from tracking updates
             binary_websocket_manager.unsubscribe(task_id, websocket, "tracking")
-            logger.info(f"Client unsubscribed from tracking updates for task_id: {task_id}")
+            logger.info(f"👤 USER ACTION: Client unsubscribed from tracking updates for task_id: {task_id}")
 
         elif message_type == "request_status":
             # Send current tracking status
@@ -562,13 +562,13 @@ async def handle_frame_control_message(websocket: WebSocket, task_id: str, messa
         if message_type == "set_quality":
             # Set frame quality
             quality = message.get("quality", 85)
-            logger.info(f"Setting frame quality to {quality} for task_id: {task_id}")
+            logger.info(f"👤 USER ACTION: Setting frame quality to {quality} for task_id: {task_id}")
             # This would be implemented to adjust frame handler quality
 
         elif message_type == "enable_compression":
             # Enable/disable compression
             enabled = message.get("enabled", True)
-            logger.info(f"Setting compression to {enabled} for task_id: {task_id}")
+            logger.info(f"👤 USER ACTION: Setting compression to {enabled} for task_id: {task_id}")
             # Toggle global compression setting
             try:
                 binary_websocket_manager.enable_compression = bool(enabled)
@@ -576,11 +576,11 @@ async def handle_frame_control_message(websocket: WebSocket, task_id: str, messa
                 pass
 
         elif message_type == "set_max_fps":
-            fps = message.get("fps", 15)
+            fps = message.get("fps", 20)
             try:
                 binary_websocket_manager.set_max_fps(websocket, float(fps))
-                logger.info(f"Set max FPS to {fps} for task_id: {task_id}")
-            except Exception:
+                logger.info(f"👤 USER ACTION: Set max FPS to {fps} for task_id: {task_id}")
+            except ValueError:
                 logger.warning(f"Invalid FPS value: {fps}")
 
         elif message_type == "request_frame_stats":
