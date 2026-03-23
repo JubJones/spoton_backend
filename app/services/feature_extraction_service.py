@@ -30,12 +30,30 @@ class FeatureExtractionService:
                  raise FileNotFoundError(f"Re-ID weights not found at {self.model_path}")
 
         try:
-            # Initialize Torchreid Feature Extractor
-            self.extractor = FeatureExtractor(
-                model_name=self.model_name,
-                model_path=self.model_path,
-                device=self.device
-            )
+            # Suppress torchreid warnings (discarded due to unmatched keys) by redirecting stdout
+            import io
+            import sys
+            import logging as std_logging
+            
+            torchreid_logger = std_logging.getLogger("torchreid")
+            old_level = torchreid_logger.level
+            torchreid_logger.setLevel(std_logging.ERROR)
+            
+            original_stdout = sys.stdout
+            sys.stdout = io.StringIO()
+            
+            try:
+                # Initialize Torchreid Feature Extractor
+                self.extractor = FeatureExtractor(
+                    model_name=self.model_name,
+                    model_path=self.model_path,
+                    device=self.device
+                )
+            finally:
+                sys.stdout = original_stdout
+            
+            # Restore logger level
+            torchreid_logger.setLevel(old_level if old_level != std_logging.NOTSET else std_logging.INFO)
             logger.info("✅ RE-ID INIT: OSNet-AIN model loaded successfully.")
         except Exception as e:
             logger.error(f"❌ RE-ID INIT FAILED: {e}")

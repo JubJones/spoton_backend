@@ -89,7 +89,8 @@ class BinaryWebSocketManager:
         
         # Backpressure controls
         self.send_timeout_seconds = 0.75
-        self.default_max_fps = 15.0
+        # Default maximum FPS if not specified
+        self.default_max_fps = 20.0
         
         # Message batching settings
         self.enable_batching = True

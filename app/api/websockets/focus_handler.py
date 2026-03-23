@@ -126,7 +126,7 @@ class FocusTrackingHandler:
             await self.start_focus_updates(task_id)
 
             logger.info(
-                "Focus set on person: task=%s person=%s camera=%s track=%s detection=%s",
+                "👤 USER ACTION: Focus set on person: task=%s person=%s camera=%s track=%s detection=%s",
                 task_id,
                 person_id,
                 focus_state.person_details.camera_id if focus_state.person_details else None,
@@ -152,7 +152,7 @@ class FocusTrackingHandler:
                 # Stop continuous updates
                 await self.stop_focus_updates(task_id)
                 
-                logger.info(f"Focus cleared for task {task_id}")
+                logger.info(f"👤 USER ACTION: Focus cleared for task {task_id}")
                 return True
             
             return False

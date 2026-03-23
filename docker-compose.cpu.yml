@@ -38,7 +38,7 @@ services:
       # CPU-optimized settings
       - OMP_NUM_THREADS=4
       - PYTORCH_NUM_THREADS=4
-      - TARGET_FPS=3                    # Reduced FPS for CPU processing
+      # - TARGET_FPS=3                    # Let config.py control this
       - FRAME_JPEG_QUALITY=70           # Lower quality for faster processing
       - DETECTION_CONFIDENCE_THRESHOLD=0.7  # Higher threshold to reduce processing
       - ENABLE_GT_REID=true                 # Run pure ground-truth pipeline for CPU

@@ -26,19 +26,19 @@ class GroundTruthReIDService:
         self._load_ground_truth()
 
     def _load_ground_truth(self):
-        """Load all gt_*.txt files from data_root."""
+        """Load all offline pre-computed tracks from data_root."""
         if not os.path.exists(self.data_root):
-            logger.error(f"❌ GT-REID: Data root not found: {self.data_root}")
+            logger.error(f"❌ OFFLINE-TRACKS: Data root not found: {self.data_root}")
             return
 
         pattern = os.path.join(self.data_root, "gt_*.txt")
         gt_files = glob.glob(pattern)
         
         if not gt_files:
-            logger.warning(f"⚠️ GT-REID: No gt_*.txt files found in {self.data_root}")
+            logger.warning(f"⚠️ OFFLINE-TRACKS: No pre-computed files found in {self.data_root}")
             return
 
-        logger.info(f"🔍 GT-REID: Loading {len(gt_files)} GT files from {self.data_root}...")
+        logger.info(f"🔍 OFFLINE-TRACKS: Loading {len(gt_files)} track files from {self.data_root}...")
 
         for file_path in gt_files:
             try:
@@ -80,10 +80,10 @@ class GroundTruthReIDService:
                         
                         self.gt_data[cam_id][frame_idx].append((pid, bbox))
                         count += 1
-                logger.warning(f"  ✅ Loaded {cam_id}: {count} annotations")
+                logger.info(f"  ✅ Loaded pre-computed tracks for {cam_id}: {count} records")
                 
             except Exception as e:
-                logger.error(f"❌ GT-REID: Error loading {file_path}: {e}")
+                logger.error(f"❌ OFFLINE-TRACKS: Error loading {file_path}: {e}")
 
     def get_identity(self, camera_id: str, frame_number: int, detection_bbox: Dict[str, float]) -> Optional[str]:
         """
@@ -121,8 +121,6 @@ class GroundTruthReIDService:
                 best_iou = iou
                 best_pid = pid
         
-        logger.warning(f"[GT DEBUG] get_identity: best_iou={best_iou} for Frame {frame_number} Cam {camera_id}")
-
         # Threshold for matching (e.g. 0.3 IoU)
         if best_iou > 0.3:
             return str(best_pid)
@@ -135,11 +133,9 @@ class GroundTruthReIDService:
         These can be used identically to YOLO detections to map precise GT coordinates.
         """
         if camera_id not in self.gt_data:
-            logger.warning(f"[GT DEBUG] get_detections: camera_id {camera_id} not in gt_data keys ({list(self.gt_data.keys())})")
             return []
             
         if frame_number not in self.gt_data[camera_id]:
-            logger.warning(f"[GT DEBUG] get_detections: frame_number {frame_number} not in gt_data[{camera_id}]")
             return []
             
         detections = []

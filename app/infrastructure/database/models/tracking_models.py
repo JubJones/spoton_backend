@@ -45,12 +45,12 @@ class TrackingEvent(Base):
     timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now(), primary_key=True)
     
     # Person identification
-    global_person_id = Column(String(100), nullable=False, index=True)
-    track_id = Column(String(100), nullable=True, index=True)
+    global_person_id = Column(Text, nullable=False, index=True)
+    track_id = Column(Text, nullable=True, index=True)
     
     # Camera and location
-    camera_id = Column(String(50), nullable=False, index=True)
-    environment_id = Column(String(50), nullable=False, index=True)
+    camera_id = Column(Text, nullable=False, index=True)
+    environment_id = Column(Text, nullable=False, index=True)
     
     # Position data
     position_x = Column(Float, nullable=True)
@@ -69,8 +69,8 @@ class TrackingEvent(Base):
     reid_confidence = Column(Float, nullable=True)
     
     # Event type and metadata
-    event_type = Column(String(50), nullable=False)  # 'detection', 'entry', 'exit', 'transition'
-    session_id = Column(String(100), nullable=True, index=True)
+    event_type = Column(Text, nullable=False)  # 'detection', 'entry', 'exit', 'transition'
+    session_id = Column(Text, nullable=True, index=True)
     
     # Additional data
     event_metadata = Column(JSONB, nullable=True)
@@ -98,8 +98,8 @@ class DetectionEvent(Base):
     timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now(), primary_key=True)
     
     # Detection data
-    camera_id = Column(String(50), nullable=False, index=True)
-    environment_id = Column(String(50), nullable=False, index=True)
+    camera_id = Column(Text, nullable=False, index=True)
+    environment_id = Column(Text, nullable=False, index=True)
     frame_number = Column(Integer, nullable=True)
     
     # Bounding box
@@ -112,14 +112,14 @@ class DetectionEvent(Base):
     confidence = Column(Float, nullable=False)
     
     # Object class
-    object_class = Column(String(50), nullable=False, default='person')
+    object_class = Column(Text, nullable=False, default='person')
     
     # Associated tracking event
     # Associated tracking event
     tracking_event_id = Column(UUID(as_uuid=True), nullable=True, index=True)
     
     # Session context
-    session_id = Column(String(100), nullable=True, index=True)
+    session_id = Column(Text, nullable=True, index=True)
     
     # Additional metadata
     detection_metadata = Column(JSONB, nullable=True)
@@ -152,14 +152,14 @@ class ReidentificationFeedbackEvent(Base):
     )
 
     event_timestamp = Column(DateTime(timezone=True), nullable=False, default=func.now())
-    global_person_id = Column(String(100), nullable=False, index=True)
-    candidate_person_id = Column(String(100), nullable=True, index=True)
-    match_id = Column(String(100), nullable=True, index=True)
+    global_person_id = Column(Text, nullable=False, index=True)
+    candidate_person_id = Column(Text, nullable=True, index=True)
+    match_id = Column(Text, nullable=True, index=True)
 
-    camera_id = Column(String(50), nullable=False, index=True)
-    environment_id = Column(String(50), nullable=False, index=True)
+    camera_id = Column(Text, nullable=False, index=True)
+    environment_id = Column(Text, nullable=False, index=True)
     frame_number = Column(Integer, nullable=True)
-    session_id = Column(String(100), nullable=True, index=True)
+    session_id = Column(Text, nullable=True, index=True)
 
     decision = Column(String(20), nullable=False)
     confidence = Column(Float, nullable=True)

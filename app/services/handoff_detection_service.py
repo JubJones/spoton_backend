@@ -187,11 +187,9 @@ class HandoffDetectionService:
             norm_width = bbox["width"] / frame_width
             norm_height = bbox["height"] / frame_height
             
-            # Validate normalized coordinates
-            if not (0.0 <= norm_center_x <= 1.0 and 0.0 <= norm_center_y <= 1.0):
-                logger.warning(f"Invalid normalized coordinates for {camera_id}: "
-                             f"center=({norm_center_x:.3f}, {norm_center_y:.3f})")
-                return False, []
+            # Clamp normalized coordinates to [0.0, 1.0] to handle edge cases gracefully
+            norm_center_x = max(0.0, min(1.0, norm_center_x))
+            norm_center_y = max(0.0, min(1.0, norm_center_y))
             
             candidate_cameras = []
             is_handoff = False
