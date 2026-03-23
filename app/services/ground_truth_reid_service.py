@@ -1,7 +1,7 @@
 
 import os
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 import glob
 
 logger = logging.getLogger(__name__)
@@ -80,8 +80,7 @@ class GroundTruthReIDService:
                         
                         self.gt_data[cam_id][frame_idx].append((pid, bbox))
                         count += 1
-                
-                logger.info(f"  ✅ Loaded {cam_id}: {count} annotations")
+                logger.warning(f"  ✅ Loaded {cam_id}: {count} annotations")
                 
             except Exception as e:
                 logger.error(f"❌ GT-REID: Error loading {file_path}: {e}")
@@ -109,24 +108,50 @@ class GroundTruthReIDService:
             
         candidates = self.gt_data[camera_id][frame_number]
         
-        best_iou = 0.0
+        best_iou = 0
         best_pid = None
         
-        det_box = [detection_bbox['x1'], detection_bbox['y1'], detection_bbox['x2'], detection_bbox['y2']]
-        
-        for pid, gt_box_dict in candidates:
-            gt_box = [gt_box_dict['x1'], gt_box_dict['y1'], gt_box_dict['x2'], gt_box_dict['y2']]
+        for pid, gt_box in candidates:
+            # Calculate IoU
+            det_box = [detection_bbox['x1'], detection_bbox['y1'], detection_bbox['x2'], detection_bbox['y2']]
+            gt_box_list = [gt_box['x1'], gt_box['y1'], gt_box['x2'], gt_box['y2']]
             
-            iou = self._calculate_iou(det_box, gt_box)
+            iou = self._calculate_iou(det_box, gt_box_list)
             if iou > best_iou:
                 best_iou = iou
                 best_pid = pid
         
+        logger.warning(f"[GT DEBUG] get_identity: best_iou={best_iou} for Frame {frame_number} Cam {camera_id}")
+
         # Threshold for matching (e.g. 0.3 IoU)
         if best_iou > 0.3:
             return str(best_pid)
             
         return None
+
+    def get_detections(self, camera_id: str, frame_number: int) -> List[Dict[str, Any]]:
+        """
+        Return all ground truth detections (bounding boxes and identities) for a given frame.
+        These can be used identically to YOLO detections to map precise GT coordinates.
+        """
+        if camera_id not in self.gt_data:
+            logger.warning(f"[GT DEBUG] get_detections: camera_id {camera_id} not in gt_data keys ({list(self.gt_data.keys())})")
+            return []
+            
+        if frame_number not in self.gt_data[camera_id]:
+            logger.warning(f"[GT DEBUG] get_detections: frame_number {frame_number} not in gt_data[{camera_id}]")
+            return []
+            
+        detections = []
+        for pid, bbox in self.gt_data[camera_id][frame_number]:
+            detections.append({
+                'track_id': str(pid),
+                'bbox': bbox,
+                'confidence': 1.0,
+                'class_id': 0 # Class 0 represents Person in our pipeline
+            })
+            
+        return detections
 
     def _calculate_iou(self, boxA, boxB):
         # determine the (x, y)-coordinates of the intersection rectangle

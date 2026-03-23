@@ -268,51 +268,54 @@ class DetectionVideoService(RawVideoService):
                 return False
             
             # Initialize YOLO detector for the requested environment
-            weights_path = self._resolve_yolo_weights_for_environment(environment_id)
+            if getattr(self, "enable_gt_reid", False):
+                logger.info(f"🚨 PURE GT MODE: Skipping YOLO model initialization for environment: {environment_id}")
+            else:
+                weights_path = self._resolve_yolo_weights_for_environment(environment_id)
 
-            # Serialize detector initialization to prevent race conditions during concurrent requests (e.g. page load)
-            # This prevents loading the same heavy model multiple times before the first one is registered.
-            if not hasattr(self, '_model_loading_lock'):
-                import asyncio
-                self._model_loading_lock = asyncio.Lock()
+                # Serialize detector initialization to prevent race conditions during concurrent requests (e.g. page load)
+                # This prevents loading the same heavy model multiple times before the first one is registered.
+                if not hasattr(self, '_model_loading_lock'):
+                    import asyncio
+                    self._model_loading_lock = asyncio.Lock()
 
-            async with self._model_loading_lock:
-                # Re-check if loaded inside lock (double-checked locking pattern)
-                if environment_id in self.detectors_by_env:
-                     logger.info(f"🧠 DETECTION SERVICE INIT: Detector for '{environment_id}' already ready (loaded during lock wait).")
-                else:
-                    # Check if this model path is already loaded for another environment (to save VRAM)
-                    existing_detector = None
-                    for env, path in self.detector_weights_by_env.items():
-                        if path == weights_path and env in self.detectors_by_env:
-                            existing_detector = self.detectors_by_env[env]
-                            logger.info(f"🧠 DETECTION SERVICE INIT: Reusing existing detector instance from '{env}' for '{environment_id}' (Path: {weights_path})")
-                            break
-
-                    if existing_detector:
-                        self.detectors_by_env[environment_id] = existing_detector
-                        self.detector_weights_by_env[environment_id] = weights_path
+                async with self._model_loading_lock:
+                    # Re-check if loaded inside lock (double-checked locking pattern)
+                    if environment_id in self.detectors_by_env:
+                         logger.info(f"🧠 DETECTION SERVICE INIT: Detector for '{environment_id}' already ready (loaded during lock wait).")
                     else:
-                        logger.info(f"🧠 DETECTION SERVICE INIT: Loading model for '{environment_id}' from: {weights_path}")
-                        
-                        is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
-                        
-                        if is_rtdetr:
-                            logger.info(f"🔄 Using dedicated RTDETRDetector for: {weights_path}")
-                            detector = RTDETRDetector(
-                                model_name=weights_path,
-                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                            )
+                        # Check if this model path is already loaded for another environment (to save VRAM)
+                        existing_detector = None
+                        for env, path in self.detector_weights_by_env.items():
+                            if path == weights_path and env in self.detectors_by_env:
+                                existing_detector = self.detectors_by_env[env]
+                                logger.info(f"🧠 DETECTION SERVICE INIT: Reusing existing detector instance from '{env}' for '{environment_id}' (Path: {weights_path})")
+                                break
+
+                        if existing_detector:
+                            self.detectors_by_env[environment_id] = existing_detector
+                            self.detector_weights_by_env[environment_id] = weights_path
                         else:
-                            detector = YOLODetector(
-                                model_name=weights_path,
-                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                            )
+                            logger.info(f"🧠 DETECTION SERVICE INIT: Loading model for '{environment_id}' from: {weights_path}")
                             
-                        await detector.load_model()
-                        await detector.warmup()
-                        self.detectors_by_env[environment_id] = detector
-                        self.detector_weights_by_env[environment_id] = weights_path
+                            is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
+                            
+                            if is_rtdetr:
+                                logger.info(f"🔄 Using dedicated RTDETRDetector for: {weights_path}")
+                                detector = RTDETRDetector(
+                                    model_name=weights_path,
+                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                                )
+                            else:
+                                detector = YOLODetector(
+                                    model_name=weights_path,
+                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                                )
+                                
+                            await detector.load_model()
+                            await detector.warmup()
+                            self.detectors_by_env[environment_id] = detector
+                            self.detector_weights_by_env[environment_id] = weights_path
             
             # Maintain backward-compatible single-detector reference for existing methods
             self.detector = self.detectors_by_env.get(environment_id)
@@ -676,7 +679,16 @@ class DetectionVideoService(RawVideoService):
         
         # Step 1: Run detection pipeline (includes spatial intelligence)
         _det_start = _time.perf_counter()
-        detection_data = await self.process_frame_with_detection(frame, camera_id, frame_number)
+        
+        # Bypass cache entirely if we are using pure GT Re-ID mode
+        bypass_cache = getattr(self, "enable_gt_reid", False)
+        
+        detection_data = await self.process_frame_with_detection(
+            frame, 
+            camera_id, 
+            frame_number,
+            use_cache=not bypass_cache
+        )
         _det_time = (_time.perf_counter() - _det_start) * 1000
 
         # Step 2: Tracking integration
@@ -882,6 +894,7 @@ class DetectionVideoService(RawVideoService):
         if tracks:
              tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
 
+        logger.warning(f"[GT DEBUG] _process_with_ground_truth: Returning {len(tracks)} tracks for Cam {camera_id} Frame {frame_number}")
         return tracks
 
     def get_tracking_stats(self) -> Dict[str, Any]:
@@ -909,16 +922,33 @@ class DetectionVideoService(RawVideoService):
         _spatial_loop_time = 0.0
         
         try:
-            # Select detector by environment of the camera, fallback to default
-            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            detector = self.detectors_by_env.get(env_for_camera) or self.detector
-            if not detector:
-                raise RuntimeError("YOLO detector not initialized for the current environment")
-            
             # Run YOLO detection
             _yolo_start = _time.perf_counter()
-            detections = await detector.detect(frame)
-            _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
+            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
+            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
+
+            if gt_service:
+                # PURE GT MODE: Bypass YOLO entirely
+                class PseudoBox:
+                    def __init__(self, x1, y1, x2, y2):
+                        self.x1, self.y1 = x1, y1
+                        self.x2, self.y2 = x2, y2
+
+                class PseudoDetection:
+                    def __init__(self, bbox_dict, conf):
+                        self.confidence = conf
+                        self.bbox = PseudoBox(bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2'])
+
+                gt_dets = gt_service.get_detections(camera_id, frame_number)
+                detections = [PseudoDetection(d['bbox'], d['confidence']) for d in gt_dets]
+                logger.warning(f"[GT DEBUG] process_frame_with_detection got {len(gt_dets)} raw GT dets, made {len(detections)} PseudoDetections for {camera_id} frame {frame_number}")
+                _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
+            else:
+                detector = self.detectors_by_env.get(env_for_camera) or self.detector
+                if not detector:
+                    raise RuntimeError("YOLO detector not initialized for the current environment")
+                detections = await detector.detect(frame)
+                _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
             
             # Calculate processing time
             processing_time = (_time.perf_counter() - _proc_start) * 1000
@@ -1059,6 +1089,7 @@ class DetectionVideoService(RawVideoService):
                 
                 enhanced_detections.append(enhanced_detection)
             
+            logger.warning(f"[GT DEBUG] Created {len(enhanced_detections)} enhanced detections for {camera_id} frame {frame_number}")
             _spatial_loop_time = (_time.perf_counter() - _spatial_start) * 1000
             
             detection_data = {
@@ -1300,8 +1331,9 @@ class DetectionVideoService(RawVideoService):
                                 if task_state:
                                     task_options = task_state.get("options", {})
 
+                            effective_frame_index = frame_offset + frame_index
                             detection_data = await self.process_frame_with_tracking(
-                                frame, camera_id, cumulative_frame_idx, options=task_options
+                                frame, camera_id, effective_frame_index, options=task_options
                             )
 
                             camera_detections[camera_id] = detection_data
@@ -2457,8 +2489,26 @@ class DetectionVideoService(RawVideoService):
                 env_for_batch = self._get_environment_for_camera(first_camera_id) or "default" if first_camera_id else "default"
                 detector = self.detectors_by_env.get(env_for_batch) or self.detector
                 
+                # Check for GT Service
+                gt_service = self.gt_reid_services.get(env_for_batch) if getattr(self, "enable_gt_reid", False) else None
+                
                 batch_detections = []
-                if detector and len(accumulated_frames) > 1:
+                if gt_service:
+                    # PURE GT MODE: Bypass YOLO
+                    class PseudoBox:
+                        def __init__(self, x1, y1, x2, y2):
+                            self.x1, self.y1 = x1, y1
+                            self.x2, self.y2 = x2, y2
+
+                    class PseudoDetection:
+                        def __init__(self, bbox_dict, conf):
+                            self.confidence = conf
+                            self.bbox = PseudoBox(bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2'])
+
+                    for cid, fidx, _ in frame_metadata:
+                        gt_dets = gt_service.get_detections(cid, fidx)
+                        batch_detections.append([PseudoDetection(d['bbox'], d['confidence']) for d in gt_dets])
+                elif detector and len(accumulated_frames) > 1:
                     # Use batch inference for all accumulated frames (up to batch=16)
                     try:
                         batch_detections = await detector.detect_batch(accumulated_frames)
