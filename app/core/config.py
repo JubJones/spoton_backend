@@ -605,7 +605,7 @@ class Settings(BaseSettings):
     BATCH_ACCUMULATION_SIZE: int = Field(default=4, description="Number of frames to accumulate per camera before batch inference (e.g., 4 cams × 4 frames = 16 batch)")
     SPATIAL_MATCH_SKIP_STATIC: bool = Field(default=False, description="Skip spatial matching for tracks that haven't moved")
 
-    TARGET_FPS: int = 7
+    TARGET_FPS: int = 23
     FRAME_JPEG_QUALITY: int = 85  # Good balance
 
     # WebSocket client connection guards

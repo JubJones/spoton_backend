@@ -69,9 +69,9 @@ app.dependency_overrides[get_historical_service] = _override_hist_service
 
 
 def _async_result(value):
-    f = asyncio.Future()
-    f.set_result(value)
-    return f
+    async def _coro():
+        return value
+    return _coro()
 
 
 async def _finite_mjpeg_generator(*args, **kwargs):
@@ -530,7 +530,7 @@ class TestGlassToGlassLatency:
         fake_detection = self._make_fake_detections()
         fake_tracks = self._make_fake_tracks()
 
-        async def _mock_detect(frame, camera_id, frame_number):
+        async def _mock_detect(frame, camera_id, frame_number, **kwargs):
             return fake_detection
 
         async def _mock_track_enhance(tracks, camera_id, frame_number):

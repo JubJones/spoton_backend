@@ -595,11 +595,28 @@ class RawVideoService:
                         # logger.info(f"📡 RAW STREAM: Streamed frame {frame_index}/{total_frames} for task {task_id}")
                 
                 # Frame rate control
-                elapsed = time.time() - last_frame_time
-                if elapsed < frame_interval:
-                    await asyncio.sleep(frame_interval - elapsed)
+                expected_frame_time = frame_interval
+                if expected_frame_time > 0:
+                    now = time.time()
+                    sleep_time = (last_frame_time + expected_frame_time) - now
+                    if sleep_time > 0:
+                        if sleep_time > 0.01:
+                            await asyncio.sleep(sleep_time - 0.005)
+                        else:
+                            await asyncio.sleep(0)
+                        
+                        # Spin-wait for exact timing
+                        while time.time() < last_frame_time + expected_frame_time:
+                            pass
+                        
+                        last_frame_time += expected_frame_time
+                    else:
+                        await asyncio.sleep(0)
+                        last_frame_time = time.time()
+                else:
+                    await asyncio.sleep(0)
+                    last_frame_time = time.time()
                 
-                last_frame_time = time.time()
                 frame_index += 1
             
             # Cleanup video captures

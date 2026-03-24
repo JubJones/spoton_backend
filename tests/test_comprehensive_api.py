@@ -81,9 +81,9 @@ def _make_env_mock(env_id: str = "test_env_1"):
 
 def _async_result(value):
     """Wrap a value in an asyncio Future so MagicMock.return_value can be awaited."""
-    f = asyncio.Future()
-    f.set_result(value)
-    return f
+    async def _coro():
+        return value
+    return _coro()
 
 
 async def _finite_mjpeg_generator(*args, **kwargs):

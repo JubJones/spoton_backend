@@ -18,7 +18,7 @@ from typing import Dict, Any
 import uuid
 import logging
 import asyncio
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.api.v1 import schemas
 from app.core.config import settings
@@ -120,7 +120,7 @@ async def get_available_detection_environments():
                     "input_resolution": f"{settings.YOLO_INPUT_SIZE}x{settings.YOLO_INPUT_SIZE}"
                 }
             },
-            "timestamp": str(datetime.utcnow().isoformat())
+            "timestamp": str(datetime.now(timezone.utc).isoformat())
         }
         
     except Exception as e:
@@ -281,7 +281,7 @@ async def list_detection_processing_tasks(
                 "total_count": len(enhanced_tasks),
                 "detection_statistics": detection_stats
             },
-            "timestamp": str(datetime.utcnow().isoformat())
+            "timestamp": str(datetime.now(timezone.utc).isoformat())
         }
     except Exception as e:
         logger.error(f"Error listing detection processing tasks: {e}")
@@ -331,7 +331,7 @@ async def get_detection_processing_task_details(
                 "detection_model": "YOLO11-L",
                 "detection_statistics": detection_stats
             },
-            "timestamp": str(datetime.utcnow().isoformat())
+            "timestamp": str(datetime.now(timezone.utc).isoformat())
         }
     except HTTPException:
         raise
@@ -375,10 +375,10 @@ async def stop_detection_processing_task(
             "data": {
                 "task_id": str(task_id),
                 "message": "Detection processing task stopped successfully",
-                "stopped_at": str(datetime.utcnow().isoformat()),
+                "stopped_at": str(datetime.now(timezone.utc).isoformat()),
                 "mode": "detection_processing"
             },
-            "timestamp": str(datetime.utcnow().isoformat())
+            "timestamp": str(datetime.now(timezone.utc).isoformat())
         }
         
     except HTTPException:
@@ -432,10 +432,10 @@ async def cleanup_detection_environment_tasks(
                 "environment_id": environment_id,
                 "message": f"Cleaned up {len(stopped_tasks)} detection tasks for environment {environment_id}",
                 "stopped_tasks": stopped_tasks,
-                "cleanup_at": str(datetime.utcnow().isoformat()),
+                "cleanup_at": str(datetime.now(timezone.utc).isoformat()),
                 "mode": "detection_processing"
             },
-            "timestamp": str(datetime.utcnow().isoformat())
+            "timestamp": str(datetime.now(timezone.utc).isoformat())
         }
         
     except Exception as e:

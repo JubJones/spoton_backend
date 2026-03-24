@@ -1289,8 +1289,10 @@ class DetectionVideoService(RawVideoService):
             
             import time as _time
             target_fps = getattr(settings, 'TARGET_FPS', 20)
+            frame_skip = getattr(settings, 'FRAME_SKIP', 1)
             expected_frame_time = (1.0 / target_fps) if target_fps > 0 else 0.0
             next_frame_time = _time.perf_counter()
+            logger.warning(f"⏱️ FPS CONFIG: TARGET_FPS={target_fps} FRAME_SKIP={frame_skip} expected_frame_time={expected_frame_time*1000:.1f}ms")
             
             # Process frames from all cameras
             while frame_index < total_frames:
@@ -1312,6 +1314,18 @@ class DetectionVideoService(RawVideoService):
                 if not self._should_continue_stream(task_id, detection_mode=True):
                     aborted_due_to_no_clients = True
                     break
+
+                # FRAME SKIP: Only process every Nth frame for performance
+                if frame_skip > 1 and frame_index % frame_skip != 0:
+                    for _camera_id, data in video_data.items():
+                        cap = data.get("video_capture")
+                        if cap and cap.isOpened():
+                            # Faster than .read(), just advances the pointer 
+                            cap.grab()
+                    frame_index += 1
+                    continue
+                
+                _frame_start = _time.perf_counter()
 
                 # Read frames from all cameras
                 camera_frames = {}
@@ -1452,12 +1466,20 @@ class DetectionVideoService(RawVideoService):
                     now = _time.perf_counter()
                     sleep_time = next_frame_time - now
                     if sleep_time > 0:
-                        await asyncio.sleep(sleep_time)
+                        if sleep_time > 0.01:
+                            await asyncio.sleep(sleep_time - 0.005)
+                        else:
+                            await asyncio.sleep(0)
+                            
+                        # Spin-wait for exact timing
+                        while _time.perf_counter() < next_frame_time:
+                            pass
+                            
                         next_frame_time += expected_frame_time
                     else:
                         # Behind schedule: don't sleep, reset clock to avoid burst
                         await asyncio.sleep(0)
-                        next_frame_time = now + expected_frame_time
+                        next_frame_time = _time.perf_counter() + expected_frame_time
                 else:
                     await asyncio.sleep(0)
 
@@ -1474,8 +1496,8 @@ class DetectionVideoService(RawVideoService):
                     fps_elapsed = time.time() - fps_start_time
                     if fps_elapsed > 0:
                         current_fps = fps_frame_count / fps_elapsed
-                        # logger.info(f"[FPS_DEBUG] Detection Pipeline FPS={current_fps:.1f} (frames={fps_frame_count} elapsed={fps_elapsed:.1f}s)")
-                    # logger.info(f"🔍 DETECTION PROCESSING: Frame {frame_index}/{total_frames} - {detection_count} detections")
+                        _frame_elapsed_ms = (_time.perf_counter() - _frame_start) * 1000
+                        logger.warning(f"⏱️ [FPS_DEBUG] Actual FPS={current_fps:.1f} | TARGET={target_fps} | frame_time={_frame_elapsed_ms:.0f}ms | frame={frame_index}/{total_frames}")
                 
                 frame_index += 1
             
@@ -3546,12 +3568,20 @@ class DetectionVideoService(RawVideoService):
                     now = _time.perf_counter()
                     sleep_time = next_frame_time - now
                     if sleep_time > 0:
-                        await asyncio.sleep(sleep_time)
+                        if sleep_time > 0.01:
+                            await asyncio.sleep(sleep_time - 0.005)
+                        else:
+                            await asyncio.sleep(0)
+                            
+                        # Spin-wait for exact timing
+                        while _time.perf_counter() < next_frame_time:
+                            pass
+                            
                         next_frame_time += expected_frame_time
                     else:
                         # Behind schedule: don't sleep, reset clock to avoid burst
                         await asyncio.sleep(0)
-                        next_frame_time = now + expected_frame_time
+                        next_frame_time = _time.perf_counter() + expected_frame_time
                 else:
                     await asyncio.sleep(0)
             
