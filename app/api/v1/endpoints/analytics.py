@@ -57,8 +57,8 @@ class PathPredictionRequest(BaseModel):
 @router.get("/dashboard")
 async def get_analytics_dashboard(
     environment_id: str = Query("default", description="Environment identifier"),
-    window_hours: int = Query(24, ge=1, le=168, description="Hours of history to include"),
-    uptime_days: int = Query(7, ge=1, le=30, description="Days of uptime history"),
+    window_hours: int = Query(24, ge=1, le=87600, description="Hours of history to include"),
+    uptime_days: int = Query(7, ge=1, le=3650, description="Days of uptime history"),
 ):
     """Return consolidated analytics snapshot for dashboard rendering."""
     # Get real data from database
@@ -80,6 +80,8 @@ async def get_analytics_dashboard(
         real_snapshot["traffic_flow"] = advanced_metrics["traffic_flow"]
     if "heatmap" not in real_snapshot and "heatmap" in advanced_metrics:
         real_snapshot["heatmap"] = advanced_metrics["heatmap"]
+    if "person_statistics" not in real_snapshot and "person_statistics" in advanced_metrics:
+        real_snapshot["person_statistics"] = advanced_metrics["person_statistics"]
 
     return {
         "status": "success",
