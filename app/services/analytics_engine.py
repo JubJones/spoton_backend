@@ -1145,7 +1145,11 @@ class AnalyticsEngine:
                 else:
                     # ── FALLBACK: Generate realistic dwell time mockup data ──
                     import random
-                    random.seed(42)  # Deterministic data
+                    import hashlib
+                    seed_str = f"dwell_{environment_id}_{window_hours}_42"
+                    seed_val = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % (2**32)
+                    random.seed(seed_val)
+                    scale_factor = max(0.02, window_hours / 24.0)
                     
                     cam_dwell_profiles = {
                         0: {"avg": 4.8, "min": 0.5, "max": 18.2, "label": "Entrance"},      # short visits
@@ -1156,7 +1160,8 @@ class AnalyticsEngine:
                     
                     for idx, cam in enumerate(cameras_list):
                         profile = cam_dwell_profiles.get(idx, {"avg": 5.0, "min": 0.5, "max": 15.0})
-                        total_persons = random.randint(35, 65)
+                        base_persons = random.randint(35, 65)
+                        total_persons = max(1, int(base_persons * scale_factor))
                         
                         lt1m = int(total_persons * 0.15)
                         btw1_5m = int(total_persons * 0.35)
@@ -1248,13 +1253,17 @@ class AnalyticsEngine:
                 else:
                     # ── FALLBACK: Generate realistic traffic flow mockup data ──
                     import random
-                    random.seed(43)
+                    import hashlib
+                    seed_str = f"traffic_{environment_id}_{window_hours}_43"
+                    seed_val = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % (2**32)
+                    random.seed(seed_val)
+                    scale_factor = max(0.02, window_hours / 24.0)
                     
                     directions_all = ['north', 'south', 'east', 'west', 'northeast', 'northwest', 'southeast', 'southwest']
-                    cam_movement_counts = [185, 152, 118, 143]  # Entrance most, storage least
+                    cam_movement_counts = [int(x * scale_factor) for x in [185, 152, 118, 143]]  # Entrance most, storage least
                     
                     for idx, cam in enumerate(cameras_list):
-                        movements = cam_movement_counts[idx] if idx < len(cam_movement_counts) else random.randint(100, 200)
+                        movements = cam_movement_counts[idx] if idx < len(cam_movement_counts) else max(1, int(random.randint(100, 200) * scale_factor))
                         
                         # Generate directional breakdown
                         dir_weights = [random.randint(5, 30) for _ in directions_all]
@@ -1437,7 +1446,13 @@ class AnalyticsEngine:
                 if use_fallback:
                     # ── FALLBACK: Generate realistic heatmap mockup data ──
                     import random
-                    random.seed(44)
+                    import hashlib
+                    import math
+                    seed_str = f"heatmap_{environment_id}_{window_hours}_44"
+                    seed_val = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % (2**32)
+                    random.seed(seed_val)
+                    
+                    occ_scale = min(5.0, max(1.0, math.log10(window_hours + 1)))
                     
                     # Assign each zone to a camera in order
                     zone_profiles = {
@@ -1452,6 +1467,7 @@ class AnalyticsEngine:
                     
                     for z_idx, tz in enumerate(template_zones):
                         profile = zone_profiles.get(z_idx, {"base_occ": 4, "peak_occ": 8, "cam_idx": 0})
+                        scaled_base_occ = max(1, int(profile["base_occ"] * occ_scale))
                         cam_idx = min(profile["cam_idx"], len(cameras_list) - 1)
                         
                         occupancy_data = []
@@ -1467,8 +1483,8 @@ class AnalyticsEngine:
                             else:
                                 activity = 0.1
                             
-                            person_count = int(profile["base_occ"] * activity + random.randint(0, 3))
-                            peak = int(person_count * 1.3 + random.randint(0, 2))
+                            person_count = int(scaled_base_occ * activity + random.randint(0, max(1, int(3 * occ_scale))))
+                            peak = int(person_count * 1.3 + random.randint(0, max(1, int(2 * occ_scale))))
                             bucket_time = start_time + bucket_duration * (i + 1)
                             
                             occupancy_data.append({
