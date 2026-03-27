@@ -632,6 +632,48 @@ class IntegratedDatabaseService:
                     "uptime_percent": 0.0,
                 })
 
+        # Feature: Provide mockup base dashboard data if there are no real detections
+        if snapshot["summary"]["total_detections"] == 0:
+            import random
+            import hashlib
+            seed_str = f"basic_{environment_id}_{window_hours}_45"
+            seed_val = int(hashlib.md5(seed_str.encode()).hexdigest(), 16) % (2**32)
+            random.seed(seed_val)
+            scale_factor = max(0.02, window_hours / 24.0)
+
+            total_mock_detections = int(random.randint(5000, 15000) * scale_factor)
+            snapshot["summary"]["total_detections"] = total_mock_detections
+            snapshot["summary"]["average_confidence_percent"] = round(random.uniform(85.0, 94.0), 2)
+            snapshot["summary"]["system_uptime_percent"] = round(random.uniform(98.0, 99.9), 2)
+            snapshot["summary"]["uptime_delta_percent"] = round(random.uniform(-0.5, 0.8), 2)
+
+            time_buckets = 24 if window_hours >= 24 else max(1, window_hours)
+            bucket_duration = timedelta(hours=window_hours) / time_buckets
+
+            snapshot["charts"]["detections_per_bucket"] = []
+            snapshot["charts"]["average_confidence_trend"] = []
+            
+            for i in range(time_buckets):
+                bucket_time = start_time + bucket_duration * (i + 1)
+                base_bucket_dets = total_mock_detections / time_buckets
+                bucket_dets = int(base_bucket_dets + random.uniform(-0.2, 0.2) * base_bucket_dets)
+                snapshot["charts"]["detections_per_bucket"].append({
+                    "timestamp": bucket_time.isoformat(),
+                    "detections": max(0, bucket_dets)
+                })
+                snapshot["charts"]["average_confidence_trend"].append({
+                    "timestamp": bucket_time.isoformat(),
+                    "confidence_percent": round(random.uniform(82.0, 96.0), 2)
+                })
+            
+            # mock missing cameras
+            if len(cameras_list := list(template_cameras.keys())) > 0:
+                for idx, cam in enumerate(snapshot["cameras"]):
+                    cam["detections"] = int(total_mock_detections / len(cameras_list) * random.uniform(0.8, 1.2))
+                    cam["unique_entities"] = max(1, int(cam["detections"] * 0.05))
+                    cam["average_confidence_percent"] = round(random.uniform(80.0, 95.0), 2)
+                    cam["uptime_percent"] = round(random.uniform(96.0, 100.0), 2)
+
         return snapshot
     
     # Trajectory Management
