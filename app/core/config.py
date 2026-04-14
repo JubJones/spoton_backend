@@ -552,10 +552,7 @@ class Settings(BaseSettings):
     DETECTION_USE_AMP: bool = False
     
     
-    # Ground Truth Re-ID (Debugging)
-    ENABLE_GT_REID: bool = False
-    DATASET_ROOT: str = Field(default="", description="Base directory for GT files. If empty, derived as <LOCAL_VIDEOS_BASE_DIR>/<env_id>/gt")
-    
+
     # YOLO Configuration (YOLO11-L)
     # TensorRT Optimization: Set USE_TENSORRT=true and provide .engine file path for 3-5x speedup
     USE_TENSORRT: bool = Field(default=True, description="Use TensorRT engine for YOLO inference (requires .engine file)")

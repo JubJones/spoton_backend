@@ -55,7 +55,6 @@ from app.services.global_person_registry import GlobalPersonRegistry
 from app.tracing import analytics_event_tracer
 from app.shared.types import CameraID, TrackID
 from app.infrastructure.cache.redis_client import redis_client
-from app.services.ground_truth_reid_service import GroundTruthReIDService
 from app.infrastructure.database.models import TrackingEvent, PersonTrajectory
 
 logger = logging.getLogger(__name__)
@@ -168,8 +167,6 @@ class DetectionVideoService(RawVideoService):
         self.space_based_matcher = SpaceBasedMatcher(registry=self.global_registry)
 
         # Ground Truth Re-ID Services (Debugging) - keyed by environment
-        self.gt_reid_services: Dict[str, GroundTruthReIDService] = {}
-        self.enable_gt_reid = getattr(settings, 'ENABLE_GT_REID', False)
 
         # Phase 2: Re-ID Services
         self.feature_extraction_service: Optional[FeatureExtractionService] = None
@@ -268,55 +265,52 @@ class DetectionVideoService(RawVideoService):
                 return False
             
             # Initialize YOLO detector for the requested environment
-            if getattr(self, "enable_gt_reid", False):
-                logger.info(f"🚨 PURE GT MODE: Skipping YOLO model initialization for environment: {environment_id}")
-            else:
-                weights_path = self._resolve_yolo_weights_for_environment(environment_id)
+            weights_path = self._resolve_yolo_weights_for_environment(environment_id)
 
-                # Serialize detector initialization to prevent race conditions during concurrent requests (e.g. page load)
-                # This prevents loading the same heavy model multiple times before the first one is registered.
-                if not hasattr(self, '_model_loading_lock'):
-                    import asyncio
-                    self._model_loading_lock = asyncio.Lock()
+            # Serialize detector initialization to prevent race conditions during concurrent requests (e.g. page load)
+            # This prevents loading the same heavy model multiple times before the first one is registered.
+            if not hasattr(self, '_model_loading_lock'):
+                import asyncio
+                self._model_loading_lock = asyncio.Lock()
 
-                async with self._model_loading_lock:
-                    # Re-check if loaded inside lock (double-checked locking pattern)
-                    if environment_id in self.detectors_by_env:
-                         logger.info(f"🧠 DETECTION SERVICE INIT: Detector for '{environment_id}' already ready (loaded during lock wait).")
+            async with self._model_loading_lock:
+                # Re-check if loaded inside lock (double-checked locking pattern)
+                if environment_id in self.detectors_by_env:
+                     logger.info(f"🧠 DETECTION SERVICE INIT: Detector for '{environment_id}' already ready (loaded during lock wait).")
+                else:
+                    # Check if this model path is already loaded for another environment (to save VRAM)
+                    existing_detector = None
+                    for env, path in self.detector_weights_by_env.items():
+                        if path == weights_path and env in self.detectors_by_env:
+                            existing_detector = self.detectors_by_env[env]
+                            logger.info(f"🧠 DETECTION SERVICE INIT: Reusing existing detector instance from '{env}' for '{environment_id}' (Path: {weights_path})")
+                            break
+
+                    if existing_detector:
+                        self.detectors_by_env[environment_id] = existing_detector
+                        self.detector_weights_by_env[environment_id] = weights_path
                     else:
-                        # Check if this model path is already loaded for another environment (to save VRAM)
-                        existing_detector = None
-                        for env, path in self.detector_weights_by_env.items():
-                            if path == weights_path and env in self.detectors_by_env:
-                                existing_detector = self.detectors_by_env[env]
-                                logger.info(f"🧠 DETECTION SERVICE INIT: Reusing existing detector instance from '{env}' for '{environment_id}' (Path: {weights_path})")
-                                break
-
-                        if existing_detector:
-                            self.detectors_by_env[environment_id] = existing_detector
-                            self.detector_weights_by_env[environment_id] = weights_path
+                        logger.info(f"🧠 DETECTION SERVICE INIT: Loading model for '{environment_id}' from: {weights_path}")
+                        
+                        is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
+                        
+                        if is_rtdetr:
+                            logger.info(f"🔄 Using dedicated RTDETRDetector for: {weights_path}")
+                            detector = RTDETRDetector(
+                                model_name=weights_path,
+                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                            )
                         else:
-                            logger.info(f"🧠 DETECTION SERVICE INIT: Loading model for '{environment_id}' from: {weights_path}")
+                            detector = YOLODetector(
+                                model_name=weights_path,
+                                confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
+                            )
                             
-                            is_rtdetr = "rtdetr" in weights_path.lower() or "rt-detr" in weights_path.lower()
-                            
-                            if is_rtdetr:
-                                logger.info(f"🔄 Using dedicated RTDETRDetector for: {weights_path}")
-                                detector = RTDETRDetector(
-                                    model_name=weights_path,
-                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                                )
-                            else:
-                                detector = YOLODetector(
-                                    model_name=weights_path,
-                                    confidence_threshold=settings.YOLO_CONFIDENCE_THRESHOLD
-                                )
-                                
-                            await detector.load_model()
-                            await detector.warmup()
-                            self.detectors_by_env[environment_id] = detector
-                            self.detector_weights_by_env[environment_id] = weights_path
-            
+                        await detector.load_model()
+                        await detector.warmup()
+                        self.detectors_by_env[environment_id] = detector
+                        self.detector_weights_by_env[environment_id] = weights_path
+        
             # Maintain backward-compatible single-detector reference for existing methods
             self.detector = self.detectors_by_env.get(environment_id)
             
@@ -343,25 +337,7 @@ class DetectionVideoService(RawVideoService):
             # Initialize HandoffDetectionService
             self.handoff_service = HandoffDetectionService()
 
-            # Initialize Ground Truth Re-ID Service for this environment (if enabled)
-            if self.enable_gt_reid:
-                logger.warning(f"🚨 STARTUP MODE: OFFLINE PRE-COMPUTED TRACKING DATA ENABLED for '{environment_id}' (Normal tracking/Re-ID DISABLED)")
-                if environment_id not in self.gt_reid_services:
-                    try:
-                        import os
-                        dataset_root = getattr(settings, 'DATASET_ROOT', '')
-                        if dataset_root:
-                            # Explicit DATASET_ROOT: use old behavior
-                            data_root = os.path.join(dataset_root, environment_id)
-                        else:
-                            # Derive from LOCAL_VIDEOS_BASE_DIR: <base>/<env>/gt
-                            local_base = getattr(settings, 'LOCAL_VIDEOS_BASE_DIR', './videos')
-                            data_root = os.path.join(local_base, environment_id, 'gt')
-                        gt_service = GroundTruthReIDService(data_root=data_root)
-                        self.gt_reid_services[environment_id] = gt_service
-                        logger.info(f"✅ GT-REID: Service initialized for '{environment_id}' (Root: {data_root})")
-                    except Exception as e:
-                        logger.error(f"❌ GT-REID INIT FAILED for '{environment_id}': {e}")
+
 
             # Initialize Re-ID Services (Phase 2)
             if self.feature_extraction_service is None:
@@ -479,39 +455,7 @@ class DetectionVideoService(RawVideoService):
         if not hasattr(self, "_global_id_counter"):
              self._global_id_counter = 1000  # Start from 1000 to distinguish from tracker IDs
 
-        if self.enable_gt_reid and self.gt_reid_services:
-            # Resolve correct GT service for this camera's environment
-            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            gt_service = self.gt_reid_services.get(env_for_camera)
-            
-            if gt_service:
-                gt_assignments = 0
-                for track in tracks:
-                    track_id = int(track['track_id'])
-                    bbox_xyxy = track.get('bbox_xyxy')
-                    if not bbox_xyxy or len(bbox_xyxy) < 4:
-                        continue
-                    
-                    # Format bbox for GT service
-                    x1, y1, x2, y2 = bbox_xyxy[:4]
-                    bbox_dict = {'x1': x1, 'y1': y1, 'x2': x2, 'y2': y2}
-                    
-                    # Query GT Service
-                    global_id = gt_service.get_identity(camera_id, frame_number, bbox_dict)
-                    
-                    if global_id is not None:
-                        # Assign Global ID directly
-                        track['global_id'] = global_id
-                        # Also update registry so it sticks (though GT will re-assign every frame anyway)
-                        self.global_registry.assign_identity(camera_id, track_id, global_id)
-                        gt_assignments += 1
-                
-                if gt_assignments > 0 and frame_number % 30 == 0:
-                    pass # logger.info(f"✅ GT-REID: Assigned {gt_assignments} IDs in frame {frame_number} for {camera_id}")
-                    
-                # If enabled, we return immediately to bypass all neural logic below
-                return tracks
-            
+
         current_track_ids = set()
         if camera_id not in self.active_track_ids:
             self.active_track_ids[camera_id] = set()
@@ -680,14 +624,11 @@ class DetectionVideoService(RawVideoService):
         # Step 1: Run detection pipeline (includes spatial intelligence)
         _det_start = _time.perf_counter()
         
-        # Bypass cache entirely if we are using pure GT Re-ID mode
-        bypass_cache = getattr(self, "enable_gt_reid", False)
-        
         detection_data = await self.process_frame_with_detection(
             frame, 
             camera_id, 
             frame_number,
-            use_cache=not bypass_cache
+            use_cache=True
         )
         _det_time = (_time.perf_counter() - _det_start) * 1000
 
@@ -699,91 +640,73 @@ class DetectionVideoService(RawVideoService):
         _reid_time = 0.0
         
         try:
-            # === PURE GT MODE check ===
-            # If a GroundTruthReIDService is available for this environment, BYPASS tracker and Spatial Matcher.
-            # Map detections directly to GT IDs.
-            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
-            
-            if gt_service:
-                # PURE GT MODE
-                tracks = await self._process_with_ground_truth(
-                    detection_data.get("detections", []), 
-                    gt_service, 
-                    camera_id, 
-                    frame_number,
-                    frame
-                )
-                # Skip tracker, skip spatial matcher, skip reid
-                
+       # Determine if tracking is enabled
+            tracking_enabled = True
+            if options and "enable_tracking" in options:
+                tracking_enabled = options["enable_tracking"]
             else:
-                 # Determine if tracking is enabled
-                 tracking_enabled = True
-                 if options and "enable_tracking" in options:
-                     tracking_enabled = options["enable_tracking"]
-                 else:
-                     # Fallback to global setting if no option provided (backward compatibility)
-                     tracking_enabled = getattr(settings, 'TRACKING_ENABLED', True)
+                # Fallback to global setting if no option provided (backward compatibility)
+                tracking_enabled = getattr(settings, 'TRACKING_ENABLED', True)
 
-                 if tracking_enabled:
-                     # Normal Tracking Mode
-                     
-                     # Lazy initialization check
-                     if camera_id not in self.camera_trackers:
-                         try:
-                             # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
-                             tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
-                             if tracker:
-                                 self.camera_trackers[camera_id] = tracker
-                                 # logger.info(f"Lazy initialization successful for {camera_id}")
-                         except Exception as e:
-                             logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+            if tracking_enabled:
+                # Normal Tracking Mode
+                
+                # Lazy initialization check
+                if camera_id not in self.camera_trackers:
+                    try:
+                        # logger.info(f"Tracker missing for {camera_id}. Attempting lazy initialization...")
+                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                        if tracker:
+                            self.camera_trackers[camera_id] = tracker
+                            # logger.info(f"Lazy initialization successful for {camera_id}")
+                    except Exception as e:
+                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
 
-                     if camera_id in self.camera_trackers:
-                         tracker = self.camera_trackers.get(camera_id)
-                         # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
-                         np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                         
-                         _track_start = _time.perf_counter()
-                         tracked_np = await tracker.update(np_dets, frame)
-                         _track_time = (_time.perf_counter() - _track_start) * 1000
-                         
-                         # Convert tracked output to track dicts
-                         tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                         
-                         # Enhance with spatial intelligence (map coords + short trajectory)
-                         _spatial_start = _time.perf_counter()
-                         tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                         _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
-                         
-                         # Apply Re-ID (Phase 2)
-                         _reid_start = _time.perf_counter()
-                         frame_height, frame_width = frame.shape[:2]
-                         tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height, frame_number=frame_number)
-                         _reid_time = (_time.perf_counter() - _reid_start) * 1000
-                         
-                         tracker_used = True
-                     else:
-                        pass # No tracker available
-                        
-                 else:
-                     # Tracking DISABLED: Return detections as pseudo-tracks
-                     if frame_number % 30 == 0:
-                         logger.debug("Tracking explicitly disabled for frame %d", frame_number)
-                         
-                     # We format them as tracks but with no ID history or association
-                     # This ensures downstream consumers (frontend) still get bounding boxes
-                     raw_detections = detection_data.get("detections", [])
-                     tracks = []
-                     for i, det in enumerate(raw_detections):
-                         # Create transient track dict with negative ID
-                         tracks.append({
-                             "track_id": -1, # No ID
-                             "bbox_xyxy": det["bbox"],
-                             "confidence": det["confidence"],
-                             "class_id": det["class_id"],
-                             "global_id": None
-                         })
+                if camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    # Convert detections to BoxMOT format: [x1, y1, x2, y2, conf, cls]
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    
+                    _track_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _track_time = (_time.perf_counter() - _track_start) * 1000
+                    
+                    # Convert tracked output to track dicts
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    
+                    # Enhance with spatial intelligence (map coords + short trajectory)
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID (Phase 2)
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height, frame_number=frame_number)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                    
+                    tracker_used = True
+                else:
+                   pass # No tracker available
+                   
+            else:
+                # Tracking DISABLED: Return detections as pseudo-tracks
+                if frame_number % 30 == 0:
+                    logger.debug("Tracking explicitly disabled for frame %d", frame_number)
+                    
+                # We format them as tracks but with no ID history or association
+                # This ensures downstream consumers (frontend) still get bounding boxes
+                raw_detections = detection_data.get("detections", [])
+                tracks = []
+                for i, det in enumerate(raw_detections):
+                    # Create transient track dict with negative ID
+                    tracks.append({
+                        "track_id": -1, # No ID
+                        "bbox_xyxy": det["bbox"],
+                        "confidence": det["confidence"],
+                        "class_id": det["class_id"],
+                        "global_id": None
+                    })
         except Exception as e:
             logger.warning(f"Tracking integration failed for camera {camera_id} on frame {frame_number}: {e}")
             tracks = []
@@ -825,77 +748,6 @@ class DetectionVideoService(RawVideoService):
         
         return detection_data
 
-    async def _process_with_ground_truth(
-        self, 
-        detections: List[Any], 
-        gt_service: GroundTruthReIDService, 
-        camera_id: str, 
-        frame_number: int,
-        frame: np.ndarray
-    ) -> List[Dict[str, Any]]:
-        """
-        Pure GT Mode: Map detections to GT IDs directly.
-        Bypasses tracker and spatial matcher.
-        """
-        tracks = []
-        assigned_gt_ids = set()
-
-        # Enhance detections with GT IDs
-        for det in detections:
-            # Handle both Detection objects (non-batch) and dict detections (batch pipeline)
-            if isinstance(det, dict):
-                bbox_dict = det.get("bbox", det)
-                bbox_dict = {
-                    'x1': bbox_dict.get('x1', 0),
-                    'y1': bbox_dict.get('y1', 0),
-                    'x2': bbox_dict.get('x2', 0),
-                    'y2': bbox_dict.get('y2', 0)
-                }
-                confidence = det.get("confidence", 0.0)
-            else:
-                bbox_dict = {
-                    'x1': det.bbox.x1,
-                    'y1': det.bbox.y1,
-                    'x2': det.bbox.x2,
-                    'y2': det.bbox.y2
-                }
-                confidence = det.confidence
-            
-            # Use GT service to find identity for this detection
-            global_id = gt_service.get_identity(camera_id, frame_number, bbox_dict)
-            
-            if global_id:
-                try:
-                    track_id_int = int(global_id)
-                except ValueError:
-                    track_id_int = abs(hash(global_id)) % 1000000
-                
-                track = {
-                    "track_id": track_id_int,
-                    "global_id": global_id,
-                    "confidence": confidence,
-                    "bbox": bbox_dict,
-                    "bbox_xyxy": [bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2']],
-                    "class_id": 1,  # Frontend expects 1 for person
-                    "map_coords": None,
-                    "trajectory": [],
-                    "age": None,
-                    "status": "active",
-                    "reid_confidence": None,
-                    "last_seen_camera": camera_id,
-                    "is_focused": False,
-                    "is_matched": False,
-                }
-                
-                tracks.append(track)
-                self.global_registry.assign_identity(camera_id, track_id_int, global_id)
-
-        # Enhance with spatial intelligence (for map view)
-        if tracks:
-             tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-
-        return tracks
-
     def get_tracking_stats(self) -> Dict[str, Any]:
         """Return current tracking stats without affecting existing API."""
         return {
@@ -924,29 +776,12 @@ class DetectionVideoService(RawVideoService):
             # Run YOLO detection
             _yolo_start = _time.perf_counter()
             env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
-
-            if gt_service:
-                # PURE GT MODE: Bypass YOLO entirely
-                class PseudoBox:
-                    def __init__(self, x1, y1, x2, y2):
-                        self.x1, self.y1 = x1, y1
-                        self.x2, self.y2 = x2, y2
-
-                class PseudoDetection:
-                    def __init__(self, bbox_dict, conf):
-                        self.confidence = conf
-                        self.bbox = PseudoBox(bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2'])
-
-                gt_dets = gt_service.get_detections(camera_id, frame_number)
-                detections = [PseudoDetection(d['bbox'], d['confidence']) for d in gt_dets]
-                _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
-            else:
-                detector = self.detectors_by_env.get(env_for_camera) or self.detector
-                if not detector:
-                    raise RuntimeError("YOLO detector not initialized for the current environment")
-                detections = await detector.detect(frame)
-                _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
+            
+            detector = self.detectors_by_env.get(env_for_camera) or self.detector
+            if not detector:
+                raise RuntimeError("YOLO detector not initialized for the current environment")
+            detections = await detector.detect(frame)
+            _yolo_time = (_time.perf_counter() - _yolo_start) * 1000
             
             # Calculate processing time
             processing_time = (_time.perf_counter() - _proc_start) * 1000
@@ -2531,26 +2366,8 @@ class DetectionVideoService(RawVideoService):
                 env_for_batch = self._get_environment_for_camera(first_camera_id) or "default" if first_camera_id else "default"
                 detector = self.detectors_by_env.get(env_for_batch) or self.detector
                 
-                # Check for GT Service
-                gt_service = self.gt_reid_services.get(env_for_batch) if getattr(self, "enable_gt_reid", False) else None
-                
                 batch_detections = []
-                if gt_service:
-                    # PURE GT MODE: Bypass YOLO
-                    class PseudoBox:
-                        def __init__(self, x1, y1, x2, y2):
-                            self.x1, self.y1 = x1, y1
-                            self.x2, self.y2 = x2, y2
-
-                    class PseudoDetection:
-                        def __init__(self, bbox_dict, conf):
-                            self.confidence = conf
-                            self.bbox = PseudoBox(bbox_dict['x1'], bbox_dict['y1'], bbox_dict['x2'], bbox_dict['y2'])
-
-                    for cid, fidx, _ in frame_metadata:
-                        gt_dets = gt_service.get_detections(cid, fidx)
-                        batch_detections.append([PseudoDetection(d['bbox'], d['confidence']) for d in gt_dets])
-                elif detector and len(accumulated_frames) > 1:
+                if detector and len(accumulated_frames) > 1:
                     # Use batch inference for all accumulated frames (up to batch=16)
                     try:
                         batch_detections = await detector.detect_batch(accumulated_frames)
@@ -2619,16 +2436,7 @@ class DetectionVideoService(RawVideoService):
                     # Run Space-Based Matching (Cross-Camera) — SKIP in Pure GT Mode
                     _space_start = _time.perf_counter()
                     
-                    # Check if ANY camera in this batch is in GT mode
-                    _gt_mode_active = False
-                    if self.enable_gt_reid:
-                        for cid in frame_camera_data:
-                            env = self._get_environment_for_camera(cid) or "default"
-                            if self.gt_reid_services.get(env):
-                                _gt_mode_active = True
-                                break
-                    
-                    if not _gt_mode_active and self.space_based_matcher and self.space_based_matcher.enabled:
+                    if self.space_based_matcher and self.space_based_matcher.enabled:
                         try:
                             camera_detections_map = {cid: ddata for cid, (_, ddata) in frame_camera_data.items()}
                             self.space_based_matcher.match_across_cameras(camera_detections_map)
@@ -2636,7 +2444,7 @@ class DetectionVideoService(RawVideoService):
                             logger.error(f"Space-based matching failed: {e}")
 
                     # Update 'is_matched' flag
-                    if not _gt_mode_active and self.space_based_matcher:
+                    if self.space_based_matcher:
                         for camera_id, (frame, detection_data) in frame_camera_data.items():
                             for track in detection_data.get("tracks", []):
                                 gid = track.get("global_id")
@@ -3023,84 +2831,68 @@ class DetectionVideoService(RawVideoService):
         _reid_time = 0.0
         
         try:
-            # === PURE GT MODE check (same as process_frame_with_tracking) ===
-            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
-            
-            if gt_service:
-                # PURE GT MODE: bypass tracker and Re-ID entirely
-                tracks = await self._process_with_ground_truth(
-                    detection_data.get("detections", []),
-                    gt_service,
-                    camera_id,
-                    frame_number,
-                    frame
-                )
-                # Skip tracker, skip spatial matcher, skip reid
-                
-            else:
-                 # Determine if tracking is enabled
-                 # For batch processing, we rely on global settings as options passing is complex here
-                 # unless we change signature. Default to GLOBAL setting.
-                 tracking_enabled = getattr(settings, 'TRACKING_ENABLED', True)
+       # Determine if tracking is enabled
+            # For batch processing, we rely on global settings as options passing is complex here
+            # unless we change signature. Default to GLOBAL setting.
+            tracking_enabled = getattr(settings, 'TRACKING_ENABLED', True)
 
-                 if tracking_enabled:
-                     # Normal Tracking Mode
-                     _init_start = _time.perf_counter()
-                     if camera_id not in self.camera_trackers:
-                         try:
-                             tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
-                             if tracker:
-                                 self.camera_trackers[camera_id] = tracker
-                         except Exception as e:
-                             logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
-                     _tracker_init_time = (_time.perf_counter() - _init_start) * 1000
-     
-                     if camera_id in self.camera_trackers:
-                         tracker = self.camera_trackers.get(camera_id)
-                         
-                         # Convert detections to BoxMOT format
-                         _conv_start = _time.perf_counter()
-                         np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
-                         _convert_dets_time = (_time.perf_counter() - _conv_start) * 1000
-                         
-                         # Update tracker
-                         _update_start = _time.perf_counter()
-                         tracked_np = await tracker.update(np_dets, frame)
-                         _tracker_update_time = (_time.perf_counter() - _update_start) * 1000
-                         
-                         # Convert to track dicts
-                         _conv_tracks_start = _time.perf_counter()
-                         tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
-                         _convert_tracks_time = (_time.perf_counter() - _conv_tracks_start) * 1000
-                         
-                         # Enhance with spatial intelligence
-                         _spatial_start = _time.perf_counter()
-                         tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
-                         _spatial_intel_time = (_time.perf_counter() - _spatial_start) * 1000
-                         
-                         # Apply Re-ID
-                         _reid_start = _time.perf_counter()
-                         frame_height, frame_width = frame.shape[:2]
-                         tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
-                         _reid_time = (_time.perf_counter() - _reid_start) * 1000
-                         
-                 else:
-                     # Tracking DISABLED: Return detections as pseudo-tracks
-                     if frame_number % 30 == 0:
-                         logger.debug("Tracking explicitly disabled for frame %d", frame_number)
-                         
-                     raw_detections = detection_data.get("detections", [])
-                     tracks = []
-                     for i, det in enumerate(raw_detections):
-                         tracks.append({
-                             "track_id": -1,
-                             "bbox_xyxy": det["bbox"],
-                             "confidence": det["confidence"],
-                             "class_id": det["class_id"],
-                             "global_id": None
-                         })
-                
+            if tracking_enabled:
+                # Normal Tracking Mode
+                _init_start = _time.perf_counter()
+                if camera_id not in self.camera_trackers:
+                    try:
+                        tracker = await self.tracker_factory.get_tracker("lazy_init_task", camera_id)
+                        if tracker:
+                            self.camera_trackers[camera_id] = tracker
+                    except Exception as e:
+                        logger.error(f"Lazy tracker init failed for {camera_id}: {e}")
+                _tracker_init_time = (_time.perf_counter() - _init_start) * 1000
+
+                if camera_id in self.camera_trackers:
+                    tracker = self.camera_trackers.get(camera_id)
+                    
+                    # Convert detections to BoxMOT format
+                    _conv_start = _time.perf_counter()
+                    np_dets = self._convert_detections_to_boxmot_format(detection_data.get("detections", []))
+                    _convert_dets_time = (_time.perf_counter() - _conv_start) * 1000
+                    
+                    # Update tracker
+                    _update_start = _time.perf_counter()
+                    tracked_np = await tracker.update(np_dets, frame)
+                    _tracker_update_time = (_time.perf_counter() - _update_start) * 1000
+                    
+                    # Convert to track dicts
+                    _conv_tracks_start = _time.perf_counter()
+                    tracks = self._convert_boxmot_to_track_data(tracked_np, camera_id)
+                    _convert_tracks_time = (_time.perf_counter() - _conv_tracks_start) * 1000
+                    
+                    # Enhance with spatial intelligence
+                    _spatial_start = _time.perf_counter()
+                    tracks = await self._enhance_tracks_with_spatial_intelligence(tracks, camera_id, frame_number)
+                    _spatial_intel_time = (_time.perf_counter() - _spatial_start) * 1000
+                    
+                    # Apply Re-ID
+                    _reid_start = _time.perf_counter()
+                    frame_height, frame_width = frame.shape[:2]
+                    tracks = await self._apply_reid_logic(tracks, frame, camera_id, frame_width, frame_height)
+                    _reid_time = (_time.perf_counter() - _reid_start) * 1000
+                    
+            else:
+                # Tracking DISABLED: Return detections as pseudo-tracks
+                if frame_number % 30 == 0:
+                    logger.debug("Tracking explicitly disabled for frame %d", frame_number)
+                    
+                raw_detections = detection_data.get("detections", [])
+                tracks = []
+                for i, det in enumerate(raw_detections):
+                    tracks.append({
+                        "track_id": -1,
+                        "bbox_xyxy": det["bbox"],
+                        "confidence": det["confidence"],
+                        "class_id": det["class_id"],
+                        "global_id": None
+                    })
+           
         except Exception as e:
             logger.warning(f"Tracking failed for camera {camera_id} on frame {frame_number}: {e}")
             tracks = []
@@ -3130,22 +2922,7 @@ class DetectionVideoService(RawVideoService):
         _reid_time = 0.0
         
         try:
-            # === PURE GT MODE check (same as process_frame_with_tracking) ===
-            env_for_camera = self._get_environment_for_camera(camera_id) or "default"
-            gt_service = self.gt_reid_services.get(env_for_camera) if self.enable_gt_reid else None
-            
-            if gt_service:
-                # PURE GT MODE: bypass tracker and Re-ID entirely
-                tracks = await self._process_with_ground_truth(
-                    detection_data.get("detections", []),
-                    gt_service,
-                    camera_id,
-                    frame_number,
-                    frame
-                )
-            # Skip tracker, skip spatial matcher, skip reid
-                
-            else:
+
                 # Determine if tracking is enabled
                 tracking_enabled = True
                 if options and "enable_tracking" in options:

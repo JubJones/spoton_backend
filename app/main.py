@@ -136,7 +136,7 @@ async def lifespan(app_instance: FastAPI):
             pass # logger.debug(f"YOLO configuration logging skipped: {e}")
 
         # Preload detector for configured environments
-        if settings.PRELOAD_YOLO_DETECTOR and not getattr(settings, 'ENABLE_GT_REID', False):
+        if settings.PRELOAD_YOLO_DETECTOR :
             try:
                 from app.models.yolo_detector import YOLODetector
                 from app.models.rtdetr_detector import RTDETRDetector
